@@ -69,7 +69,13 @@ from pandas.stats.tests.common import COLS
 
 # http://stackoverflow.com/questions/4836710/does-python-have-a-built-in-function-for-string-natural-sort
 def natural_sorted(l):
-    """Sort list of numbers/strings in human-friendly order."""
+    """Sort list of numbers/strings in human-friendly order.
+    
+    Args:
+        l(list): A list of strings.
+    Returns:
+        list
+    """
     convert = lambda text: int(text) if text.isdigit() else text.lower() 
     alphanum_key = lambda key: [ convert(c) for c in re.split('([0-9]+)', key) ] 
     return sorted(l, key = alphanum_key)
@@ -687,7 +693,7 @@ def get_valuesSet(flist=[None], axis='r', index=0, filter='a', colSep=["\t"]):
     return results
     
     
-def get_columns(flist=[None], cols=[0], colSep=["\t"], header=False, index=None, merge=True, force=False):
+def get_columns(flist=[None], cols=[0], colSep=["\t"], header=False, index=None, merge=True):
     """Obtain the specified columns.
         
     Comment lines starting with '#' are ignored.
@@ -697,10 +703,6 @@ def get_columns(flist=[None], cols=[0], colSep=["\t"], header=False, index=None,
     came from and their position in it. Existing labels are optionally 
     preserved as the top row or can be skipped entirely.
     
-    NOTE: The first row is used to determine the number of fields and the
-    function will fail if a row has a different number of fields. This
-    behaviour can be overridden using the force argument, at your own risk.
-     
     If an index is specified, it will be used only for merging, and will NOT be
     included in the output columns, unless explicitly present in cols[].
     
@@ -712,10 +714,6 @@ def get_columns(flist=[None], cols=[0], colSep=["\t"], header=False, index=None,
                     desired columns. (Default [0]).
         colSep[str]: List of characters used as field separators. 
                     (Default ["\t"]).
-        force(bool): Work around malformed csv. Shorter rows will be 
-                    completed with the string values "IDXERROR". It is up 
-                    to the caller to determine if and how the csv
-                    malformation affects the return value.
         merge(bool): Concatenate results from all files into a single 
                     dataframe. If False, a list of dataframes is returned
                     instead. (Default True).
@@ -953,7 +951,7 @@ def append_columns(flist, colSep=["\t"], header=False, index=None):
         # List the columns and remove the index one from among them.
         cols = [i for i in range(0,numofcols[f]) if i != index]
         df =get_columns(FilesList(files=[myfile], aliases=[myalias]), cols=cols, 
-                     colSep=colSep, header=header, force=True, merge=False, index=index)[0]
+                     colSep=colSep, header=header, merge=False, index=index)[0]
         data.append( df )
     # Merge. Row indexes will have been assigned by get_columns(), if applicable.
     keyhead = data[0].index.name
@@ -962,7 +960,7 @@ def append_columns(flist, colSep=["\t"], header=False, index=None):
     return result
 
 
-def get_crosspoints(flist, cols=[0], rows=[0], colSep=["\t"], header=False, index=None, merge=True, force=False):
+def get_crosspoints(flist, cols=[0], rows=[0], colSep=["\t"], header=False, index=None, merge=True):
     """ Get the values at selected rows and columns.
     
     The values at the intersections of the selected rows and columns are extracted.
@@ -975,12 +973,10 @@ def get_crosspoints(flist, cols=[0], rows=[0], colSep=["\t"], header=False, inde
         header(bool): Whether there is a header line (False).
         index(int): Which column has the row labels (None).
         merge(bool): Merge results into single table (True).
-        force(bool): Try to recover when rows differ in number of fields 
-                    (False).
     Returns:
         [pandas.DataFrame]: 
     """
-    results = get_columns(flist, cols=cols, colSep=colSep, header=header, force=force, merge=merge, index=index)
+    results = get_columns(flist, cols=cols, colSep=colSep, header=header, merge=merge, index=index)
     for i in range(0, len(results)):
         results[i] = results[i].iloc[rows,:]
     return results
@@ -1318,7 +1314,7 @@ def main(args):
     are not practical as commas have their own meaning for some of these flags and \
     it would become difficult to disambiguate.")
     
-    # Input.
+    # Input/Output.
     parser.add_argument('INPUTTYPE', type=str, choices=['L','T','D','P'],
                                 help="Specify the type of the TARGETs: \
                                 'T' = The actual targets. \
@@ -1618,7 +1614,7 @@ def main(args):
                 cols.extend(p.split(","))  # comma separated arguments
             # Get the specified columns.
             result = get_columns(flist, cols=cols, colSep=params.sep, 
-                                header=params.labels, force=True, merge=merge, index=idx)
+                                header=params.labels, merge=merge, index=idx)
         else:
             # Get random columns.
             result = get_random_columns(flist, k=params.rndcols, colSep=params.sep, 
