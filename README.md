@@ -40,7 +40,7 @@ Library:
 
 1. Readable current time stamp.
 2. Format various message strings (call parameters, end of task, info, warning, error).
-3. Log command, parameters and message to logfile.
+3. Log call details of main script to logfile.
 4. Log message to file.
 
 Script:
