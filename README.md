@@ -4,7 +4,7 @@ A collection of general-purpose code that makes my life easier.
 
 ## Contents
 
-#### fileutilities.py
+### fileutilities.py
 
 Batch tasks of file-munging that I seem to need frequently enough to merit automation. Works as script or library.  (python 2.7.3)
 
@@ -32,7 +32,7 @@ Library only:
 
 A partial testing suite available in test_fileutilities.py.
 
-#### mylogs.py
+### mylogs.py
 
 Custom logging of commands and messages in consistent format. Works as library or command-wrapping script. (python 2.7.3)
 
@@ -48,7 +48,7 @@ Script:
 1. Log and then execute any shell command.
 2. Log a message.
 
-#### sequtilities.py
+### sequtilities.py
 
 Custom utility functions related to Bioinformatics sequence analysis. Works as library or script. (python 2.7.3)
 
