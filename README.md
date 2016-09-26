@@ -10,23 +10,23 @@ Batch tasks of file-munging that I seem to need frequently enough to merit autom
 
 Library and script:
 
-1. Probe files for access/type/emptiness.
+1. Probe files for access/type/emptiness. (rather pointless, kept as record of heuristic for differentiating binary from text)
 2. List & filter directories contents and assign aliases.
 3. Soft-link listed files into destination.
 4. Loop shell command over listed files.
 5. Replace delimiting character.
 6. Count columns in delimited files.
 7. Extract columns from delimited files, even ones with irregular row lengths.
-8. Randomly extract columns from delimited files.
+8. Extract random columns from delimited files (i.e. for bootstrapping).
 9. Append columns to delimited files (merge delimited files horizontally).
-10. Set of unique values in any row or column of a delimited file.
+10. Get the set of different values in any row or column of a delimited file (for fields with loads of observations but few values).
 
 Library only:
 
-1. FilesList class.
+1. The FilesList class.
 2. Human-friendly string list sorting.
 3. Get values at intersection of specific rows and columns of delimited texts.
-4. Auto-numerate duplicates in a list of strings.
+4. Auto-suffix duplicates in a list of strings.
 5. Auto-generate file names using a common target path, prefix and suffix and a list of strings.
 5. First / Last lines of listed files. Obsolete, but kept as record of buffer access tricks.
 
