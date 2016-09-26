@@ -12,6 +12,7 @@ Library of utility functions relevant to sequencing tasks.
 
 import sys, argparse, re, csv
 import pandas as pd
+from collections import Counter
 
 import fileutilities as fu
 import mylogs as ml
@@ -23,7 +24,7 @@ def collect_starFinalLogs(flist, all=False):
     File identifiers (filenames) will be trimmed at '_Log'.
     
     Args:
-        flist: A FilesList or list of input files.
+        flist: A list/FilesList of input files.
         all(bool): Show all fields (False).
     Returns:
         pandas.DataFrame
@@ -59,41 +60,72 @@ def collect_starFinalLogs(flist, all=False):
     return df
 
 
-def gtf2premrna(flist):
-    """Infer pre-mRNA from a GTF annotation.
+def gtf2pandas(flist):
+    """Import GTF files as pandas.DataFrames.
+    
+    Two columns will be added: the gene id and transcript id, as extracted from the attributes column.
+    The attributes column itself will reain as is.
     
     Args:
-        flist: A FilesList or list of input GTF files.
+        flist: A list/FilesList of GTF files.
     Returns:
         [pandas.DataFrame]: List of dataframes, one per file.
     """
     # Use my own parser, because it already handles input from multiple files or STDIN.
     input = fu.get_columns(flist, cols=range(0,9), colSep=["\t"], header=False, index=None, merge=False)
     result = []
-    for i, gtf in enumerate(input):
-        gtf.columns = ["chrom", "source", "feature", "start", "stop", "score", "strand", "phase", "attributes"]
-        gtf["gene"] = gtf["attributes"].str.extract('gene_id \"?(\w+)')
+    for gtf in input:
+        gtf.columns = ["chr", "source", "feature", "start", "stop", "score", "strand", "phase", "attributes"]
+        gtf["gene"] = gtf["attributes"].str.extract('gene_id \"?([^\";]+)')
+        gtf["transcript"] = gtf["attributes"].str.extract('transcript_id \"?([^\";]+)')
         gtf.set_index(gtf["gene"], inplace=True)
+        result.append(gtf)
+    return result
+
+
+def gtf2premrna(gtfs, filter=True):
+    """Infer pre-mRNA from a GTF annotation.
+    
+    Create a new GTF with the earliest start and latest finish associated with each gene_id.
+    
+    Args:
+        gtfs: A list of GTF pandas.DataFrames, imported using gtf2pandas() from this library. 
+        filter(bool): Remove pre-mRNA models for single-model single-exon genes.
+                    This reduces model inflation/duplication.
+    Returns:
+        [pandas.DataFrame]: List of dataframes, one per file.
+    """
+    result = []
+    for g in gtfs:
         # Aggregate.
-        grped = gtf.groupby("gene")
+        grped = g.groupby("gene")
         gnum = len(grped)
         pres = pd.DataFrame( data= {
-                "chrom" : grped.head(1)["chrom"],
-                "source" : ['based_on_Araport11'] * gnum,
-                "feature" : ['pre-mRNA'] * gnum,
-                "start" : grped["start"].min(),
-                "stop" : grped["stop"].max(),
-                "score" : ['.'] * gnum,
-                "strand" : grped.head(1)["strand"],
-                "phase" : ['.'] * gnum,
-                "attributes" : grped.head(1)["gene"],  # Temporary value.
-                "gene" : grped.head(1)["gene"]
+            "chr" : grped.head(1)["chr"],
+            "source" : ['based_on_Araport11'] * gnum,
+            "feature" : ['exon'] * gnum,  # for the benefit of existing 3rd-party parsers
+            "start" : grped["start"].min(),
+            "stop" : grped["stop"].max(),
+            "score" : ['.'] * gnum,
+            "strand" : grped.head(1)["strand"],
+            "phase" : ['.'] * gnum,
+            "attributes" : grped.head(1)["gene"],  # Temporary value.
+            "gene" : grped.head(1)["gene"]
         })
-        # Format attributes.
-        for j in range(0, gnum) :
-            pres.ix[j, "attributes"] = 'transcript_id \"' + pres.ix[j, "gene"] + '_pre\"; gene_id \"' + pres.ix[j, "gene"] + '\";'
+        # Filter
+        if (filter):
+            u = grped["transcript"].apply(lambda x: len(set(x)))  # Number of models per gene.
+            e = grped["feature"].apply(lambda x: Counter(x)["exon"])  # Number of exons per gene.
+            idx = pres.index
+            for gid in idx:
+                # Drop pre-mRNA entries for single-model single-exon genes.
+                if (u[gid] == 1 and e[gid] == 1):
+                    pres.drop(gid, axis=0, inplace=True)
+        # Format the attributes.
+        for gid in pres.index :
+            pres.ix[gid, "attributes"] = 'transcript_id \"' + gid + '_pre\"; gene_id \"' + gid + '\";'
         # Order columns to match GTF specification.
-        result.append(pres[["chrom","source", "feature", "start", "stop", "score", "strand", "phase", "attributes"]])
+        result.append(pres[["chr","source", "feature", "start", "stop", "score", "strand", "phase", "attributes"]])
     return result
 
 
@@ -133,10 +165,12 @@ def main(args):
     parser.add_argument('--StarFinalLogs', type=str, choices=['tab','wiki'],
                                 help="Combine multiple final summary mapping logs by STAR \
                                 into a single text table of the specified format. Compact or verbose.")
-    parser.add_argument('--premRNA', action='store_true',
+    parser.add_argument('--premRNA', type=str, choices=['a', 'f'],
                                 help="Infer pre-mRNA coordinates from a GTF annotation. Returns a GTF \
                                 of pre-mRNA transcripts, comprising of the earliest start and latest finish \
-                                coordinates for each gene. ** Compatible with 'D' as INPUTTYPE.")
+                                coordinates for each gene. ** Choice 'a' returns a pre-mRNA for every gene, whereas \
+                                choice 'f' filters out genes with only one transcript model comprising of a single exon \
+                                ** Compatible with 'D' as INPUTTYPE.")
     params = parser.parse_args(args)
     
     
@@ -183,6 +217,7 @@ def main(args):
     
     # Combine STAR LOGS.
     if params.StarFinalLogs:
+        # Do it.
         df = collect_starFinalLogs(flist, all=params.verbose)
         # Call details.
         if params.comments:
@@ -202,7 +237,9 @@ def main(args):
     
     # Create PRE-MRNA GTF.
     elif params.premRNA:
-        result = gtf2premrna(flist)
+        # Import data and calculate the result.
+        gtfs = gtf2pandas(flist)
+        result = gtf2premrna(gtfs, filter=(params.premRNA == 'f'))
         # Create output filenames, if applicable. If [], then STDOUT.
         outfiles = fu.make_names(flist.aliases, (outdir, outpref, outsuff))
         outstream = sys.stdout
@@ -227,8 +264,6 @@ def main(args):
                 sys.stderr.write(ml.donestring("create pre-mRNA annotation"))
             except IOError:
                 pass
-            
-
 
 
 #     # All done.     

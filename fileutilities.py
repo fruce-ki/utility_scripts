@@ -776,6 +776,7 @@ def get_columns_manual(file=None, cols=[0], colSep=["\t"], header=False, index=N
         colSep[str]: List of regex strings for field separators. 
                     (Default ["\t"]).
         index(int): Position of column to be used as row index. (Default None)
+        alias(str): An alias for the file. Used for naming the columns.
     Returns:
         pandas.DataFrame: DataFrame with the columns, labeled by original 
                     column number, ordered as specified.
@@ -1701,7 +1702,7 @@ def main(args):
             for f, (myfile, myalias) in flist.enum():
                 print "".join([myfile, "\t", str(nest[f])])
             if params.STDERRcomments:
-                sys.stderr.write(ml.donestring("Value set."))
+                sys.stderr.write(ml.donestring("Value set"))
         except IOError:
             pass
         
