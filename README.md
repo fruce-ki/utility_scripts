@@ -56,3 +56,7 @@ Library and script:
 
 1. Aggregate and summarize the listed final logs of STAR.
 2. Infer pre-mRNA coordinates from a GTF genome annotation.
+
+Library only:
+
+1. Import GTF into a pandas.DataFrame. Extract gene_id and transcript_id as new columns and set gene id as index.
