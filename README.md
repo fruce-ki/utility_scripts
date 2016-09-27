@@ -14,7 +14,7 @@ Library and script:
 2. List & filter directories contents and assign aliases.
 3. Soft-link listed files into destination.
 4. Loop shell command over listed files.
-5. Replace delimiting character.
+5. Replace delimiting character (or any substring really) with new one.
 6. Count columns in delimited files.
 7. Extract columns from delimited files, even ones with irregular row lengths.
 8. Extract random columns from delimited files (i.e. for bootstrapping).
