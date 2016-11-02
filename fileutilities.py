@@ -1512,7 +1512,7 @@ def main(args):
                 sys.stdout.write(ml.paramstring())
             print result.to_file()
             if params.STDERRcomments:
-                sys.stderr.write(ml.donestring("probe"))
+                sys.stderr.write(ml.donestring("probing"))
         except IOError:
             pass
     
@@ -1525,7 +1525,7 @@ def main(args):
                 sys.stdout.write(ml.paramstring())
             sys.stdout.write(result.to_file())
             if params.STDERRcomments:
-                sys.stderr.write(ml.donestring("list"))
+                sys.stderr.write(ml.donestring("listing"))
         except IOError:
             pass
          
@@ -1551,7 +1551,7 @@ def main(args):
                        progress=(params.STDERRcomments), comments=params.comments,
                        log=params.log)
             if params.STDERRcomments:
-                sys.stderr.write(ml.donestring("loop-"+ params.loop[0]))
+                sys.stderr.write(ml.donestring("looping-"+ params.loop[0]))
         except IOError:
             pass
     
@@ -1560,7 +1560,7 @@ def main(args):
     elif params.link:
         slink(flist, dir=params.link[0], aliases=params.link[1:])
         if params.STDERRcomments:
-            sys.stderr.write(ml.donestring("link"))
+            sys.stderr.write(ml.donestring("linking"))
              
              
     # SWAP substrings. --------------------------------------------------------
@@ -1590,7 +1590,7 @@ def main(args):
                     outstream.close()
         if params.STDERRcomments:
             try:
-                sys.stderr.write(ml.donestring("swap delimiters"))
+                sys.stderr.write(ml.donestring("swapping delimiters"))
             except IOError:
                 pass
     
@@ -1652,9 +1652,9 @@ def main(args):
         if params.STDERRcomments:
             try:
                 if params.cols:
-                    sys.stderr.write(ml.donestring("get columns, index "+ str(idx is not None)))
+                    sys.stderr.write(ml.donestring("getting columns, index "+ str(idx is not None)))
                 else:
-                    sys.stderr.write(ml.donestring("get random columns, index "+ str(idx is not None)))
+                    sys.stderr.write(ml.donestring("getting random columns, index "+ str(idx is not None)))
             except IOError:
                 pass
         
@@ -1674,7 +1674,7 @@ def main(args):
                     outstream.write(metadata[myfile])
             sys.stdout.write(df.to_csv(sep=params.sep[0], header=params.relabel, index=params.index))
             if params.STDERRcomments:
-                sys.stderr.write(ml.donestring("append columns, index "+ str(idx is not None)))
+                sys.stderr.write(ml.donestring("appending columns, index "+ str(idx is not None)))
         except IOError:
             pass
  
@@ -1688,7 +1688,7 @@ def main(args):
             for f, (myfile, myalias) in flist.enum():
                 print "\t".join([str(result[f]), myalias, myfile])
             if params.STDERRcomments:
-                sys.stderr.write(ml.donestring("count columns"))
+                sys.stderr.write(ml.donestring("counting columns"))
         except IOError:
             pass
         
@@ -1702,7 +1702,7 @@ def main(args):
             for f, (myfile, myalias) in flist.enum():
                 print "".join([myfile, "\t", str(nest[f])])
             if params.STDERRcomments:
-                sys.stderr.write(ml.donestring("Value set"))
+                sys.stderr.write(ml.donestring("obtaining set of values."))
         except IOError:
             pass
         
