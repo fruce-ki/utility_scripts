@@ -60,3 +60,7 @@ Library and script:
 Library only:
 
 1. Import GTF into a pandas.DataFrame. Extract gene_id and transcript_id as new columns and set gene id as index.
+
+Script only:
+
+1. List all gene/transcript ID pairs from a GTF annotation file.
