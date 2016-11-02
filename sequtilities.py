@@ -171,6 +171,8 @@ def main(args):
                                 coordinates for each gene. ** Choice 'a' returns a pre-mRNA for every gene, whereas \
                                 choice 'f' filters out genes with only one transcript model comprising of a single exon \
                                 ** Compatible with 'D' as INPUTTYPE.")
+    parser.add_argument('--t2g', action='store_true',
+                                help="Extract transcript-gene ID pairs from a GTF file.")
     params = parser.parse_args(args)
     
     
@@ -207,7 +209,7 @@ def main(args):
     # OUTPUT.
     outdir, outpref, outsuff = None, None, None
     if params.out:
-        outdir = expand_fpaths([params.out[0]])[0]
+        outdir = fu.expand_fpaths([params.out[0]])[0]
         outpref = params.out[1]
         outsuff = params.out[2]
         
@@ -232,7 +234,7 @@ def main(args):
             sys.stdout.write(df.to_csv(sep="\t", header=True, index=True))
         # Done.
         if params.STDERRcomments:
-            sys.stderr.write(ml.donestring("collect STAR final logs"))
+            sys.stderr.write(ml.donestring("collecting STAR final logs"))
     
     
     # Create PRE-MRNA GTF.
@@ -261,7 +263,37 @@ def main(args):
                     outstream.close()
         if params.STDERRcomments:
             try:
-                sys.stderr.write(ml.donestring("create pre-mRNA annotation"))
+                sys.stderr.write(ml.donestring("creating pre-mRNA annotation"))
+            except IOError:
+                pass
+
+
+    # Extract transcript and gene ID PAIRS from GTF
+    elif params.t2g:
+        # Import GTF.
+        gtfs = gtf2pandas(flist)
+        # Create output filenames, if applicable. If [], then STDOUT.
+        outfiles = fu.make_names(flist.aliases, (outdir, outpref, outsuff))
+        outstream = sys.stdout
+        # I need the for loop to iterate at least once. Relevant for STDIN input, since I have no input files listed then.
+        if flist == []:
+            flist.append("<STDIN>")
+        # Print the contents.
+        for i, (myfile, myalias) in flist.enum():
+            if outfiles:
+                # Send to individual file instead of STDOUT.
+                outstream = open(outfiles[i], 'w')
+            try:
+                gtfs[i].iloc[:,9:11].drop_duplicates().sort_values(["gene","transcript"]).to_csv(outstream, sep='\t', header=False, index=False, quoting=csv.QUOTE_NONE)
+            except IOError:
+                pass
+            finally:
+                if outfiles:
+                    # Don't want to accidentally close STDOUT.
+                    outstream.close()
+        if params.STDERRcomments:
+            try:
+                sys.stderr.write(ml.donestring("extracting gene/transcript ID pairs."))
             except IOError:
                 pass
 
