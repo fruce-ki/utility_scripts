@@ -1,9 +1,9 @@
-#!/usr/bin/python
+#!~/bin/python3
 
 """mylogs.py
 
 Author: Kimon Froussios
-Compatibility tested: python 2.7.3
+Compatibility tested: python 2.7.3, 3.5.2
 Last revised: 29/08/2016
 
 Library for custom logging.
