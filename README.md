@@ -1,12 +1,13 @@
 # utility_scripts
 
 A collection of general-purpose code that makes my life easier.
+Originally written for Python 2.7, I ported them to Python 3.5. Further development will take place on the Python 3 versions only. The Python 2 versions are kept for archival reasons.
 
 ## Contents
 
 ### fileutilities.py
 
-Batch tasks of file-munging that I seem to need frequently enough to merit automation. Works as script or library.  (python 2.7.3)
+Batch tasks of file-munging that I seem to need frequently enough to merit automation. Works as script or library. 
 
 Library and script:
 
@@ -34,7 +35,7 @@ A partial testing suite available in test_fileutilities.py.
 
 ### mylogs.py
 
-Custom logging of commands and messages in consistent format. Works as library or command-wrapping script. (python 2.7.3)
+Custom logging of commands and messages in consistent format. Works as library or command-wrapping script. 
 
 Library:
 
@@ -50,7 +51,7 @@ Script:
 
 ### sequtilities.py
 
-Custom utility functions related to Bioinformatics sequence analysis. Works as library or script. (python 2.7.3)
+Custom utility functions related to Bioinformatics sequence analysis. Works as library or script.
 
 Library and script:
 
