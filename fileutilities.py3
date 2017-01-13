@@ -1,10 +1,10 @@
-#!~/bin/python3
+#!/homes/kfroussios/bin/python3
 
 """fileutilities.py
 
 Author: Kimon Froussios
 Compatibility tested: python 3.5.2
-Last reviewed: 15/11/2016
+Last reviewed: 13/01/2017
 
 This module is a solution for Frequently Performed Generic Tasks that involve 
 multiple files:
@@ -282,7 +282,10 @@ def slink(flist, aliases=None, dir="./", autoext=True):
 
 # Helper function.
 def autonumerate(things):
-    """Detect duplicate entries in a list and append numbers to make them unique.
+    """Detect duplicate entries in a string list and suffix them.
+    
+    Suffixes are in _N format where N a natural number >=2. Existing suffixes
+    in that format will also be detected and incremented.
     
     Args:
         things[str]: A list of strings.
@@ -290,10 +293,18 @@ def autonumerate(things):
         [str]: A corrected list of strings.
     """
     c = Counter(things);
+    # Because I use decrement, reversing the list ensures first instance gets smallest number.
+    things.reverse()
     for i, t in enumerate(things):
-        if c[t] > 1:
-            things[i] = t +'_' + str(c[t])
+        n = c[t]
+        if n > 0:
+            newname = t +'_' + str(n)
+            while newname in things:  # Check for already present incrementations of the base alias.
+                n += 1
+                newname = t +'_' + str(n)
+            things[i] = newname
             c[t] -= 1
+    things.reverse()
     return things
 
 
@@ -592,7 +603,7 @@ def prepare_df(df, myalias="", keyCol=None, keyhead="row_ID", header=False, cols
         cols = list(range(0, df.shape[1]))
     labels = []
     if appendNum:
-        labels = [str(myalias) +"_"+ str(i) for i in cols]
+        labels = [str(myalias) +"_|"+ str(i) for i in cols]
     else:
         labels = [str(myalias) for i in cols]
     df.columns = labels
@@ -708,8 +719,7 @@ def get_columns(flist=[None], cols=[0], colSep=["\t"], header=False, index=None,
     
     Args:
         flist: A list/FilesList of delimited plain text files.
-        header(bool): If True, the first non-comment line will not be in
-                    the data. (Default False)
+        header(bool): Crop the header line (first non-comment line). (Default False)
         cols[int/str] : A list of positional indexes or names or ranges of the 
                     desired columns. (Default [0]).
         colSep[str]: List of characters used as field separators. 
@@ -846,7 +856,7 @@ def get_columns_manual(file=None, cols=[0], colSep=["\t"], header=False, index=N
     df = prepare_df(df, myalias=alias, keyCol=index, header=header, cols=expandedcols, 
                     keyhead=keyhead, appendNum=True if len(expandedcols)>1 else False)
     if index is not None:
-        df.drop(alias+"_my_garbage_label_row_key", 1, inplace=True)
+        df.drop(alias+"_|my_garbage_label_row_key", 1, inplace=True)
     return df
 
 
@@ -1052,7 +1062,7 @@ class FilesList(list):
         # Create the basic list.
         super(FilesList, self).__init__(files)
         # Add a plain list attribute for the aliases with default values.
-        self.aliases = aliases
+        self.aliases = autonumerate(aliases)
               
     def __str__(self):
         """Represent as string.
@@ -1109,7 +1119,7 @@ class FilesList(list):
         """Appends value to both the paths list and the aliases list.
         
         This method overrides the built-in append() of list. It is backwards
-        compatible by having a default value for the alias.
+        compatible by automatically guessing an alias.
         This reduces the risk of the paths and aliases going out of sync due
         to items being manually added without updating the aliases.
         It is still possible to break the sync by manually adding items to the 
