@@ -297,9 +297,9 @@ def autonumerate(things):
     things.reverse()
     for i, t in enumerate(things):
         n = c[t]
-        if n > 0:
+        if n > 1:  # The first occurrence is not suffixed. 
             newname = t +'_' + str(n)
-            while newname in things:  # Check for already present incrementations of the base alias.
+            while newname in things:  # Check for already present suffixes
                 n += 1
                 newname = t +'_' + str(n)
             things[i] = newname
@@ -383,11 +383,11 @@ def do_foreach(flist, comm, comments=False, progress=True, out=(None,None,None),
         command = []
         for c in comm:
             (mypath, mybase) = os.path.split(str(myfile))
-            c = string.replace(c,"***full***", str(myfile))
-            c = string.replace(c,"***path***", mypath)
-            c = string.replace(c,"***file***", mybase)
-            c = string.replace(c,"***core***", os.path.splitext(mybase)[0])
-            c = string.replace(c,"***alias***", str(myalias))
+            c = c.replace("***full***", str(myfile))
+            c = c.replace("***path***", mypath)
+            c = c.replace("***file***", mybase)
+            c = c.replace("***core***", os.path.splitext(mybase)[0])
+            c = c.replace("***alias***", str(myalias))
             command.append(c)
         # Redirect output.
         if outfiles:
@@ -1315,148 +1315,87 @@ def main(args):
     
     """    
     # Organize arguments and usage help:
-    parser = argparse.ArgumentParser(description="A basic implementation providing\
-    direct access to the primary functionality of the fileutilities module.\
-    Only one task can be invoked at a time. Unless otherwise specified, all lists \
-    are space separated. It is *strongly* recommended to provide INPUTTYPE and TARGETs \
-     *before* providing any of the other parameter. This is due to many \
-    parameters accepting an indefinite number of values, which prevents them from knowing \
-    where their list ends unless a flag is encountered. Comma separated values \
-    are not practical as commas have their own meaning for some of these flags and \
-    it would become difficult to disambiguate.")
+    parser = argparse.ArgumentParser(description="Provide INPUTTYPE and TARGETs \
+     *before* providing any of the other parameters. This is due to many \
+    parameters accepting an indefinite number of values. Only one task at a time.")
     
     # Input/Output.
     parser.add_argument('INPUTTYPE', type=str, choices=['L','T','D','P'],
-                                help="Specify the type of the TARGETs: \
-                                'T' = The actual targets. \
-                                'P' = Pipe the list of targets from STDIN, such as the result of --dir \
-                                      or the shell's ls. \
-                                'L' = Text file(s) listing the targets. \
-                                'D' = Pipe data from STDIN instead of from files. \
+                                help=" Specify the type of the TARGETs: \
+                                'T' = The actual input filess. \
+                                'L' = Text file(s) listing the input files. \
+                                'P' = Get list of input files from STDIN pipe. \
+                                'D' = Input data directly from STDIN pipe. \
                                 ('D' is compatible with only some of the functions)")
     parser.add_argument('TARGET', type=str, nargs='*',
-                                help="The targets. This is the main variable of the command. \
-                                For most tasks these will be the files to operate on. Look into \
-                                the specific task details below for special uses. \
-                                ** Mandatory unless INPUTTYPE is 'D' or 'P'. \
-                                Values can be space or comma separated.")
+                                help=" The targets, space- or comma-separated. Usually files. \
+                                Look into the specific task details below for special uses. \
+                                Do not specify with INPUTTYPE 'P' or 'D'.")
     parser.add_argument('-O','--out', type=str, nargs=3,
-                                help="Send individual outputs to individual files instead of \
-                                merging them and outputting to STDOUT. The first value is the \
-                                target directory, the second is a common prefix, and \
-                                the third value is a common suffix/extension. Output files will be like \
-                                <out[0]>/<out[1]>target<out[2]>, where 'target' is each value of TARGET. \
-                                Prefix and suffix may be empty strings: \"\".")
+                                help=" Send individual outputs to individual files instead of \
+                                merging them to STDOUT. Output files will be like \
+                                <out[0]>/<out[1]>target<out[2]>")
     # Parameters.
     parser.add_argument('-L','--log', action='store_true',
-                                help="Log this command.")
+                                help=" Log this command to ./commands.log.")
     parser.add_argument('-c','--comments', action='store_true',
-                                help="Include commented info to STDOUT or files.")
+                                help=" Include commented info to STDOUT or files. (Default don't include)")
     parser.add_argument('-C','--STDERRcomments', action="store_false",
-                                help="Do NOT show progress info in STDERR.")
+                                help=" Do NOT show info in STDERR. (Default show)")
     parser.add_argument('-s','--sep', type=str, default=["\t"], nargs='+',
-                                help="Character for column separator in the target files.\
-                                A list of characters may be specified, and all target files \
-                                will be split at any and all occurrences of these characters. \
-                                The first value in the list is the one used for the output. \
-                                (Default \\t, ** bash syntax for tab: $'\\t') \
-                                ** With --swap, --sep can be given a list of regex instead.")
+                                help=" A list of input field separators. The first value \
+                                will be used for all output. (Default \\t, bash syntax for tab: $'\\t').")
     parser.add_argument('-l','--labels', action='store_true',
-                                help="Discard column headers in target files. (Default False)")
+                                help=" Discard column headers (first content line) in input files. (Default do not discard)")
     parser.add_argument('-r','--relabel', action='store_false',
-                                help="Do NOT create new column headers that reflect the origin \
-                                of the columns. (Default do create)")
+                                help=" Do NOT create new column headers that reflect the origin of the columns. (Default create)")
     parser.add_argument('-i','--index', action='store_true',
-                                help="Use column 0 as row index. Works with \
-                                --cols, --rndcols and --appnd. (Default False)")
+                                help=" Use column 0 as row index. The index will always be included in the output. (Default no index)")
     parser.add_argument('-M','--metadata', type=int, default=0,
-                                help="Number of metadata lines at the \
-                                beginning of input data (Default 0). If specified, the \
-                                lines will be read and stored separately \
-                                and then will be re-inserted verbatim in the output. \
-                                It is *strongly* recommended that such lines be commented \
-                                with '#', so that they are ignored by the data parser. \
-                                ** This is only possible for functions of this script that \
-                                directly handle data.")
+                                help=" Number of metadata lines at the \
+                                beginning of input data (Default 0). Metadate will be read separately \
+                                and re-added verbatim into the output.")
     # General tasks.
     parser.add_argument('--probe', type=str, choices=list(_funcDispatch.keys()),
-                                help="Do one of a these simple checks on the target files.")
+                                help=" Do one of a these simple checks on the target files.")
     parser.add_argument('--dir', type=str, nargs='*',
-                                help="List the contents of the target paths. \
-                                An optional  list of regex patterns may be specified \
-                                to filter which files are listed. The full absolute paths \
-                                are returned, which is convenient for working \
-                                with files that are scattered across multiple places. \
-                                ** Each file is also given an alias, that consists of the \
-                                basename, without the path or extension and possibly a \
-                                unique number when necessary.")
+                                help=" List the contents of the target paths. \
+                                Full absolute file paths are returned. Each file is also given an alias. \
+                                Supplying an optional list of regex patterns enables filtering of the result.")
     parser.add_argument('--link', type=str, nargs='+',
-                                help="Create symbolic links for the target files \
-                                as their aliases. The first value is the directory \
-                                in which to collect all the links (mandatory). \
-                                Any additional values are used as respective names for \
-                                the links, one for one. If no additional values are \
-                                present, the aliases from the list file will \
-                                be used, if available. Otherwise the basenames of the files \
-                                will be used, enumerated when identical basenames occur.")
+                                help=" Create symbolic links for the targets into the specified directory. \
+                                Any additional values are used as respective names for the links, one for one, \
+                                otherwise the aliases or basenames will be used, enumerated when necessary.")
     parser.add_argument('--loop', type=str, nargs='+',
-                                help="Repeat the specified shell command for each target.\
-                                The fist value of this parameter determines how to substitute \
-                                the targets in the nested command: \
-                                'S'= strings, 'R'= range of positive integers. TARGETs must be \
-                                in x:y range format, closed at both ends. ** PLACEHOLDERS: \
-                                ***full***' : absolute path of file. \
-                                '***path***' : absolute path to the file. \
-                                '***file***' : filename without path. \
-                                '***core***' : filename without the last extension. \
-                                '***alias***': alias for file, by default same as core. \
-                                ** If looping over a numerical range instead of files, \
-                                use file, core or alias, they should produce the same result. \
-                                ** The nested command should be supplied as a list of \
-                                separate components, not as a single string. \
-                                Option flags intended for the nested command should be preceded \
-                                by a '+' sign like this: '+-v', to avoid confusion with flags \
-                                intended for fileutilities.py.")
+                                help=" Repeat the specified shell command for each target value. \
+                                The fist value of this parameter determines what the target values are: \
+                                'S'= strings: paths/files/strings, 'R'= range: ranges of positive integers in x:y format. \
+                                Target PLACEHOLDERS: ***full***, ***path***, ***file***, \
+                                ***core***, ***alias***. \
+                                If looping over a NUMERICAL RANGE use any of the last 3 placeholders. \
+                                The nested command should be supplied as a list of components, not as a single string. \
+                                Options intended for the nested command should be preceded \
+                                by a '+' sign like this: '+-v'.")
     # Delimited file tasks.
     parser.add_argument('--swap', type=str,
-                                help="Replace all occurrences of any of the values of --sep with this string.\
-                                If --out is defined, results will be sent to individual files instead of STDOUT. \
-                                ** Bash syntax for tab: $'\\t'. ** Compatible with 'D' as INPUTTYPE.")
+                                help=" Replace all occurrences of the --sep values with the value supplied here.\
+                                ** Bash syntax for tab: $'\\t'. Compatible with 'D' as INPUTTYPE.")
     parser.add_argument('--cntcols', action='store_true',
-                                help="Count the number of fields in the first row of each \
-                                target file.")
+                                help="Count the number of fields in the first row of each target file.")
     parser.add_argument('--cols', nargs='+',
-                                help="Extract the specified columns (named or 0-indexed) from each of\
-                                the target files. The columns will be merged into a single table \
-                                sent to STDOUT, unless individual output file instructions are specified with --out. \
-                                If --index is defined and --out is not, the first column of each \
-                                file is used as row key. Also, the index will be included in the output. \
-                                ** Columns are specified as a comma-separated list. \
-                                Ranges specified as x:y, closed at both ends. Open ranges not supported. \
-                                You can use --cntcols to find out how many columns your file has.\
-                                ** Negative column indexes must be escaped first like this: \-1. \
-                                ** Compatible with 'D' as INPUTTYPE.")
+                                help="Extract the specified columns (named or 0-indexed) from each target. \
+                                Column ranges in x:y format closed at both ends. \
+                                Negative indices must be escaped first: \-1. Compatible with 'D' as INPUTTYPE.")
     parser.add_argument('--rndcols', type=int,
                                 help="Randomly select this many columns from the target files. \
-                                If --index is defined, the first column will be used as index for merging the \
-                                results and will be excluded from the selection process. The index will \
-                                be included in each output. If --out is defined, the results will not be merged \
-                                but will be sent to individual files instead. ** Not compatible with INPUTTTYPE D.")
+                                With --index, the index column will not be part of the random selection.")
     parser.add_argument('--appnd', action='store_true',
-                                help="Append all the columns of the target files into a single table. \
-                                If used with --index, the merge will match rows based \
-                                on the keys in the first column of each file, and the index \
-                                will be included in the output. Otherwise, \
-                                merging will simply paste the columns next to each other \
-                                as they are.")
+                                help="Append all the columns of the target files into a single table.")
     parser.add_argument('--valset', nargs=3,
-                                help="Non-redundant set of values in given row/column. Takes three \
-                                arguments: the first sets the data orientation 'r' for row or 'c' for column, \
-                                the second is the position index of the row/column, \
-                                the third is a repetition filter: \
-                                'a' for set of all values, \
-                                'u' for set of non-repeated values only, \
-                                'r' for set of only values that exist more than once.")
+                                help="Get the non-redundant set of values in the given row/column. \
+                                Takes three arguments: (i) orientation 'r' for row or 'c' for column, \
+                                (ii) position index of the row/column, (iii) repetition filter: \
+                                'a' all values, 'u' unique values only, 'r' only values with two or more instances.")
     params = parser.parse_args(args)
     
     # INPUT ###################################################################

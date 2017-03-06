@@ -1,4 +1,4 @@
-#!~/bin/python3
+#!/homes/kfroussios/bin/python3
 
 """sequtilities.py
 
@@ -137,29 +137,28 @@ def main(args):
      part each runtime task is associated to a library function.")
 
     # Input/Output.
-    parser.add_argument('INPUTTYPE', type=str, choices=['T','L','P','D'],
-                                help="Specify the type of the TARGETs: \
-                                'T' = The actual targets, \
-                                'P' = Pipe the list of targets from STDIN, \
-                                'L' = Text file(s) listing the targets \
-                                'D' = Pipe data from STDIN instead of from files. \
+    parser.add_argument('INPUTTYPE', type=str, choices=['L','T','D','P'],
+                                help=" Specify the type of the TARGETs: \
+                                'T' = The actual input filess. \
+                                'L' = Text file(s) listing the input files. \
+                                'P' = Get list of input files from STDIN pipe. \
+                                'D' = Input data directly from STDIN pipe. \
                                 ('D' is compatible with only some of the functions)")
     parser.add_argument('TARGET', type=str, nargs='*',
-                                help="File(s). ** Mandatory unless INPUTTYPE is 'P'.")
+                                help=" The targets, space- or comma-separated. Usually files. \
+                                Look into the specific task details below for special uses. \
+                                Do not specify with INPUTTYPE 'P' or 'D'.")
     parser.add_argument('-O','--out', type=str, nargs=3,
-                                help="Send individual outputs to individual files instead of \
-                                merging them and outputting to STDOUT. The first value is the \
-                                target directory, the second is a common prefix, and \
-                                the third value is a common suffix/extension. Output files will be like \
-                                <out[0]>/<out[1]>target<out[2]>, where 'target' is each value of TARGET. \
-                                Prefix and suffix may be empty strings: \"\".")
+                                help=" Send individual outputs to individual files instead of \
+                                merging them to STDOUT. Output files will be like \
+                                <out[0]>/<out[1]>target<out[2]>")
     # Parameters.
     parser.add_argument('-L','--log', action='store_true',
-                                help="Log this command.")
+                                help=" Log this command to ./commands.log.")
     parser.add_argument('-c','--comments', action='store_true',
-                                help="Include commented info to STDOUT or files.")
+                                help=" Include commented info to STDOUT or files. (Default don't include)")
     parser.add_argument('-C','--STDERRcomments', action="store_false",
-                                help="Do NOT show progress info in STDERR.")
+                                help=" Do NOT show info in STDERR. (Default show)")
     parser.add_argument('-v','--verbose', action="store_true",
                                 help="Include more details/fields/etc in the output. Task-dependent.")
     # Tasks.
@@ -172,7 +171,7 @@ def main(args):
                                 coordinates for each gene. ** Choice 'a' returns a pre-mRNA for every gene, whereas \
                                 choice 'f' filters out genes with only one transcript model comprising of a single exon \
                                 ** Compatible with 'D' as INPUTTYPE.")
-    parser.add_argument('--t2g', type=str, choices=['head', 'nohead'],
+    parser.add_argument('--t2g', type=str, choices=['header', 'nohead'],
                                 help="Extract transcript-gene ID pairs from a GTF file. The value determines\
                                 whether to print a column header line or not.")
     params = parser.parse_args(args)
@@ -282,7 +281,7 @@ def main(args):
             flist.append("<STDIN>")
         # Print the contents.
         hdr=None
-        if params.t2g == "head":
+        if params.t2g == "header":
             hdr = True
         else:
             hdr = False
