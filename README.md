@@ -31,7 +31,6 @@ Library only:
 5. Auto-generate file names using a common target path, prefix and suffix and a list of strings.
 5. First / Last lines of listed files. Obsolete, but kept as record of buffer access tricks.
 
-A partial testing suite available in test_fileutilities.py.
 
 ### mylogs.py
 
