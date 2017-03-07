@@ -56,6 +56,7 @@ Library and script:
 
 1. Aggregate and summarize the listed final logs of STAR.
 2. Infer pre-mRNA coordinates from a GTF genome annotation.
+3. Extract transcript-gene ID pairs from a GTF annotation.
 
 Library only:
 
