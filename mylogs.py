@@ -1,10 +1,10 @@
-#!~/bin/python3
+#!/homes/kfroussios/bin/python3
 
 """mylogs.py
 
 Author: Kimon Froussios
 Compatibility tested: python 2.7.3, 3.5.2
-Last revised: 29/08/2016
+Last revised: 19/04/2017
 
 Library for custom logging.
 
@@ -109,7 +109,10 @@ def log_command(message="", logfile = "./commands.log" ):
     """
     with open(logfile,'a') as comlog:
         if message == "":
-            comlog.write(tstamp() + "\t" + str(sys.executable) + " " + " ".join(sys.argv) + "\n")
+            comlog.write(tstamp() + "\t" + str(sys.executable) + " " + " ".join(sys.argv).replace("$", "\$") + "\n")  # Automatically escape bash variables. 
+                                                                                                                      # If a variable's name is in the command arguments, it was entered in escaped form, 
+                                                                                                                      # otherwise the command would include the dereferenced value instead of the name, but the
+                                                                                                                      # escape char is removed when the string is evaluated by bash. So I need to add it back for a correct log.
         else:
             comlog.write(tstamp() + "\t" + str(sys.executable) + " " + " ".join(sys.argv) + "\n" + "          " + message.rstrip().replace("\n","\n          ") + "\n")
         
