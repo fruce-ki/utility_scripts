@@ -140,7 +140,7 @@ if __name__ == "__main__":
     
     if sys.argv[1] == "-e":
         # Log command and run it.
-        log_message(message = " ".join(sys.argv[2:]), logfile = "commands.log")
+        log_message(message = " ".join(sys.argv[2:]).replace("$", "\$"), logfile = "commands.log")
         subprocess.call(sys.argv[2:], stdout = sys.stdout, shell = False)
     else:
         # Log message.
