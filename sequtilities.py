@@ -35,7 +35,7 @@ def collect_starFinalLogs(flist, all=False):
         rows = [2,4,5,7,8,9,10,11,12,13,14,15,16,17,18,19,20,22,23,24,25,27,28,29]
     else:
         rows = [4, 5, 8, 9, 23, 25, 27, 28, 29]
-    df = fu.get_crosspoints(flist, cols=[1], rows=rows, colSep=["|"], header=False, index=0, merge=True)[0]
+    df = fu.get_crosspoints(flist, cols=[1], rows=rows, colSep=["\|"], header=False, index=0, merge=True)[0]
     
     spaces = re.compile("\s{2,}|\t")
     quotes = re.compile("\"")
