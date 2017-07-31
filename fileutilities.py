@@ -61,7 +61,6 @@ from builtins import list
 from collections import Counter
 
 import mylogs as ml
-from pandas.stats.tests.common import COLS
 
 
 #####   F U N C T I O N S   #####
