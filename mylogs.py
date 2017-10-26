@@ -31,6 +31,15 @@ def tstamp():
     """
     return str(datetime.datetime.now())
 
+def escapise(comm):
+    """Escape special characters in command
+    
+    Args:
+        comm(str): String to sanitise.
+    Returns:
+        (str)
+    """
+    return(comm.replace("$", "\$").replace('>','\>').replace('\|','\\|').replace('\*','\\*'))
 
 def paramstring(message=""):
     """Execution parameters log-string.
@@ -108,13 +117,12 @@ def log_command(message="", logfile = "./commands.log" ):
         logfile(str): File to write to (./commands.log).
     """
     with open(logfile,'a') as comlog:
+        # Escape bash variables and redirections. If they exist in the command arguments, they were entered in escaped form.
+        c = escapise(" ".join(sys.argv))
         if message == "":
-            comlog.write(tstamp() + "\t" + str(sys.executable) + " " + " ".join(sys.argv).replace("$", "\$") + "\n")  # Automatically escape bash variables. 
-                                                                                                                      # If a variable's name is in the command arguments, it was entered in escaped form, 
-                                                                                                                      # otherwise the command would include the dereferenced value instead of the name, but the
-                                                                                                                      # escape char is removed when the string is evaluated by bash. So I need to add it back for a correct log.
+            comlog.write(tstamp() + "\t" + str(sys.executable) + " " + c + "\n")  
         else:
-            comlog.write(tstamp() + "\t" + str(sys.executable) + " " + " ".join(sys.argv) + "\n" + "          " + message.rstrip().replace("\n","\n          ") + "\n")
+            comlog.write(tstamp() + "\t" + str(sys.executable) + " " + c + "\n" + "                          \t" + message.rstrip().replace("\n","\n          ") + "\n")
         
 
 def log_message(message="", logfile="./messages.log"):
@@ -140,15 +148,12 @@ if __name__ == "__main__":
     
     if sys.argv[1] == "-e":
         # Log command and run it.
-        log_message(message = " ".join(sys.argv[2:]).replace("$", "\$"), logfile = "commands.log")
-        subprocess.call(sys.argv[2:], stdout = sys.stdout, shell = False)
-    else:
+        c = " ".join(sys.argv[2:])
+        log_command(message = c)  # Log both the full mylogs command (timestamped), and the command actually executed (as the message).
+        subprocess.call(c, shell = True, stdout = sys.stdout)
+    elif sys.argv[1] == "-m":
         # Log message.
-        try:
-            log_message(message = sys.argv[1], logfile = sys.argv[2])
-        except IndexError:
-            # No logfile provided, use default.
-            log_message(message = sys.argv[1])
+        log_message(message = escapise(" ".join(sys.argv[3:])), logfile = sys.argv[2])
     
     sys.exit(0)
     
