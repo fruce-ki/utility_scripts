@@ -3,8 +3,7 @@
 """mylogs.py
 
 Author: Kimon Froussios
-Compatibility tested: python 2.7.3, 3.5.2
-Last revised: 19/04/2017
+Last revised: 27/10/2017
 
 Library for custom logging.
 
@@ -39,7 +38,11 @@ def escapise(comm):
     Returns:
         (str)
     """
-    return(comm.replace("$", "\$").replace('>','\>').replace('\|','\\|').replace('\*','\\*'))
+    return(comm.translate(str.maketrans({"\\": r"\\",
+                                         ">":  r"\>",
+                                         "$":  r"\$",
+                                         "*":  r"\*",
+                                         "|":  r"\|"})) )
 
 def paramstring(message=""):
     """Execution parameters log-string.
@@ -107,7 +110,7 @@ def errstring(message=""):
     return "##!ERROR!# " + tstamp() + "\t" + os.path.basename(sys.argv[0]) + " - " + message +"\n"
 
 
-def log_command(message="", logfile = "./commands.log" ):
+def log_command(message="", logfile = "./commands.log"):
     """Record timestamp, command-line call and optional message.
     
     This function obtains the command from sys.argv[].
@@ -150,6 +153,11 @@ if __name__ == "__main__":
         # Log command and run it.
         c = " ".join(sys.argv[2:])
         log_command(message = c)  # Log both the full mylogs command (timestamped), and the command actually executed (as the message).
+        subprocess.call(c, shell = True, stdout = sys.stdout)
+    elif sys.argv[1] == "-E":
+        # Log command and run it in fully escaped form.
+        c = escapise(" ".join(sys.argv[2:]))
+        log_command(message = c)
         subprocess.call(c, shell = True, stdout = sys.stdout)
     elif sys.argv[1] == "-m":
         # Log message.
