@@ -397,7 +397,7 @@ def do_foreach(flist, comm, comments=False, progress=True, out=(None,None,None),
                 sys.stderr.write(ml.infostring("DO: "+ see))
         except IOError:
             pass
-        subprocess.call(command, stdout=outstream, shell=False)
+        subprocess.call(" ".join(command), stdout=outstream, shell=True)
         # Optionally identify iteration.
         try:
             if comments and out == (None,None):
