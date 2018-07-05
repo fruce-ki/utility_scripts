@@ -3,7 +3,7 @@
 """mylogs.py
 
 Author: Kimon Froussios
-Last revised: 18/11/2017
+Last revised: 27/10/2017
 
 Library for custom logging.
 
@@ -43,10 +43,12 @@ def escapise(comnd):
         [str]
     """
     for i,c in enumerate(comnd):
-        # Escape existing single quotes, so I can surround strings with them without interference.
-        if '\t' in c:
-            # If tabs are needed, expansion of $'\t' requires the string to be unquoted, so characters must be escaped individually.
-            comnd[i] = c.translate(str.maketrans({"\"": r"\"",
+        # Sometimes an empty string is an argument. That needs to be quoted for the log.
+        if c == '':
+            comnd[i] = '\'\''
+        else:
+            comnd[i] = c.translate(str.maketrans({"\\": r"\\",
+                                                  "\"": r"\"",
                                                   "\'": r"\'",
                                                   "$": r"\$",
                                                   "\t": r"$'\t'",
@@ -56,13 +58,6 @@ def escapise(comnd):
                                                   "*": r"\*",
                                                   "#": r"\#",
                                                   "%": r"\%"}))
-        # If no tabs are needed, single-quote if any special characters are present. (cleanest option)
-        elif any((x in [' ' ,'"', '$', '@', ':', '^', '%', '*', '>', '<', '|', '#']) for x in c):
-            c = c.replace("'", "\'")
-            comnd[i] = "'" + c + "'"
-        # Sometimes an empty string is an argument. That needs to be quoted for the log.
-        elif c == '':
-            comnd[i] = '\'\''
     return comnd
 
 
@@ -174,11 +169,12 @@ if __name__ == "__main__":
     if sys.argv[1] == "-e":
         # Log command and run it.
         c = " ".join(sys.argv[2:])
-        log_command(message=c)  # Log both the full mylogs command (timestamped), and the command actually executed (as the message).
+        log_command()
+        log_message(message=c, logfile="./subcommands.log")
         subprocess.call(c, shell=True, stdout=sys.stdout)
     elif sys.argv[1] == "-m":
         # Log message.
-        log_message(logfile=sys.argv[2], message=" ".join(escapise(sys.argv[3:])))
+        log_message(message=" ".join(escapise(sys.argv[2:])))
 
     sys.exit(0)
 

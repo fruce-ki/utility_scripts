@@ -303,7 +303,7 @@ def make_names(items, parameters):
                     the output names.
         parameters(str,str,str): The first element is the output directory, 
                     the second is a common prefix to add to the names, 
-                    the third is a common sufix to add to the names.
+                    the third is a common suffix to add to the names.
                     Like so: <out[0]>/<out[1]>item<out[2] .
                     If any of the 3 values in None, no outnames will be made.
                     Use current directory and empty strings as necessary.
@@ -313,8 +313,8 @@ def make_names(items, parameters):
     outfiles = []
     if None not in parameters:
         for i in items:
-            outfiles.append(os.path.join(os.path.abspath(os.path.expanduser(parameters[0])), 
-                                         parameters[1] + os.path.splitext(os.path.basename(str(i)))[0] + parameters[2]) )
+            outfiles.append(os.path.join(os.path.abspath(os.path.expanduser(parameters[0])),
+                                         parameters[1] + i + parameters[2]) )
         autonumerate(outfiles)
     return outfiles
 
@@ -390,7 +390,7 @@ def do_foreach(flist, comm, comments=False, progress=True, out=(None,None,None),
         try:
             see = " ".join(command)
             if log:
-                ml.log_message(message=see, logfile="./commands.log")
+                ml.log_message(message=see, logfile="./subcommands.log")
             if comments and out == (None,None):
                 outstream.write(ml.infostring("CWD: "+ os.getcwd() +"\tDO: "+ see))
             if progress:
@@ -1328,7 +1328,8 @@ def main(args):
     parser.add_argument('-O','--out', type=str, nargs=3,
                                 help=" Send individual outputs to individual files instead of \
                                 merging them to STDOUT. Output files will be like \
-                                <out[0]>/<out[1]>target<out[2]>")
+                                <out[0]>/<out[1]>target<out[2]>, where target is stripped of \
+                                any directory path and its outermost file extension.")
     # Parameters.
     parser.add_argument('-L','--log', action='store_true',
                                 help=" Log this command to ./commands.log.")
