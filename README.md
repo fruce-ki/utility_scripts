@@ -1,7 +1,7 @@
 # utility_scripts
 
 A collection of general-purpose code that makes my life easier.
-Originally written for Python 2.7, I ported them to Python 3.5. Further development will take place on the Python 3 versions only. The Python 2 versions are kept for archival reasons.
+Originally written for Python 2.7, I ported them to Python 3.5. 
 
 ## Contents
 
