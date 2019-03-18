@@ -1,0 +1,59 @@
+# Stuff I always want:
+######################
+
+# History
+shopt -s histappend
+shopt -s cmdhist
+
+HISTCONTROL="erasedups:ignoreboth"
+HISTSIZE=1000
+HISTFILESIZE=2000
+export HISTTIMEFORMAT="%d/%m/%y %T "
+
+
+# Bash
+shopt -s checkwinsize
+shopt -s no_empty_cmd_completion
+shopt -s globstar 2> /dev/null
+shopt -s nocaseglob;
+shopt -s autocd 2> /dev/null
+shopt -s dirspell 2> /dev/null
+shopt -s cdspell 2> /dev/null
+
+
+# Prompt
+PS1="\[\e[1;33m\]\u@\h\[\e[m\]:\[\e[0;31m\]\W\[\e[m\]\$ "
+PROMPT_COMMAND="history -a;$PROMPT_COMMAND"
+PROMPT_DIRTRIM=2
+
+
+# Colourful directories
+alias ls='ls -G'
+alias la='ls -AG'
+alias ll='ls -alLG'
+alias l='ls -lhG'
+
+alias cd..='cd ..'
+alias scr='screen -R'
+
+
+# No vim please
+export SVN_EDITOR=nano
+
+
+# Log current command. Does not work very well on Mac.
+logme() {
+    comm=$(fc -ln -1 | sed 's/^[[:space:]]*//')
+    echo $(date "+%Y-%m-%d %H:%M:%S")$'\t\t'$(echo ${comm} | sed 's/&&logme/\&\& logme/') >> ./commands.log
+}
+
+# Retroactively log the previous command.
+loglast() {
+    comm=$(fc -ln -2 | head -n 1 | sed 's/^[[:space:]]*//')
+    echo $(date "+%Y-%m-%d %H:%M:%S")$'\t\t'${comm}' && logme' >> ./commands.log
+}
+
+
+# Machine specifics:
+####################
+
