@@ -27,12 +27,6 @@ PROMPT_COMMAND="history -a;$PROMPT_COMMAND"
 PROMPT_DIRTRIM=2
 
 
-# Colourful directories
-alias ls='ls -G'
-alias la='ls -AG'
-alias ll='ls -alLG'
-alias l='ls -lhG'
-
 alias cd..='cd ..'
 alias scr='screen -R'
 
@@ -44,16 +38,25 @@ export SVN_EDITOR=nano
 # Log current command. Does not work very well on Mac.
 logme() {
     comm=$(fc -ln -1 | sed 's/^[[:space:]]*//')
-    echo $(date "+%Y-%m-%d %H:%M:%S")$'\t\t'$(echo ${comm} | sed 's/&&logme/\&\& logme/') >> ./commands.log
+    echo $(date "+%Y-%m-%d %H:%M:%S")$'\t\t'$(echo ${comm} | sed 's/&& logme// | sed 's/& logme//') | sed 's/; logme// >> ./commands.log
 }
 
 # Retroactively log the previous command.
 loglast() {
     comm=$(fc -ln -2 | head -n 1 | sed 's/^[[:space:]]*//')
-    echo $(date "+%Y-%m-%d %H:%M:%S")$'\t\t'${comm}' && logme' >> ./commands.log
+    echo $(date "+%Y-%m-%d %H:%M:%S")$'\t\t'${comm} >> ./commands.log
 }
 
 
 # Machine specifics:
 ####################
 
+# Colourful directories
+
+# Linux (top) or Mac (bottom). Uncomment appropriate.
+# alias ls='ls -G'
+# alias ls='ls --color=always'
+
+alias la='ls -A'
+alias ll='ls -lAL'
+alias l='ls -lh'
