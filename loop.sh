@@ -3,7 +3,8 @@
 function usage() {
     echo "Usage:"
     echo "      $0 [-f NUMBER_FROM -t NUMBER_TO] | [-v STRING_VALUE [-v STRING_VALUE] [...]]] -c 'COMMAND_STRING'"
-    echo "Provide either the start and end of a numeric range, or multiple string literals, over which the command is to be iterated. Values will be substituted for '{task_id}' occurances in the command."
+    echo "Provide either the start and end of a numeric range, or multiple string literals.
+    	The place-holder(s) '{val}' in the command will be substituded with each looping value."
     exit 1
 }
 
