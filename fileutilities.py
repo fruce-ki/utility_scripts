@@ -272,7 +272,7 @@ def do_foreach(flist, comm, comments=False, progress=True, out=(None,None,None),
             c = c.replace('{{val}}', '{val}')
             c = c.replace('{{bas}}', '{bas}')
             c = c.replace('{{ali}}', '{ali}')
-            c = c.replace('++-', '+-')
+            c = c.replace(',-', '-')
             # This argument is ready to go now.
             command.append(c)
         # Redirect output.
@@ -1158,8 +1158,8 @@ def main(args):
                                 {abs} full path, {dir} path of directory portion, {val} target value such as filename, \
                                 {bas} basename (filename minus outermost extension), {ali} file alias. \
                                 Flags intended for the nested command should be preceded \
-                                by a '+' sign like this: '+-v'. Recursive calls to fileutilities.py are possible by \
-                                nesting the placeholders and escapes: i.e. {{abs}}, ++-v. One layer is peeled off \
+                                by a ',' sign like this: ',-v'. Recursive calls to fileutilities.py are possible by \
+                                nesting the placeholders and escapes: i.e. {{abs}}, ,,-v. One layer is peeled off \
                                 with each call to fileutilities loop. The placeholders will take the values \
                                 of the targets of the respectively nested call.")
     # Delimited file tasks.
