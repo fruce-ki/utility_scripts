@@ -1125,8 +1125,8 @@ def main(args):
                                 help=" Log this command to ./commands.log.")
     parser.add_argument('-c','--comments', action='store_true',
                                 help=" Include commented info to STDOUT or files. (Default don't include)")
-    parser.add_argument('-C','--STDERRcomments', action="store_true",
-                                help=" Show info in STDERR. (Default don't show)")
+    parser.add_argument('-C','--STDERRcomments', action="store_false",
+                                help=" Do NOt show info in STDERR. (Default show)")
     parser.add_argument('-s','--sep', type=str, default=["\t"], nargs='+',
                                 help=" A list of input field separators. The first value \
                                 will be used for all output. (Default \\t, bash syntax for tab: $'\\t').")
@@ -1235,8 +1235,8 @@ def main(args):
 
     if params.log:
         ml.log_command()
-    if not params.STDERRcomments:
-        sys.stderr.write(ml.paramstring())
+#    if params.STDERRcomments:
+#        sys.stderr.write(ml.paramstring())
 
     # TASKS ###################################################################
 
