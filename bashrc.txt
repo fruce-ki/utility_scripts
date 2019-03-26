@@ -1,44 +1,98 @@
-# Stuff I always want:
-######################
+# .bashrc
 
-# History
-shopt -s histappend
-shopt -s cmdhist
+# Source global definitions
+if [ -f /etc/bashrc ]; then
+	. /etc/bashrc
+fi
 
-HISTCONTROL="erasedups:ignoreboth"
-HISTSIZE=1000
-HISTFILESIZE=2000
-export HISTTIMEFORMAT="%d/%m/%y %T "
+HISTTIMEFORMAT="%d/%m/%y %T "
+export HISTTIMEFORMAT
 
-
-# Bash
-shopt -s checkwinsize
+# Disable completion when the input buffer is empty.  i.e. Hitting tab
+# and waiting a long time for bash to expand all of $PATH.
 shopt -s no_empty_cmd_completion
-shopt -s globstar 2> /dev/null
-shopt -s nocaseglob;
-shopt -s autocd 2> /dev/null
-shopt -s dirspell 2> /dev/null
-shopt -s cdspell 2> /dev/null
 
+# Bash won't get SIGWINCH if another process is in the foreground.
+# Enable checkwinsize so that bash will check the terminal size when
+# it regains control.  #65623
+# http://cnswww.cns.cwru.edu/~chet/bash/FAQ (E11)
+shopt -s checkwinsize
 
-# Prompt
-PS1="\[\e[1;33m\]\u@\h\[\e[m\]:\[\e[0;31m\]\W\[\e[m\]\$ "
+# Make bash write history after every issued command and don't wait for logut.
+shopt -s histappend
 PROMPT_COMMAND="history -a;$PROMPT_COMMAND"
+
+# Automatically trim long paths in the prompt.
 PROMPT_DIRTRIM=2
 
+# Turn on recursive globbing (enables ** to recurse all directories)
+shopt -s globstar 2> /dev/null
+
+# Case-insensitive globbing (used in pathname expansion)
+shopt -s nocaseglob;
+
+
+# Perform file completion in a case insensitive fashion
+bind "set completion-ignore-case on"
+
+# Display matches for ambiguous patterns at first tab press
+bind "set show-all-if-ambiguous on"
+
+# Immediately add a trailing slash when autocompleting symlinks to directories
+bind "set mark-symlinked-directories on"
+
+# Save multi-line commands as one command
+shopt -s cmdhist
+
+# Huge history. Doesn't appear to slow things down, so why not?
+HISTSIZE=500000
+HISTFILESIZE=100000
+
+# Avoid duplicate entries
+HISTCONTROL="erasedups:ignoreboth"
+
+# Prepend cd to directory names automatically
+shopt -s autocd 2> /dev/null
+# Correct spelling errors during tab-completion
+shopt -s dirspell 2> /dev/null
+# Correct spelling errors in arguments supplied to cd
+shopt -s cdspell 2> /dev/null
+
+# This allows you to bookmark your favorite places across the file system
+# Define a variable containing a path and you will be able to cd into it regardless of the directory you're in
+shopt -s cdable_vars
+# Examples:
+# export dotfiles="$HOME/dotfiles"
+# export projects="$HOME/projects"
+# export documents="$HOME/Documents"
+# export dropbox="$HOME/Dropbox"
+
+
+module load gcc/6.3.0-2.27
+
+
+# My additions
+
+# Colourful prompt
+PS1="\[\e[1;33m\]\u \[\e[1;36m\]\h \[\e[0;31m\]\W\[\e[m\]\$ "
+
+# Colourful directories
+alias ls='ls --color=always'
+alias la='ls -A --color=always'
+alias ll='ls -lAL --color=always'
+alias l='ls -lh --color=always'
 
 alias cd..='cd ..'
 alias scr='screen -R'
 
-
-# No vim please
-export SVN_EDITOR=nano
+# Shorthand
+alias q='squeue --account=kimon.froussios'
 
 
 # Log current command. Does not work very well on Mac.
 logme() {
     comm=$(fc -ln -1 | sed 's/^[[:space:]]*//')
-    echo $(date "+%Y-%m-%d %H:%M:%S")$'\t\t'$(echo ${comm} | sed 's/&& logme// | sed 's/& logme//') | sed 's/; logme// >> ./commands.log
+    echo $(date "+%Y-%m-%d %H:%M:%S")$'\t\t'${comm} | sed 's/&& logme//' | sed 's/& logme//' | sed 's/; logme//' >> ./commands.log
 }
 
 # Retroactively log the previous command.
@@ -48,15 +102,32 @@ loglast() {
 }
 
 
-# Machine specifics:
-####################
+# Find my stuff
+export PATH="$PATH:$HOME/bin:$HOME/utility_scripts"
+export PYTHONPATH="$PYTHONPATH:$HOME/utility_scripts"
 
-# Colourful directories
 
-# Linux (top) or Mac (bottom). Uncomment appropriate.
-# alias ls='ls -G'
-# alias ls='ls --color=always'
+# Load modules for nextflow
+module load java/1.8.0_121
+module load singularity/2.5.2
 
-alias la='ls -A'
-alias ll='ls -lAL'
-alias l='ls -lh'
+
+# added by Miniconda3 4.5.12 installer
+# >>> conda init >>>
+# !! Contents within this block are managed by 'conda init' !!
+__conda_setup="$(CONDA_REPORT_ERRORS=false '/users/kimon.froussios/miniconda3/bin/conda' shell.bash hook 2> /dev/null)"
+if [ $? -eq 0 ]; then
+    \eval "$__conda_setup"
+else
+    if [ -f "/users/kimon.froussios/miniconda3/etc/profile.d/conda.sh" ]; then
+        . "/users/kimon.froussios/miniconda3/etc/profile.d/conda.sh"
+        CONDA_CHANGEPS1=false conda activate base
+    else
+        \export PATH="/users/kimon.froussios/miniconda3/bin:$PATH"
+    fi
+fi
+unset __conda_setup
+# <<< conda init <<<
+
+
+conda activate mybasics
