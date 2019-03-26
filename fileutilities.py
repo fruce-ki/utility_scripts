@@ -4,22 +4,16 @@
 
 Author: Kimon Froussios
 Compatibility tested: python 3.5.2
-Last reviewed: 20/11/2017
+Last reviewed: 26/03/2019
 
 This module is a solution for Frequently Performed Generic Tasks that involve
 multiple files:
 * repeating a command for a range of files (not currently parallelized),
 * accessing and restructuring (multiple) delimited files.
 * miscellaneous stuff. Some of it is auxiliary to the primary functions, some
-  is a legacy of this module's evolution of concept. Some of it could arguably
-  be in different libraries, but I see not reason to inflate the dependencies.
-  I hate sprawling webs of dependencies on non-standard packages more than I
-  dislike some out-of-place functions.
-
-The primary purpose of this entire module is to encapsulate frequent generic
-tasks and related boilerplate code so as to be able to do them from the command
-line in a single step, instead of implementing specialized code for each
-variation of the task. The module provides a library of flexible functions as
+  is a legacy of this module's evolution of concept. 
+  
+The module provides a library of flexible functions as
 well as a main() implementing the primary use scenarios.
 
 Execute with -h in a shell to obtain syntax and help.
@@ -76,108 +70,6 @@ def expand_fpaths(flist):
         """
         return [os.path.abspath(os.path.expanduser(str(f))) for f in flist]
 
-
-def are_empty(flist, invalids=True):
-    """List the files that are empty.
-
-    Args:
-        flist: A list/FilesList of files to probe.
-        invalid(bool): How should invalid paths be reported? (Default True)
-                    There is no right or wrong way to classify invalid
-                    paths, it is entirely dependent on the context in which
-                    the files would be used downstream.
-    Returns:
-        FilesList: List of empty files.
-    """
-    try:
-        flist.aliases[0]
-    except AttributeError:
-        # If it's a plain list, upgrade it to a FilesList.
-        flist = FilesList(flist)
-    result = FilesList()
-    for i, (myfile, myalias) in flist.enum():
-        try:
-            if os.path.getsize(myfile) == 0:
-                result.append(myfile, myalias)
-        except OSError:
-            if invalids:
-                result.append(myfile, myalias)
-    return result
-
-
-def dont_exist(flist):
-    """List the files that don't exist.
-
-    Args:
-        flist: A list/FilesList of files to probe.
-    Returns:
-        FilesList: List of missing files.
-    """
-    try:
-        flist.aliases[0]
-    except AttributeError:
-        # If it's a plain list, upgrade it to a FilesList.
-        flist = FilesList(flist)
-    result = FilesList()
-    for i, (myfile, myalias) in flist.enum():
-        if not os.path.exists(myfile):
-            result.append(myfile, myalias)
-    return result
-
-
-def arent_readable(flist):
-    """List inaccessible files.
-
-    Invalid paths are also reported as inaccessible.
-
-    Args:
-        flist: A list/FilesList of files to probe.
-    Returns:
-        FilesList: List of inaccessible files.
-    """
-    try:
-        flist.aliases[0]
-    except AttributeError:
-        # If it's a plain list, upgrade it to a FilesList.
-        flist = FilesList(flist)
-    result = FilesList()
-    for f, (myfile, myalias) in flist.enum():
-        try:
-            if not os.access(myfile, os.R_OK):
-                result.append(myfile, myalias)
-        except OSError:
-            result.append(myfile, myalias)
-    return result
-
-
-def arent_text(flist, invalids=True):
-    """List the file that are (probably) text.
-
-    This is achieved by probing the contents and using heuristics to
-    determine the type of those contents.
-
-    Args:
-        flist: A list/FilesList of files to probe.
-        invalids(bool): Should invalid paths be reported as not-text?
-                    (Default True)
-    Returns:
-        FilesList: List of files that are probably not plain text.
-    """
-    try:
-        flist.aliases[0]
-    except AttributeError:
-        # If it's a plain list, upgrade it to a FilesList.
-        flist = FilesList(flist)
-    result = FilesList()
-    for i, (myfile, myalias) in flist.enum():
-        try:
-            with open(myfile) as f:
-                if not istext(f.read(1024)):
-                    result.append(myfile, myalias)
-        except IOError:
-            if invalids:
-                result.append(myfile, myalias)
-    return result
 
 # Helper function, string check.
 def istext(s):
@@ -409,107 +301,6 @@ def do_foreach(flist, comm, comments=False, progress=True, out=(None,None,None),
         finally:
             if outfiles:
                 outstream.close()
-
-
-def tails(flist, linesToGet=5):
-    """Get last lines of text files.
-
-    Adapted from:
-        https://gist.github.com/volker48/3437288
-
-    Files that cause an error are still represented in the return value with an
-    empty sublist, like empty files, in order to maintain the correspondence
-    between input and output lists.
-
-    Args:
-        flist: A list/FilesList of text files.
-        lines_to_get: Number of lines to get from the end.
-    Returns:
-        [[str]]: A list of lists. Each sublist represents the lines returned by
-                    one file.
-    Raises:
-        IOError: With a message about ALL the inaccessible files.
-    """
-    result = []
-    errors = []
-    for myfile in flist:
-        if linesToGet < 1:
-            result.append([])
-            continue
-        try:
-            with open(myfile, 'r') as f:
-                # Place the cursor at the last character.
-                f.seek(-1, os.SEEK_END)
-                position = f.tell()
-                linesSeen = 0
-                # I want the beginning of a line, by proxy of the previous line's newline end.
-                # So if the last character of the file is a newline, ignore it and go one step back.
-                if f.read(1) == "\n":
-                    position -= 1
-                    f.seek(position)
-                # Crawl backwards one character at a time.
-                while linesSeen < linesToGet and position > 0:
-                    # Try previous character.
-                    position -= 1
-                    f.seek(position)
-                    c = f.read(1)
-                    if c == "\n":
-                        linesSeen += 1
-                if position == 0:
-                    # The cursor will be right after a newline, unless I hit the beginning
-                    # of the file, in which case the loop leaves it on the second character.
-                    # So bring it manually to the start of the line and file.
-                    f.seek(0)
-                # Now that the cursor is a the right place, read in the lines.
-                chunk = []
-                for line in f:
-                    chunk.append(line)
-                result.append(chunk)
-        except IOError as e:
-            result.append([])
-            errors.append(e.message)
-    if errors != []:
-        raise IOError(" --- ".join(errors))
-    return result
-
-
-def heads(flist, linesToGet=5):
-    """Get first lines of text files.
-
-    Files that cause an error are still represented in the return value with an
-    empty sublist, like empty files, in order to maintain the correspondence
-    between input and output lists.
-
-    Args:
-        flist: A list/FilesList of text files.
-        lines_to_get: Number of lines to get from the top.
-    Returns:
-        [[str]]: A list of lists. Each sublist represents the lines returned by
-                    one file.
-    Raises:
-        IOError: With a message about ALL the inaccessible files.
-    """
-    result = []
-    errors = []
-    for myfile in flist:
-        if linesToGet < 1:
-            result.append([])
-            continue
-        try:
-            with open(myfile, 'r') as f:
-                chunk = []
-                for i in range(0, linesToGet):
-                    line = f.readline()
-                    if line != "":
-                        # Otherwise it appends empty strings when it hits the end of file.
-                        chunk.append(line)
-                result.append(chunk)
-        except IOError as e:
-            result.append([])
-            errors.append(e.message)
-    if errors != []:
-        raise IOError(" --- ".join(errors))
-    return result
 
 
 def swap_strFiles(flist, insep=[","], outsep="\t"):
@@ -1260,14 +1051,6 @@ class FilesList(list):
             newFL.append(k, d[k])
         return newFL
 
-# Dispatch for similar functions.
-_funcDispatch = {"dont_exist" :  dont_exist,
-                 "arent_access" : arent_readable,
-                 "are_empty" : are_empty,   # Doesn't make sense from command line
-                                            # because of lack of control of non-existence value.
-                 "arent_text" : arent_text
-                }
-
 
 def store_metadata(flist, numoflines):
     """Store top lines of files into dictionary.
@@ -1361,8 +1144,6 @@ def main(args):
     parser.add_argument('-V','--verbatim', action='store_true',
                                 help=" Preserve the target values from a list file, do not try to expand them into absolute paths. (Default impute absolute paths)")
     # General tasks.
-    parser.add_argument('--probe', type=str, choices=list(_funcDispatch.keys()),
-                                help=" Do one of a these simple checks on the target files.")
     parser.add_argument('--dir', type=str, nargs='*',
                                 help=" List the contents of the target paths. \
                                 Full absolute file paths are returned. Each file is also given an alias. \
