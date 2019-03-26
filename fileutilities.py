@@ -778,6 +778,31 @@ def get_crosspoints(flist, cols=[0], rows=[0], colSep=["\t"], header=False, inde
     return results
 
 
+def store_metadata(flist, numoflines):
+    """Store top lines of files into dictionary.
+
+    Args:
+        flist: A list or FilesList.
+        numoflines(int): Number of lines to save.
+    Returns:
+        dict[]: The items of flist[] are used as keys.
+    """
+    metadata = dict()
+    for myfile in flist:
+        if myfile is None:
+            fin = sys.stdin
+        else:
+            fin = open(myfile)
+        lines = []
+        for i in range(0, numoflines):
+            lines.append(fin.readline())
+        metadata[myfile] = "".join(lines)
+        if fin != sys.stdin:
+            fin.close()
+    return metadata
+
+
+
 #####   C L A S S E S   #####
 
 
@@ -1005,25 +1030,22 @@ class FilesList(list):
         rx = []
         if patterns:
             rx = [re.compile(p) for p in patterns]
-        cwd = os.getcwd()
         for d in dirpaths:
             try:
                 os.chdir(d)
-                for f in os.listdir('./'):
+                for f in os.listdir(d):
                     if f in ["","\n",".",".."]:
                         continue
                     if not patterns:
                         # No filter.
-                        self.append(f, self.autoalias(f), verbatim=verbatim)
+                        self.append(os.path.join(d, f), self.autoalias(f), verbatim=verbatim)
                     else:
                         for p in rx:
                             if p.search(f):
-                                self.append(f, self.autoalias(f), verbatim=verbatim)
+                                self.append(os.path.join(d, f), self.autoalias(f), verbatim=verbatim)
                                 break
             finally:
-                # Ensure return to original directory to prevent errors in
-                # external code that uses the class.
-                os.chdir(cwd)
+                pass
         self.aliases = autonumerate(self.aliases)
         return self.sorted()
 
@@ -1050,30 +1072,6 @@ class FilesList(list):
         for k in sk:
             newFL.append(k, d[k])
         return newFL
-
-
-def store_metadata(flist, numoflines):
-    """Store top lines of files into dictionary.
-
-    Args:
-        flist: A list or FilesList.
-        numoflines(int): Number of lines to save.
-    Returns:
-        dict[]: The items of flist[] are used as keys.
-    """
-    metadata = dict()
-    for myfile in flist:
-        if myfile is None:
-            fin = sys.stdin
-        else:
-            fin = open(myfile)
-        lines = []
-        for i in range(0, numoflines):
-            lines.append(fin.readline())
-        metadata[myfile] = "".join(lines)
-        if fin != sys.stdin:
-            fin.close()
-    return metadata
 
 
 
@@ -1241,21 +1239,8 @@ def main(args):
 
     # TASKS ###################################################################
 
-    # Simple file PROBEs. -----------------------------------------------------
-    if params.probe:
-        result = _funcDispatch[params.probe](flist)
-        try:
-            if params.comments:
-                sys.stdout.write(ml.paramstring())
-            print(result.to_file())
-            if params.STDERRcomments:
-                sys.stderr.write(ml.donestring("probing"))
-        except IOError:
-            pass
-
-
     # Filter DIRECTORY contents. ----------------------------------------------
-    elif params.dir is not None:
+    if params.dir is not None:
         result = FilesList().populate_from_directories(flist, params.dir)
         try:
             if params.comments:
