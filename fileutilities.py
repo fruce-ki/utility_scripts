@@ -1,4 +1,4 @@
-#!/homes/kfroussios/bin/python3
+#!/users/kimon.froussios/miniconda3/envs/mybasics/bin/python3
 
 """fileutilities.py
 

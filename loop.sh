@@ -31,4 +31,5 @@ command="$@"
 for value in "${values[@]}"; do
 	echo "${value}..."
 	${command//'{val}'/$value}
+	wait
 done
