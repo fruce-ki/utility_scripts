@@ -278,7 +278,7 @@ def do_foreach(flist, comm, comments=False, progress=True, out=(None,None,None),
         # Redirect output.
         if outfiles:
             outstream = open(outfiles[i], 'w')
-        # Do.
+        # Verbose stuff.
         try:
             see = " ".join(command)
             if log:
@@ -289,6 +289,7 @@ def do_foreach(flist, comm, comments=False, progress=True, out=(None,None,None),
                 sys.stderr.write(ml.infostring("DO: "+ see))
         except IOError:
             pass
+        # Do the thing.
         subprocess.call(" ".join(command), stdout=outstream, shell=True)
         # Optionally identify iteration.
         try:
@@ -1124,8 +1125,8 @@ def main(args):
                                 help=" Log this command to ./commands.log.")
     parser.add_argument('-c','--comments', action='store_true',
                                 help=" Include commented info to STDOUT or files. (Default don't include)")
-    parser.add_argument('-C','--STDERRcomments', action="store_false",
-                                help=" Do NOT show info in STDERR. (Default show)")
+    parser.add_argument('-C','--STDERRcomments', action="store_true",
+                                help=" Show info in STDERR. (Default don't show)")
     parser.add_argument('-s','--sep', type=str, default=["\t"], nargs='+',
                                 help=" A list of input field separators. The first value \
                                 will be used for all output. (Default \\t, bash syntax for tab: $'\\t').")
@@ -1234,7 +1235,7 @@ def main(args):
 
     if params.log:
         ml.log_command()
-    if params.STDERRcomments:
+    if not params.STDERRcomments:
         sys.stderr.write(ml.paramstring())
 
     # TASKS ###################################################################
