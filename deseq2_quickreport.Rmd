@@ -40,7 +40,7 @@ for (tablein in files) {
   )
   
   # Top 100 p
-  print('Top 100 padj \n')
+  print('Top 100 padj')
   print(
     dt[complete.cases(dt), ] %>%
       arrange(padj, abs(log2FoldChange), lfcSE) %>%
@@ -49,7 +49,7 @@ for (tablein in files) {
   )
   
   # Top 100 fc-
-  print('Top 100 down-regulated, padj<0.01 \n')
+  print('Top 100 down-regulated, padj<0.01')
   print(
     dt[complete.cases(dt), ] %>%
       filter(padj < 0.01) %>%
@@ -59,7 +59,7 @@ for (tablein in files) {
   )
   
   # Top 100 fc+
-  print('Top 100 up-regulated, padj<0.01 \n')
+  print('Top 100 up-regulated, padj<0.01')
   print(
     dt[complete.cases(dt), ] %>%
       filter(padj < 0.01) %>%
