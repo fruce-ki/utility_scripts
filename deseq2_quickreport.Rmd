@@ -44,6 +44,7 @@ for (tablein in files) {
   print(
     dt[complete.cases(dt), ] %>%
       arrange(padj, abs(log2FoldChange), lfcSE) %>%
+      select(-pvalue) %>%
       head(n=100)
   )
   
@@ -53,6 +54,7 @@ for (tablein in files) {
     dt[complete.cases(dt), ] %>%
       filter(padj < 0.01) %>%
       arrange(log2FoldChange, padj, lfcSE) %>%
+      select(-pvalue) %>%
       head(n=100)
   )
   
@@ -62,6 +64,7 @@ for (tablein in files) {
     dt[complete.cases(dt), ] %>%
       filter(padj < 0.01) %>%
       arrange(desc(log2FoldChange), padj, lfcSE) %>%
+      select(-pvalue) %>%
       head(n=100)
   )
 }
