@@ -1,0 +1,68 @@
+---
+title: "DESeq2 quick report:"
+output: html_document
+---
+
+%\VignetteEngine{knitr::knitr}
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+pcutoff <- 0.01
+basedir = './results'
+files <-c('out.tsv')
+
+library(data.table)
+library(tidyverse)
+```
+
+```{r}
+for (tablein in files) {
+  print( tablein )
+
+  dt <- fread(file.path(basedir, tablein))
+  
+  # Effect sizes
+  print(
+    ggplot(dt, aes(x=log2FoldChange)) +
+      geom_histogram(bins = 100) +
+      scale_y_sqrt() +
+      ggtitle(tablein)
+  )
+  
+  # Volcano
+  print( 
+    ggplot(dt, aes(x=log2FoldChange, y=-log10(padj))) +
+      geom_point(shape=16, alpha=0.3, size=rel(0.5)) +
+      ggtitle(tablein)
+  )
+  
+  # Top 100 p
+  print('Top 100 padj \n')
+  print(
+    dt[complete.cases(dt), ] %>%
+      arrange(padj, abs(log2FoldChange), lfcSE) %>%
+      head(n=100)
+  )
+  
+  # Top 100 fc-
+  print('Top 100 down-regulated, padj<0.01 \n')
+  print(
+    dt[complete.cases(dt), ] %>%
+      filter(padj < 0.01) %>%
+      arrange(log2FoldChange, padj, lfcSE) %>%
+      head(n=100)
+  )
+  
+  # Top 100 fc+
+  print('Top 100 up-regulated, padj<0.01 \n')
+  print(
+    dt[complete.cases(dt), ] %>%
+      filter(padj < 0.01) %>%
+      arrange(desc(log2FoldChange), padj, lfcSE) %>%
+      head(n=100)
+  )
+}
+```

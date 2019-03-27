@@ -82,11 +82,12 @@ alias la='ls -A --color=always'
 alias ll='ls -lAL --color=always'
 alias l='ls -lh --color=always'
 
+# Shorthand
+alias q='squeue | grep kimon.fr'
 alias cd..='cd ..'
 alias scr='screen -R'
+alias wd="readlink -f $PWD"
 
-# Shorthand
-alias q='squeue --account=kimon.froussios'
 
 
 # Log current command. Does not work very well on Mac.

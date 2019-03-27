@@ -1,3 +1,5 @@
+#!~/miniconda3/envs/mybasics/bin/perl
+
 $counter = 0 ;
 while( $line = <STDIN> ) {
 	# SAM/BAM header
