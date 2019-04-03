@@ -45,14 +45,14 @@ bind "set mark-symlinked-directories on"
 shopt -s cmdhist
 
 # Huge history. Doesn't appear to slow things down, so why not?
-HISTSIZE=500000
+HISTSIZE=500
 HISTFILESIZE=100000
 
 # Avoid duplicate entries
 HISTCONTROL="erasedups:ignoreboth"
 
 # Prepend cd to directory names automatically
-shopt -s autocd 2> /dev/null
+#shopt -s autocd 2> /dev/null
 # Correct spelling errors during tab-completion
 shopt -s dirspell 2> /dev/null
 # Correct spelling errors in arguments supplied to cd
@@ -86,7 +86,7 @@ alias l='ls -lh --color=always'
 alias q='squeue | grep kimon.fr'
 alias cd..='cd ..'
 alias scr='screen -R'
-alias wd="readlink -f $PWD"
+alias wd='readlink -f $PWD'
 
 
 
@@ -102,6 +102,12 @@ loglast() {
     echo $(date "+%Y-%m-%d %H:%M:%S")$'\t\t'${comm} >> ./commands.log
 }
 
+# Sometimes I want to delete the last command because something went wrong 
+unloglast() {
+	# There's always a new line at the end, so truncate two lines, then re-add a new line.
+	tail -n 2 commands.log | wc -c | xargs -I {} truncate commands.log -s -{}
+	echo '' >> commands.log
+}
 
 # Find my stuff
 export PATH="$PATH:$HOME/bin:$HOME/utility_scripts"
