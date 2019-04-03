@@ -40,21 +40,30 @@ names(dt)[which(names(dt)==opt$groupCol)] <- 'sexygroup666'
 names(dt)[which(names(dt)==opt$targetCol)] <- 'sexyid666'
 
 for (gr in groupNames){
+  # Group separately guides that are present andguides that are not present.
+  nonzero <- rowSums(dt[, -c(1,2)]) > 0
   # Relevant rows
   sel <- dt$sexygroup666 == gr
-  # Number of relevant guides
-  n <- sum(sel)
+  # Number of guides
+  nx <- sum(sel & nonzero)
+  nz <- sum(sel & !nonzero)
   # Number of subgroups to split into, decimals rounded up. The last group will have fewer guides if division was not whole.
-  splitN <- floor(n / opt$guidesPerGene) + 1
+  splitX <- floor(nx / opt$guidesPerGene) + 1
+  splitZ <- floor(nz / opt$guidesPerGene) + 1
   # Create new groupNames of suffixes
-  newGroups <- paste0(gr, '_', rep(1:splitN, each = opt$guidesPerGene))
+  newGroupsX <- paste0(gr, '_X_', rep(1:splitX, each = opt$guidesPerGene))
+  newGroupsZ <- paste0(gr, '_Z_', rep(1:splitZ, each = opt$guidesPerGene))
   # Truncate extra spaces (due to having rounded up)
-  newGroups <- newGroups[1:n]
+  newGroupsX <- newGroupsX[1:nx]
+  newGroupsZ <- newGroupsZ[1:nz]
   # Shuffle for good measure
-  if (!opt$nonrandom)
-    newGroups <- sample(newGroups)
+  if (!opt$nonrandom) {
+    newGroupsX <- sample(newGroupsX)
+    newGroupsZ <- sample(newGroupsZ)
+  }
   # And put the new values back into the table
-  dt[sel, sexygroup666 := newGroups]
+  dt[sel & nonzero, sexygroup666 := newGroupsX]
+  dt[sel & !nonzero, sexygroup666 := newGroupsZ]
 }
 
 # Restore original column names
