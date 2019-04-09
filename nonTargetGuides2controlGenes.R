@@ -10,7 +10,7 @@ spec = matrix(c(
   'mincount'      , 'm', 2, "numeric"  , "Minimum count to separate control guides into detected and non (1).",
   'guidesPerGene' , 'n', 2, "numeric"  , "Desired number of guides per control \"gene\" (6).",
   'outFile'       , 'o', 2, "character", "Output file (overwrite input file).",
-  'nonrandom'     , 'r', 0, "logical"  , "Assign guides to groups in order of appearance instead of randomly (FALSE).",
+  'nonrandom'     , 'r', 0, "logical"  , "Assign guides to groups in order of abundance instead of randomly (FALSE).",
   'seed'          , 's', 2, "numeric"  , "Seed for reproducible pseudo-randomisation.",
   'targetCol'     , 't', 2, "character", "Name of the column containing the guide names ('id').",
   'reference'     , 'z', 2, "character", "Comma separated column names across which to apply mincount for the controls. (if NULL, then all)"
