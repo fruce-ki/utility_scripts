@@ -11,10 +11,21 @@ header <- as.logical(args[6])
 library(data.table)
 
 df <- fread(infile, header=header)
+
+# In a headerless file, cols must be positional indices.
+# In a headered file, cols must be given by name.
 if (! header)
-  cols <- as.nu
-df[, newname, with=FALSE] <- rowSums(df[, cols, with=FALSE])
+  cols <- as.numeric(cols)
+
+# Sum. Give a temporary new name to the new column, to prevent clash with existing columns in case of replace==TRUE.
+v <- rowSums(df[, cols, with=FALSE])
+df[, newsexycolumnname666 := v]
+
+# Drop the old columns.
 if (replace) {
-  df[, cols, with=FALSE] <- NULL
+  df[, cols] <- NULL
 }
-fwrite(df, file=outfile, header=header)
+# Now name the new column properly.
+names(df)[length(names(df))] <- newname
+
+fwrite(df, file=outfile, col.names=header, row.names=FALSE)
