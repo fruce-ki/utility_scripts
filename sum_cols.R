@@ -28,4 +28,4 @@ if (replace) {
 # Now name the new column properly.
 names(df)[length(names(df))] <- newname
 
-fwrite(df, file=outfile, col.names=header, row.names=FALSE)
+fwrite(df, file=outfile, col.names=header, row.names=FALSE, sep="\t")
