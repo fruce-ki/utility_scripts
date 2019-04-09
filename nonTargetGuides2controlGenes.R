@@ -48,7 +48,7 @@ for (gr in groupNames){
   meanCount <- NULL
   if (is.null(opt$reference)) {
     # All samples == columns excluding the guide and group ids.
-    meanCount <- rowMeans(dt[, -c(grpidx, tgtidx), with=FALSE])
+    meanCount <- rowMeans(dt[, -c('sexygroup666', 'sexyid666'), with=FALSE])
   } else {
     # Specified samples only.
     meanCount <- rowMeans(dt[, c(opt$reference), with=FALSE])
