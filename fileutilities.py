@@ -713,7 +713,7 @@ def get_random_columns(flist, colSep=["\t"], k=1, header=False, index=None, merg
     return result
 
 
-def append_columns(flist, colSep=["\t"], header=False, index=None):
+def append_columns(flist, colSep=["\t"], header=False, index=None, merge=True):
     """Append all columns from the files, as they are.
 
     The order of the columns in the output follows the order of the columns in
@@ -757,6 +757,51 @@ def append_columns(flist, colSep=["\t"], header=False, index=None):
     return result
 
 
+def dedup_columns(flist, cols=[0,1], colSep=["\t"], merge=True):
+    """Merge duplicate columns from the files, as they are.
+
+    This function also supports key-aware appending, using outer-join, when a
+    row index is specified.
+
+    Args:
+        flist: A list/FilesList of files to combine.
+        colSep[str]: A list of characters used as field delimiters.
+                    (Default ["\t"])
+        cols[int] : A list of positional indexes of the
+                    desired columns. (Default [0,1]).
+
+    Returns:
+        pandas.Dataframe
+    """
+    try:
+        flist.aliases[0]
+    except AttributeError:
+        flist = FilesList(flist)
+    # Determine how many columns each file has.
+    numofcols = count_columns(flist, colSep=colSep)
+    # Delegate fetching all the columns.
+    result = []
+    keyhead = None
+    for f, (myfile, myalias) in flist.enum():
+        # List the columns.
+        allcols = [i for i in range(0,numofcols[f])]
+        df = get_columns(FilesList(files=[myfile], aliases=[myalias]), cols=allcols,
+        						colSep=colSep, header=False, merge=False, index=None)[0]
+        # Collect duplicated values, drop duplicated columns, assign values to new column.
+        v = df.iloc[:,cols].apply(lambda x: 
+                                    x.unique()[0] if x.unique().shape[0]==1 else x.unique()[1], 
+                                axis=1)
+        df.drop(df.columns[cols], axis=1, inplace=True)
+        df = pd.concat([df, v], axis=1, join='outer', sort=False, ignore_index=False)
+        if not keyhead:
+            keyhead = df.index.name
+        result.append(df)
+    # Merge.
+    if merge:
+        result = [pd.concat(result, axis=1, join='outer', ignore_index=False, sort=False), ]
+        result[0].index.name = keyhead
+    return result    
+    
 def get_crosspoints(flist, cols=[0], rows=[0], colSep=["\t"], header=False, index=None, merge=True):
     """ Get the values at selected rows and columns.
 
@@ -1178,6 +1223,9 @@ def main(args):
                                 With --index, the index column will not be part of the random selection.")
     parser.add_argument('--appnd', action='store_true',
                                 help="Append all the columns of the target files into a single table.")
+    parser.add_argument('--mrgdups', type=int, nargs='+',
+    							help="Combine gappy duplicate columns into a single column with all the values.\
+    							Columns are specified by their 0-based positional index given as arguments here.")
     parser.add_argument('--valset', nargs=3,
                                 help="Get the non-redundant set of values in the given row/column. \
                                 Takes three arguments: (i) orientation 'r' for row or 'c' for column, \
@@ -1400,6 +1448,50 @@ def main(args):
                 sys.stderr.write(ml.donestring("appending columns, index "+ str(idx is not None)))
         except IOError:
             pass
+
+
+    # MERGE duplicate columns. ---------------------------------------------------------
+    elif params.mrgdups:
+        # Create output filenames, if applicable. If [], then STDOUT.
+        outfiles = make_names(flist.aliases, (outdir, outpref, outsuff))
+        outstream = sys.stdout
+        merge = False if outfiles else True
+        # Do.
+        result = dedup_columns(flist, colSep=params.sep, cols=params.mrgdups)
+		# I need the for loop to iterate at least once. Relevant for STDIN input, since I have no input files listed then.
+        if flist == []:
+            flist.append("<STDIN>")
+        if merge:
+            try:
+                if params.comments:
+                    # Embed call info at beginning of output.
+                    outstream.write(ml.paramstring("SOURCE: " + myfile))
+                if params.metadata:
+                    # Dump all the metadata from all the merged input sources.
+                    for i, (myfile, myalias) in flist.enum():
+                        outstream.write(metadata[myfile])
+                outstream.write( result[0].to_csv(header=params.relabel, index=params.index, sep=params.sep[0]))
+            except IOError:
+                pass
+        else:
+            for i, (myfile, myalias) in flist.enum():
+                outstream = open(outfiles[i], 'w')
+                try:
+                    if params.comments:
+                        # Embed call info at beginning of output.
+                        outstream.write(ml.paramstring("SOURCE: " + myfile))
+                    if params.metadata:
+                        outstream.write(metadata[myfile])
+                    outstream.write( result[i].to_csv(header=params.relabel, index=params.index, sep=params.sep[0]))
+                except IOError:
+                    pass
+                finally:
+                    outstream.close()
+        if params.STDERRcomments:
+            try:
+                sys.stderr.write(ml.donestring("deduplicating columns."))
+            except IOError:
+                pass
 
 
     # COUNT columns. ----------------------------------------------------------
