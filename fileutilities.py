@@ -543,7 +543,7 @@ def get_columns(flist=[None], cols=[0], colSep=["\t"], header=False, index=None,
         result.append(df)
     # Merge.
     if merge:
-        result = [pd.concat(result, axis=1, join='outer', ignore_index=False), sort=True]
+        result = [pd.concat(result, axis=1, join='outer', ignore_index=False, sort=True), ]
         result[0].index.name = keyhead
     return result
 
