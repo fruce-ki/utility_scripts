@@ -543,7 +543,7 @@ def get_columns(flist=[None], cols=[0], colSep=["\t"], header=False, index=None,
         result.append(df)
     # Merge.
     if merge:
-        result = [pd.concat(result, axis=1, join='outer', ignore_index=False, sort=True), ]
+        result = [pd.concat(result, axis=1, join='outer', ignore_index=False, sort=False), ]
         result[0].index.name = keyhead
     return result
 
@@ -752,7 +752,7 @@ def append_columns(flist, colSep=["\t"], header=False, index=None):
         data.append( df )
     # Merge. Row indexes will have been assigned by get_columns(), if applicable.
     keyhead = data[0].index.name
-    result = pd.concat(data, axis=1, join="outer", ignore_index=False, sort=True)
+    result = pd.concat(data, axis=1, join="outer", ignore_index=False, sort=False)
     result.index.name = keyhead
     return result
 
