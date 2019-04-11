@@ -639,6 +639,7 @@ def get_columns_manual(file=None, cols=[0], colSep=["\t"], header=False, index=N
         expandedcols.append("my_garbage_label_row_key")
     # Package data nicely.
     df = pd.DataFrame(data=values)
+    df.astype(str, copy=False)   		# Uniform string type is simplest and safest.
     df = prepare_df(df, myalias=alias, keyCol=index, header=header, cols=expandedcols,
                     keyhead=keyhead, appendNum=True if len(expandedcols)>1 else False)
     if index is not None:
@@ -713,17 +714,11 @@ def get_random_columns(flist, colSep=["\t"], k=1, header=False, index=None, merg
     return result
 
 
-def append_columns(flist, colSep=["\t"], header=False, index=None, merge=True):
+def append_columns(flist, colSep=["\t"], header=False, index=None, merge=True, type='outer'):
     """Append all columns from the files, as they are.
 
-    The order of the columns in the output follows the order of the columns in
-    the files and the order of the files. The files don't need to have the same
-    number of columns. It is your responsibility to ensure sensible consistency
-    of number and order of rows across files, otherwise the combined data may
-    be nonsensical.
-
-    This function also supports key-aware appending, using outer-join, when a
-    row index is specified.
+    Inner or outer concatenation by a unique index, or index-less concatenation.
+    Ideally used with a unique index and for only for same-length files.
 
     Args:
         flist: A list/FilesList of files to combine.
@@ -732,6 +727,10 @@ def append_columns(flist, colSep=["\t"], header=False, index=None, merge=True):
         header(bool): First non-comment line as column labels. (Default False)
         index(int): Column to use as row index (same in all files).
                     (Default None)
+                    If None, the number of rows can differ between files and will be
+                    padded (outer) or truncated (inner), otherwise the row number must
+                    be the same in all files. 
+        type(str): Join type 'inner' or 'outer'.
     Returns:
         pandas.Dataframe
     """
@@ -752,8 +751,91 @@ def append_columns(flist, colSep=["\t"], header=False, index=None, merge=True):
         data.append( df )
     # Merge. Row indexes will have been assigned by get_columns(), if applicable.
     keyhead = data[0].index.name
-    result = pd.concat(data, axis=1, join="outer", ignore_index=False, sort=False)
+    result = pd.concat(data, axis=1, join=type, ignore_index=False, sort=False)
     result.index.name = keyhead
+    return result
+
+
+# Helper function
+def getDuplicateColumns(df):
+    '''
+    Get a list of duplicate columns.
+    It will iterate over all the columns in dataframe and find the columns whose contents are duplicate.
+    
+    Stolen from https://thispointer.com/how-to-find-drop-duplicate-columns-in-a-dataframe-python-pandas/ .
+    
+    Args:
+    	df: Dataframe object
+    Returns:
+        List of columns whose contents are redudnant (one occurence will of each will not be included in the list).
+    '''
+    duplicateColumnNames = set()
+    # Iterate over all the columns in dataframe
+    for x in range(df.shape[1]):
+        # Select column at xth index.
+        col = df.iloc[:, x]
+        # Iterate over all the columns in DataFrame from (x+1)th index till end
+        for y in range(x + 1, df.shape[1]):
+            # Select column at yth index.
+            otherCol = df.iloc[:, y]
+            # Check if two columns at x 7 y index are equal
+            if col.equals(otherCol):
+                duplicateColumnNames.add(df.columns.values[y])
+    return list(duplicateColumnNames)
+    
+    
+def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='outer', saveHeader=False):
+    """Incrementally merge tables.
+
+	Join the first two files and then join the third file to the merged first two, etc.
+	For assymetric joins (left or right) the order of files in flist can change the outcome.
+	For symmetric joins (inner or outter) the order of files should not change the outcome.
+
+    Args:
+        flist: A list/FilesList of files to combine.
+        colSep[str]: A list of characters used as field delimiters.
+                    (Default ["\t"])
+        header(bool): Crop first non-comment line as column labels. (Default False)
+        index(int): Column to use as row index (same in all files).
+                    (Default 0)
+        type(str): 'left', 'right', 'outer' or 'inner' merge. (Default outer)
+        saveHeader(bool): Exclude the first row from sorting upon merging. (False)
+                        Necessary when the header is not to be cropped.
+    Returns:
+        pandas.Dataframe
+    """
+    try:
+        flist.aliases[0]
+    except AttributeError:
+        flist = FilesList(flist)
+    # Determine how many columns each file has.
+    numofcols = count_columns(flist, colSep=colSep)
+    # Fetch and incrementally merge.
+    result = None
+    for f, (myfile, myalias) in flist.enum():
+        # List the columns and remove the index one from among them.
+        cols = [i for i in range(0,numofcols[f])]
+        df = get_columns(FilesList(files=[myfile], aliases=[myalias]), cols=cols, 
+                        colSep=colSep, header=header, merge=False, index=index)[0]
+        if (f == 0):
+            result = df
+        else:
+            if saveHeader:
+                # Extract headers, merge headers and tables separately, then put merged header on top of the merged table.
+                hnew = pd.merge(left=result.iloc[[0]], right=df.iloc[[0]], sort=False, 
+                                left_index=True, right_index=True, how="outer")
+                result = pd.concat([hnew, pd.merge(left=result.iloc[1:,:], right=df.iloc[1:,:], how=type, on=None,
+                                                   left_index=True, right_index=True, 
+                                                   sort=False, suffixes=('','_'+ myalias))],
+                                    axis=0, ignore_index=False, sort=False)
+            else:
+                result = pd.merge(left=result, right=df, how=type, on=None,
+                                  left_index=True, right_index=True, 
+                                  sort=False, suffixes=('','_'+ myalias))
+    # The column merged on accumulates a duplicate for each table. Drop them.
+    # If the index columns are not exact duplicates (due to gappy rows), 
+    # dedup_columns can be used afterwaredsto merged the columns).
+    result.drop(columns=getDuplicateColumns(result), inplace=True)
     return result
 
 
@@ -788,9 +870,7 @@ def dedup_columns(flist, cols=[0,1], colSep=["\t"], merge=True):
         df = get_columns(FilesList(files=[myfile], aliases=[myalias]), cols=allcols,
         						colSep=colSep, header=False, merge=False, index=None)[0]
         # Collect duplicated values, drop duplicated columns, assign values to new column.
-        v = df.iloc[:,cols].apply(lambda x: 
-                                    x.unique()[0] if x.unique().shape[0]==1 else x.unique()[1], 
-                                axis=1)
+        v = df.iloc[:, cols].apply(lambda x: next(s for s in x.unique() if s), axis=1)
         df.drop(df.columns[cols], axis=1, inplace=True)
         df = pd.concat([df, v], axis=1, join='outer', sort=False, ignore_index=False)
         if not keyhead:
@@ -1221,8 +1301,20 @@ def main(args):
     parser.add_argument('--rndcols', type=int,
                                 help="Randomly select this many columns from the target files. \
                                 With --index, the index column will not be part of the random selection.")
-    parser.add_argument('--appnd', action='store_true',
-                                help="Append all the columns of the target files into a single table.")
+    parser.add_argument('--appnd', type=str,
+                                help="Append all the columns from same-length target files into a single table. \
+                                Can be 'outer' or 'inner' join. If index is used, the values must be unique \
+                                within each file.")
+    parser.add_argument('--merge', nargs=2, type=str,
+                                help="Merge table files. Index may contain duplicates and files may differ in dimensions. \
+                                The first column of each file will be used as row index to merge on, \
+                                overriding the presence/absence of the -i flag. \
+                                First argument is type: 'left', 'right', 'inner', 'outer'. \
+								Second argument is 'yes', 'no', that a header is present. This is \
+								necessary, when you don't want to remove a header with -l, because \
+								merge will sort the rows, resulting in the header appearing \
+								at a random internal row. \
+                                For left/right joins, the order of files affects the result.")
     parser.add_argument('--mrgdups', type=int, nargs='+',
     							help="Combine gappy duplicate columns into a single column with all the values.\
     							Columns are specified by their 0-based positional index given as arguments here.")
@@ -1430,12 +1522,15 @@ def main(args):
                 pass
 
 
-    # APPEND columns. ---------------------------------------------------------
-    elif params.appnd:
+    # APPEND columns or MERGE table. ---------------------------------------------------------
+    elif params.appnd or params.merge:
         idx = None
-        if params.index:
-            idx = 0
-        df = append_columns(flist, colSep=params.sep, header=params.labels, index=idx)
+        if params.appnd:
+            if params.index:
+                idx = 0
+            df = append_columns(flist, colSep=params.sep, header=params.labels, index=idx, type=params.appnd)
+        else:
+            df = merge_tables(flist, colSep=params.sep, header=params.labels, index=0, type=params.merge[0], saveHeader=params.merge[1] == "yes")
         try:
             if params.comments:
                 ml.parastring()
@@ -1445,7 +1540,10 @@ def main(args):
                     outstream.write(metadata[myfile])
             sys.stdout.write(df.to_csv(sep=params.sep[0], header=params.relabel, index=params.index))
             if params.STDERRcomments:
-                sys.stderr.write(ml.donestring("appending columns, index "+ str(idx is not None)))
+                if params.appnd:
+                    sys.stderr.write(ml.donestring(params.appnd[0] +" append of columns, index "+ str(idx is not None)))
+                else:
+                    sys.stderr.write(ml.donestring(params.merge[0] +" merge of tables"))
         except IOError:
             pass
 
@@ -1489,7 +1587,7 @@ def main(args):
                     outstream.close()
         if params.STDERRcomments:
             try:
-                sys.stderr.write(ml.donestring("deduplicating columns."))
+                sys.stderr.write(ml.donestring("deduplicating columns"))
             except IOError:
                 pass
 
