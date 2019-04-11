@@ -784,7 +784,7 @@ def getDuplicateColumns(df):
     return list(duplicateColumnNames)
     
     
-def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='outer', saveHeader=False):
+def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='outer', saveHeader=False, dedup=False):
     """Incrementally merge tables.
 
 	Join the first two files and then join the third file to the merged first two, etc.
@@ -834,8 +834,9 @@ def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='
                                   sort=False, suffixes=('','_'+ myalias))
     # The column merged on accumulates a duplicate for each table. Drop them.
     # If the index columns are not exact duplicates (due to gappy rows), 
-    # dedup_columns can be used afterwaredsto merged the columns).
-    result.drop(columns=getDuplicateColumns(result), inplace=True)
+    # dedup_columns can be used afterwards on the merged file).
+    if dedup:
+        result.drop(columns=getDuplicateColumns(result), inplace=True)
     return result
 
 
@@ -1305,15 +1306,13 @@ def main(args):
                                 help="Append all the columns from same-length target files into a single table. \
                                 Can be 'outer' or 'inner' join. If index is used, the values must be unique \
                                 within each file.")
-    parser.add_argument('--merge', nargs=2, type=str,
+    parser.add_argument('--merge', nargs=3, type=str,
                                 help="Merge table files. Index may contain duplicates and files may differ in dimensions. \
-                                The first column of each file will be used as row index to merge on, \
-                                overriding the presence/absence of the -i flag. \
+                                The first column of each file will be used as row index to merge on regardless of -i flag. \
                                 First argument is type: 'left', 'right', 'inner', 'outer'. \
-								Second argument is 'yes', 'no', that a header is present. This is \
-								necessary, when you don't want to remove a header with -l, because \
-								merge will sort the rows, resulting in the header appearing \
-								at a random internal row. \
+								Second argument is preserve first row: 'yes', 'no' (because merge sorts rows) \
+								Third argument is deduplicate: 'yes', 'no' (index columns get repeated for each file. \
+                                For very large tables, best don't deduplicate, and use --mrgdups on the output). \
                                 For left/right joins, the order of files affects the result.")
     parser.add_argument('--mrgdups', type=int, nargs='+',
     							help="Combine gappy duplicate columns into a single column with all the values.\
@@ -1530,7 +1529,8 @@ def main(args):
                 idx = 0
             df = append_columns(flist, colSep=params.sep, header=params.labels, index=idx, type=params.appnd)
         else:
-            df = merge_tables(flist, colSep=params.sep, header=params.labels, index=0, type=params.merge[0], saveHeader=params.merge[1] == "yes")
+            df = merge_tables(flist, colSep=params.sep, header=params.labels, index=0, type=params.merge[0], 
+                              saveHeader=params.merge[1] == "yes", dedup=params.merge[2] == "yes")
         try:
             if params.comments:
                 ml.parastring()
