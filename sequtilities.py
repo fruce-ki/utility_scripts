@@ -1,4 +1,4 @@
-#!/homes/kfroussios/bin/python3
+#!~/miniconda3/envs/mybasics/bin/python3
 
 """sequtilities.py
 
@@ -20,9 +20,9 @@ import mylogs as ml
 
 def collect_starFinalLogs(flist, all=False):
     """Combine the listed Log.final.out files into a pandas Dataframe.
-    
+
     File identifiers (filenames) will be trimmed at '_Log'.
-    
+
     Args:
         flist: A list/FilesList of input files.
         all(bool): Show all fields (False).
@@ -36,7 +36,7 @@ def collect_starFinalLogs(flist, all=False):
     else:
         rows = [4, 5, 8, 9, 23, 25, 27, 28, 29]
     df = fu.get_crosspoints(flist, cols=[1], rows=rows, colSep=["\|"], header=False, index=0, merge=True)[0]
-    
+
     spaces = re.compile("\s{2,}|\t")
     quotes = re.compile("\"")
     # Clean up padding from cells.
@@ -60,13 +60,14 @@ def collect_starFinalLogs(flist, all=False):
     return df
 
 
+# Helper function
 def gtf2pandas(flist):
     """Import GTF files as pandas.DataFrames.
-    
-    Two columns will be added: the parent_id (gene) and target_id (transcript), 
+
+    Two columns will be added: the parent_id (gene) and target_id (transcript),
     as extracted from the attributes column. The attributes column itself will remain as is.
     The choice of column names was made for compatibility with sleuth.
-    
+
     Args:
         flist: A list/FilesList of GTF files.
     Returns:
@@ -83,14 +84,13 @@ def gtf2pandas(flist):
         result.append(gtf)
     return result
 
-
 def gtf2premrna(gtfs, filter=True):
     """Infer pre-mRNA from a GTF annotation.
-    
+
     Create a new GTF with the earliest start and latest finish associated with each gene_id.
-    
+
     Args:
-        gtfs: A list of GTF pandas.DataFrames, imported using gtf2pandas() from this library. 
+        gtfs: A list of GTF pandas.DataFrames, imported using gtf2pandas() from this library.
         filter(bool): Remove pre-mRNA models for single-model single-exon genes.
                     This reduces model inflation/duplication.
     Returns:
@@ -174,17 +174,23 @@ def main(args):
     parser.add_argument('--t2g', type=str, choices=['header', 'nohead'],
                                 help="Extract transcript-gene ID pairs from a GTF file. The value determines\
                                 whether to print a column header line or not.")
+    parser.add_argument('--samFltrRegs', type=str,
+                                help="Filter a headerless SAM file stream according to a SAM header file \
+                                that contains the desired group of regions. This works only with the 'D' INPUTTYPE. \
+                                The input stream is typically the output of `samtools view <somefile.bam>`. \
+                                The output is streamed to STDOUT, typically to be piped back to `samtools view -b`. \
+                                The header file will be prepended to the output stream.")
     params = parser.parse_args(args)
-    
-    
+
+
     # CALL DETAILS.
     if params.log:
         import mylogs
         mylogs.log_command()
-    if params.STDERRcomments:
-        sys.stderr.write(ml.paramstring())
-        
-    
+#    if params.STDERRcomments:
+#        sys.stderr.write(ml.paramstring())
+
+
     # INPUT.
     flist = None
     if params.INPUTTYPE == 'P':
@@ -201,23 +207,23 @@ def main(args):
         # Create the FilesList by supplying a direct list of files.
         flist = fu.FilesList(params.TARGET)
     elif params.INPUTTYPE == 'D':
-        # Data will be read from STDIN. No files needed. Make an empty list. 
+        # Data will be read from STDIN. No files needed. Make an empty list.
         # Not all functions will switch to STDIN given this. Several will simply do nothing.
-        flist = FilesList()
+        flist = fu.FilesList()
     else:
         sys.exit(ml.errstring("Unknown INPUTTYPE."))
-    
+
     # OUTPUT.
     outdir, outpref, outsuff = None, None, None
     if params.out:
         outdir = fu.expand_fpaths([params.out[0]])[0]
         outpref = params.out[1]
         outsuff = params.out[2]
-        
-        
+
+
     ### TASKS ###
-    
-    
+
+
     # Combine STAR LOGS.
     if params.StarFinalLogs:
         # Do it.
@@ -236,8 +242,8 @@ def main(args):
         # Done.
         if params.STDERRcomments:
             sys.stderr.write(ml.donestring("collecting STAR final logs"))
-    
-    
+
+
     # Create PRE-MRNA GTF.
     elif params.premRNA:
         # Import data and calculate the result.
@@ -305,10 +311,36 @@ def main(args):
                 pass
 
 
-#     # All done.     
+    # FILTER a BAM file by REGION
+    elif params.samFltrRegs:
+        if not params.INPUTTYPE == 'D':
+            sys.exit("The only allowed INPUTTYPE is 'D' for streaming of headerless SAM content.")
+        # Get regions from SAM header file
+        regf = open(params.samFltrRegs, 'r')
+        regions = list()
+        p = re.compile('\sSN:(\S+)')
+        for line in regf:
+            sys.stdout.write(line)
+            m = p.search(line)
+            if m:
+                regions.append(m.group(1))
+        regf.close()
+        # Parse SAM stream and output only the matching lines.
+        p = re.compile('\S+\s+\S+\s+(\S+)')
+        for r in sys.stdin:
+            m = p.match(r)
+            if m and m.group(1) in regions:
+                sys.stdout.write(r)
+        if params.STDERRcomments:
+            try:
+                sys.stderr.write(ml.donestring("filtering regions in SAM stream."))
+            except IOError:
+                pass
+
+#     # All done.
 #     if params.STDERRcomments:
-#         sys.stderr.write(ml.donestring())   
-    
+#         sys.stderr.write(ml.donestring())
+
 
 
 
@@ -318,7 +350,7 @@ def main(args):
 # Call main only if the module was executed directly.
 if __name__ == "__main__":
     main(sys.argv[1:])
-    
+
     sys.exit(0)
-    
+
 #EOF
