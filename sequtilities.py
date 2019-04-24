@@ -1,4 +1,4 @@
-#!~/miniconda3/envs/mybasics/bin/python3
+#!/users/kimon.froussios/miniconda3/envs/mybasics/bin/python3
 
 """sequtilities.py
 
@@ -333,7 +333,7 @@ def main(args):
                 sys.stdout.write(r)
         if params.STDERRcomments:
             try:
-                sys.stderr.write(ml.donestring("filtering regions in SAM stream."))
+                sys.stderr.write(ml.donestring("filtering regions in SAM stream"))
             except IOError:
                 pass
 
