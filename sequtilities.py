@@ -326,7 +326,7 @@ def main(args):
                 regions.append(m.group(1))
         regf.close()
         # Parse SAM stream and output only the matching lines.
-        p = re.compile('\S+\s+\S+\s+(\S+)')
+        p = re.compile('.+?\t\S+\t(\S+)')
         for r in sys.stdin:
             m = p.match(r)
             if m and m.group(1) in regions:
