@@ -1,4 +1,13 @@
 #!/usr/bin/sh
+#
+#SBATCH --get-user-env
+#SBATCH --mem=10000
+#SBATCH -J mageck-wf
+#SBATCH -N 1
+#SBATCH --ntasks-per-node=1
+#SBATCH --ntasks-per-core=1
+#SBATCH --output=mageck-wf.out
+#SBATCH --error=mageck-wf.err
 
 ## Parameters ##
 function usage() {
@@ -101,7 +110,7 @@ fileutilities.py T ${mageckdir}/*${renamed}/genes_pos_stats.txt ${mageckdir}/*${
 echo "Merge all guide-level outputs and clean up redundant columns."
 guides="${mageckdir}/guides_all.tsv"
 fileutilities.py T $library ${mageckdir}/*${renamed}/guides_stats.txt -r -i --appnd outer > $guides
-srun --mem 10000 fileutilities.py T $guides -r --mrgdups $(head -n1 $guides | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++} print "\n";') > ${guides/.tsv/_dedup.tsv}
+fileutilities.py T $guides -r --mrgdups $(head -n1 $guides | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++} print "\n";') > ${guides/.tsv/_dedup.tsv}
 guides="${guides/.tsv/_dedup.tsv}"
 nc=$(fileutilities.py T $guides --cntcols)
 fileutilities.py T $guides -r --cols $(expr $nc - 1) $(expr $nc - 2) 0 $(expr $nc - 3) 1:$(expr $nc - 4) > ${guides/.tsv/_reord.tsv}
@@ -109,8 +118,8 @@ guides="${guides/.tsv/_reord.tsv}"
 
 echo "Merge guide-level and gene-level outputs and clean up redundant columns."
 $out="${mageckdir}/guides+genes.tsv"
-srun --mem 10000 fileutilities.py T $guides $genes -r --merge outer yes no > $out
-srun --mem 10000 fileutilities.py T $out -r --mrgdups $(head -n1 $out | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++}') > ${out/.tsv/_dedup.tsv}
+fileutilities.py T $guides $genes -r --merge outer yes no > $out
+fileutilities.py T $out -r --mrgdups $(head -n1 $out | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++}') > ${out/.tsv/_dedup.tsv}
 out="${out/.tsv/_dedup.tsv}"
 nc=$(fileutilities.py T $out --cntcols)
 fileutilities.py T $out -r --cols $(expr $nc - 1) 0:$(expr $nc - 2) > ${out/.tsv/_reord.tsv}
