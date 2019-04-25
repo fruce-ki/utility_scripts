@@ -79,8 +79,6 @@ fi
 empty=""
 
 
-exit 0
-
 echo "Pre-process to BAM to FASTQ, align, and count."
 nextflow run zuberlab/crispr-process-nf $revcomp --inputDir $indir --library $library --padding_base $pad --spacer_length $spacer --barcode_demux_length $demux --barcode_random_length $umi --barcodes $barcodes --outputDir $countsdir -profile ii2 --resume
 $counts="${countsdir}/counts/${library/txt/$empty}/counts_mageck.txt"
