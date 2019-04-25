@@ -40,37 +40,46 @@ while getopts 'i:l:b:r:n:c:m:C:G:z:Z:p:s:u:d:E' flag; do
   esac
 done
 # Check we got the minimum set
-if [ -z "$indir" ] || [-z "$library" ] || [-z "$barcodes"] || [-z "$revcomp"] || [-z "$contrasts"] || [-z "$countsdir"] || [ -z "$mageckdir" ]; then
+if [[ -z "$indir" || -z "$library" || -z "$barcodes" || -z "$revcomp" || -z "$contrasts" || -z "$countsdir" || -z "$mageckdir" ]]; then
   usage
   exit 1
 fi
+
 # Defaults
 if [ "$revcomp" == "yes" ]; then
   revcomp="--reverse_complement"
 else
   revcomp=""
 fi
-if [ -z $pad ]; then
+
+if [ -z "$pad" ]; then
   pad="C"
 fi
+
 if [ -z "$countthresh" ]; then
-  $countthresh=50
+  countthresh=50
 fi
+
 if [ -z "$spacer" ]; then
-  $spacer=20
+  spacer=20
 fi
+
 if [ -z "$umi" ]; then
-  $umi=6
+  umi=6
 fi
 if [ -z "$demux" ]; then
-  $demux=4
+  demux=4
 fi
+
 if [ -z "$entrezfield" ]; then
-  $entrezfield=2
+  entrezfield=2
 fi
 
 ## Workflow ##
-$empty=""
+empty=""
+
+
+exit 0
 
 echo "Pre-process to BAM to FASTQ, align, and count."
 nextflow run zuberlab/crispr-process-nf $revcomp --inputDir $indir --library $library --padding_base $pad --spacer_length $spacer --barcode_demux_length $demux --barcode_random_length $umi --barcodes $barcodes --outputDir $countsdir -profile ii2 --resume
