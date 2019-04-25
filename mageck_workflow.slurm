@@ -93,7 +93,7 @@ fi
 echo "Extract entrez IDs from sgRNA IDs."
 $lib="$(dirname $library)"
 cut -f 1 $library | perl -e '$pat = join "|", split "," $ARGV[0]; while($line=<STDIN>){ if ($line=~/(?<!\w)id(?!\w)/) { print "Entrez\n" } elsif ( $line=~/^($pat)/ ){ print "$1\n" } else { @a = split(/_/, $line); print "$a[$ARGV[2]]\n" }}' $ctrlguides $entrezfield > ${lib}/entrez.txt
-fileutilities.py T $library ${lib}/entrez.txt --appnd -r > ${library}_entrez.txt
+fileutilities.py T $library ${lib}/entrez.txt --appnd outer -r > ${library}_entrez.txt
 library=${library}_entrez.txt
 
 echo "MAGECK."
