@@ -40,7 +40,7 @@ while getopts 'i:l:b:r:n:c:m:C:G:z:Z:p:s:u:d:E' flag; do
   esac
 done
 # Check we got the minimum set
-if [ -z "$indir" || -z "$library" || -z "$barcodes" || -z "$revcomp" || -z "$contrasts" || -z "$countsdir" || -z "$mageckdir" ]; then
+if [ -z "$indir" ] || [-z "$library" ] || [-z "$barcodes"] || [-z "$revcomp"] || [-z "$contrasts"] || [-z "$countsdir"] || [ -z "$mageckdir" ]; then
   usage
   exit 1
 fi
