@@ -134,7 +134,7 @@ out="${out/.tsv/_reord.tsv}"
 
 echo "Add -log10(p)."
 l10="${mageckdir}/tmp_log10p.tsv"
-Rscript ./analysis/p2log10p.R $out $l10
+Rscript ~/utility_scripts/p2log10p.R $out $l10
 fileutilities T $out $l10 -i -r --appnd outer > ${out/.tsv/_l10p.tsv}
 #rm l10
 
