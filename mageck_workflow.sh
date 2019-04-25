@@ -9,7 +9,7 @@ function usage() {
 		exit 1
 }
 # Parse options.
-while getopts 'i:l:b:r:n:c:m:C:G:z:Z:p:s:u:d' flag; do
+while getopts 'i:l:b:r:n:c:m:C:G:z:Z:p:s:u:d:E' flag; do
   case "${flag}" in
     i) indir="${OPTARG}" ;;           # Input directory with unaligned BAMs
     l) library="${OPTARG}" ;;         # sgRNA library
