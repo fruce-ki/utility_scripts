@@ -180,6 +180,9 @@ def main(args):
                                 The input stream is typically the output of `samtools view <somefile.bam>`. \
                                 The output is streamed to STDOUT, typically to be piped back to `samtools view -b`. \
                                 The header file will be prepended to the output stream.")
+    parser.add_argument('--samPatternStats', type=str,
+                                help="Number and location of matches of the pattern in the reads of a SAM stream. \
+                                This works only with the 'D' INPUTTYPE.")
     params = parser.parse_args(args)
 
 
@@ -314,7 +317,7 @@ def main(args):
     # FILTER a BAM file by REGION
     elif params.samFltrRegs:
         if not params.INPUTTYPE == 'D':
-            sys.exit("The only allowed INPUTTYPE is 'D' for streaming of headerless SAM content.")
+            sys.exit("The only allowed INPUTTYPE is 'D' for streaming of header-less SAM content.")
         # Get regions from SAM header file
         regf = open(params.samFltrRegs, 'r')
         regions = list()
@@ -336,6 +339,37 @@ def main(args):
                 sys.stderr.write(ml.donestring("filtering regions in SAM stream"))
             except IOError:
                 pass
+
+    # Adapter STATS from SAM stream
+    # read length distribution, pattern position distribution, pattern match
+    elif params.samPatternStats:
+         if not params.INPUTTYPE == 'D':
+             sys.exit("The only allowed INPUTTYPE is 'D' for streaming of header-less SAM content.")
+         p = re.compile(params.samPatternStats)
+         lengths = list()
+         reads = 0
+         matches = 0
+         positions = list()
+         for line in sys.stdin:
+             seq = line.split("\t")[9]
+             reads = reads + 1
+             lengths.append(len(seq))
+             m = p.search(seq)
+             if m:
+                 matches = matches + 1
+                 positions.append(m.start())
+         print("Reads: " + str(reads))
+         print("Lengths: ")
+         print( Counter(lengths) )
+         print("Matches " + params.samPatternStats + " : " + str(matches))
+         print("Match positions: ")
+         print( Counter(positions).most_common() )
+         if params.STDERRcomments:
+             try:
+                 sys.stderr.write(ml.donestring("pattern stats in SAM stream"))
+             except IOError:
+                 pass
+
 
 #     # All done.
 #     if params.STDERRcomments:
