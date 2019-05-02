@@ -142,5 +142,6 @@ rm ${mageckdir}/guides_all_dedup_reord.tsv
 rm ${mageckdir}/guides+genes.tsv
 rm ${mageckdir}/guides+genes_dedup.tsv
 rm ${mageckdir}/guides+genes_dedup_reord.tsv
+rm -r ${mageckdir}/*${renamed}
 
 echo "All done!"
