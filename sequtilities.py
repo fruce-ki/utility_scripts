@@ -180,9 +180,14 @@ def main(args):
                                 The input stream is typically the output of `samtools view <somefile.bam>`. \
                                 The output is streamed to STDOUT, typically to be piped back to `samtools view -b`. \
                                 The header file will be prepended to the output stream.")
-    parser.add_argument('--samPatternStats', type=str,
+    parser.add_argument('--samPatternStats', type=str, nargs='+',
                                 help="Number and location of matches of the pattern in the reads of a SAM stream. \
-                                This works only with the 'D' INPUTTYPE.")
+                                This works only with the 'D' INPUTTYPE. \
+                                The first argument is the sequence pattern to search. \
+                                Optionally, it can also report the sequence frequencies \
+                                in a region before or after the match, by specifying the second and third arguments: \
+                                * the offset from the match (+n downstream of match end, \-n upstream of match start, escaping the minus sign is important) \
+                                and * the length of the region.")
     params = parser.parse_args(args)
 
 
@@ -343,32 +348,50 @@ def main(args):
     # Adapter STATS from SAM stream
     # read length distribution, pattern position distribution, pattern match
     elif params.samPatternStats:
-         if not params.INPUTTYPE == 'D':
-             sys.exit("The only allowed INPUTTYPE is 'D' for streaming of header-less SAM content.")
-         p = re.compile(params.samPatternStats)
-         lengths = list()
-         reads = 0
-         matches = 0
-         positions = list()
-         for line in sys.stdin:
-             seq = line.split("\t")[9]
-             reads = reads + 1
-             lengths.append(len(seq))
-             m = p.search(seq)
-             if m:
-                 matches = matches + 1
-                 positions.append(m.start())
-         print("Reads: " + str(reads))
-         print("Lengths: ")
-         print( Counter(lengths) )
-         print("Matches " + params.samPatternStats + " : " + str(matches))
-         print("Match positions: ")
-         print( Counter(positions).most_common() )
-         if params.STDERRcomments:
-             try:
-                 sys.stderr.write(ml.donestring("pattern stats in SAM stream"))
-             except IOError:
-                 pass
+        if not params.INPUTTYPE == 'D':
+            sys.exit("The only allowed INPUTTYPE is 'D' for streaming of header-less SAM content.")
+        p = re.compile(params.samPatternStats[0])
+        # Prepare places to store findings.
+        lengths = list()
+        reads = 0
+        matches = 0
+        positions = list()
+        barcodes = list()
+        # Search the pattern line by line.
+        for line in sys.stdin:
+            seq = line.split("\t")[9]
+            reads = reads + 1
+            lengths.append(len(seq))
+            m = p.search(seq)
+            if m:
+                matches = matches + 1
+                positions.append(m.start() + 1)
+                # Optionally also report the sequence in the up/down-stream region.
+                if params.samPatternStats[2]:
+                    l = int(params.samPatternStats[1])
+                    pos = m.end() + l if l > 0 else m.start() + l
+                    if pos >= 0 and (pos + l) < len(seq):
+                        barcodes.append( seq[pos:(pos + int(params.samPatternStats[2]))] + "_@_" + str(pos + 1) )
+                        # Sequence_at_position ie: ACGT_@_7
+                    else:
+                        barcodes.append("out_of_range_@_" + str(pos + 1))
+        print("Reads: " + str(reads))
+        print("Lengths: ")
+        print( Counter(lengths) )
+        print("Matches " + params.samPatternStats[0] + " : " + str(matches))
+        print("Match positions: ")
+        for v,c in Counter(positions).most_common():
+            print(v, c)
+        if params.samPatternStats[2]:
+            print("Barcode and location frequencies")
+            for v,c in Counter(barcodes).most_common():
+                print(v, c)
+        if params.STDERRcomments:
+            try:
+                sys.stderr.write(ml.donestring("pattern stats in SAM stream"))
+            except IOError:
+                pass
+
 
 
 #     # All done.
