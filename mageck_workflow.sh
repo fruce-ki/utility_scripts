@@ -13,12 +13,22 @@
 function usage() {
     echo "Usage:"
     echo "      $0 -i INDIR -l GUIDES_LIB -b DEMUX_TABLE -n COUNTS_OUTDIR -c CONTRASTS_TABLE -m MAGECK_OUTDIR
-                [-r REVCOMP] [-p PAD_BASE] [-s SPACER_LENGTH] [-u UMI_LENGTH] [-d DEMUX_BC_LENGTH] [-z MINCOUNT] [-E ENTREZ_FIELD]
+                [-r REVCOMP] [-p PAD_BASE] [-s SPACER_LENGTH] [-u UMI_LENGTH] [-d DEMUX_BC_LENGTH] [-M BC_MISMATCHES] [-z MINCOUNT] [-E ENTREZ_FIELD]
                 [-Z SAMPLES -C CTRL_GUIDE_GRPS -G GUIDES_PER_GENE]"
 		exit 1
 }
+
+# Defaults
+pad="C"
+countthresh=50
+spacer=20
+umi=6
+demux=4
+bcmm=1
+revcomp="no"
+entrezfield=2
 # Parse options.
-while getopts 'i:l:b:r:n:c:m:r:C:G:z:Z:p:s:u:d:E' flag; do
+while getopts 'i:l:b:r:n:c:m:r:C:G:z:Z:p:s:u:d:M:E' flag; do
   case "${flag}" in
     i) indir="${OPTARG}" ;;           # Input directory with unaligned BAMs
     l) library="${OPTARG}" ;;         # sgRNA library
@@ -35,56 +45,31 @@ while getopts 'i:l:b:r:n:c:m:r:C:G:z:Z:p:s:u:d:E' flag; do
     s) spacer="${OPTARG}" ;;          # Spacer length (20)
     u) umi="${OPTARG}" ;;             # UMI length (6)
     d) demux="${OPTARG}" ;;           # De-multiplexing barcode length (4)
+    M) bcmm="${OPTARG}" ;;            # Barcode mismatch allowance (1)
     E) entrezfield="${OPTARG}" ;;     # 0-based index position in the undesrcore-separated composite guide IDs that represents the gene Entrez ID (2).
     *) usage ;;
   esac
 done
-# Check we got the minimum set
-if [ -z "$indir" ] || [-z "$library" ] || [ -z "$barcodes" ] || [ -z "$revcomp" ] || [ -z "$contrasts" ] || [ -z "$countsdir" ] || [ -z "$mageckdir" ]; then
-  usage
-  exit 1
-fi
 
-# Defaults
 if [ "$revcomp" = "yes" ]; then
   revcomp="--reverse_complement"
 else
   revcomp=""
 fi
 
-if [ -z "$pad" ]; then
-  pad="C"
+# Check we got the minimum set
+if [ -z "$indir" ] || [ -z "$library" ] || [ -z "$barcodes" ] || [ -z "$contrasts" ] || [ -z "$countsdir" ] || [ -z "$mageckdir" ]; then
+  usage
+  exit 1
 fi
 
-if [ -z "$countthresh" ]; then
-  countthresh=50
-fi
-
-if [ -z "$spacer" ]; then
-  spacer=20
-fi
-
-if [ -z "$umi" ]; then
-  umi=6
-fi
-if [ -z "$demux" ]; then
-  demux=4
-fi
-
-if [ -z "$entrezfield" ]; then
-  entrezfield=2
-fi
 
 ## Workflow ##
-empty=""
-
 
 echo "Pre-process to BAM to FASTQ, align, and count."
-nextflow run zuberlab/crispr-process-nf $revcomp --inputDir $indir --library $library --padding_base $pad --spacer_length $spacer --barcode_demux_length $demux --barcode_random_length $umi --barcodes $barcodes --outputDir $countsdir -profile ii2 --resume
+nextflow run zuberlab/crispr-process-nf $revcomp --inputDir $indir --library $library --padding_base $pad --spacer_length $spacer --barcode_demux_length $demux --barcode_random_length $umi --barcode_demux_mismatches $bcmm --barcodes $barcodes --outputDir $countsdir -profile ii2 --resume
 ld=$(basename $library)
-counts="${countsdir}/counts/${ld/.txt/$empty}/counts_mageck.txt"
-
-exit 0
+counts="${countsdir}/counts/${ld/.txt/''}/counts_mageck.txt"
 
 # echo "Merge some columns, add some columns."
 # Rscript ~/utility_scripts/sum_cols.R ./process/crispr_nf/counts/library/counts_mageck.txt ${counts/.txt/_merged.txt} 'NoIFNG_d0,NoIFNG_d0_3,NoIFNG_d0_4' NoIFNG_d0 TRUE TRUE
