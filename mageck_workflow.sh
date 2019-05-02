@@ -1,11 +1,11 @@
 #!/usr/bin/sh
 #
 #SBATCH --get-user-env
-#SBATCH --mem=10000
 #SBATCH -J mageck-wf
-#SBATCH -N 1
-#SBATCH --ntasks-per-node=1
-#SBATCH --ntasks-per-core=1
+#SBATCH --mem=10000
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=10
 #SBATCH --output=mageck-wf.out
 #SBATCH --error=mageck-wf.err
 
