@@ -68,7 +68,7 @@ fi
 ## Workflow ##
 
 echo "Pre-process to BAM to FASTQ, align, and count."
-nextflow run zuberlab/crispr-process-nf $revcomp --inputDir $indir --library $library --padding_base $pad --spacer_length $spacer --barcode_demux_length $demux --barcode_random_length $umi --barcode_demux_mismatches $bcmm --barcodes $barcodes --outputDir $countsdir -profile ii2 --resume
+nextflow run zuberlab/crispr-process-nf $revcomp --inputDir $indir --library $library --padding_base $pad --spacer_length $spacer --barcode_demux_length $demux --barcode_random_length $umi --barcode_demux_mismatches $bcmm --barcodes $barcodes --outputDir $countsdir -profile ii2
 ld=$(basename $library)
 counts="${countsdir}/counts/${ld/.txt/}/counts_mageck.txt"
 
@@ -96,7 +96,7 @@ library=${library}_entrez.txt
 
 echo ''
 echo "MAGECK."
-nextflow run zuberlab/crispr-mageck-nf --contrasts $contrasts --counts $counts --outputDir $mageckdir --min_count $countthresh -profile ii2 --legacy --resume
+nextflow run zuberlab/crispr-mageck-nf --contrasts $contrasts --counts $counts --outputDir $mageckdir --min_count $countthresh -profile ii2 --legacy
 
 echo ''
 echo "Rename columns."
