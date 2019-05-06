@@ -11,8 +11,8 @@ multiple files:
 * repeating a command for a range of files (not currently parallelized),
 * accessing and restructuring (multiple) delimited files.
 * miscellaneous stuff. Some of it is auxiliary to the primary functions, some
-  is a legacy of this module's evolution of concept. 
-  
+  is a legacy of this module's evolution of concept.
+
 The module provides a library of flexible functions as
 well as a main() implementing the primary use scenarios.
 
@@ -729,7 +729,7 @@ def append_columns(flist, colSep=["\t"], header=False, index=None, merge=True, t
                     (Default None)
                     If None, the number of rows can differ between files and will be
                     padded (outer) or truncated (inner), otherwise the row number must
-                    be the same in all files. 
+                    be the same in all files.
         type(str): Join type 'inner' or 'outer'.
     Returns:
         pandas.Dataframe
@@ -761,9 +761,9 @@ def getDuplicateColumns(df):
     '''
     Get a list of duplicate columns.
     It will iterate over all the columns in dataframe and find the columns whose contents are duplicate.
-    
+
     Stolen from https://thispointer.com/how-to-find-drop-duplicate-columns-in-a-dataframe-python-pandas/ .
-    
+
     Args:
     	df: Dataframe object
     Returns:
@@ -782,8 +782,8 @@ def getDuplicateColumns(df):
             if col.equals(otherCol):
                 duplicateColumnNames.add(df.columns.values[y])
     return list(duplicateColumnNames)
-    
-    
+
+
 def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='outer', saveHeader=False, dedup=False):
     """Incrementally merge tables.
 
@@ -815,25 +815,25 @@ def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='
     for f, (myfile, myalias) in flist.enum():
         # List the columns and remove the index one from among them.
         cols = [i for i in range(0,numofcols[f])]
-        df = get_columns(FilesList(files=[myfile], aliases=[myalias]), cols=cols, 
+        df = get_columns(FilesList(files=[myfile], aliases=[myalias]), cols=cols,
                         colSep=colSep, header=header, merge=False, index=index)[0]
         if (f == 0):
             result = df
         else:
             if saveHeader:
                 # Extract headers, merge headers and tables separately, then put merged header on top of the merged table.
-                hnew = pd.merge(left=result.iloc[[0]], right=df.iloc[[0]], sort=False, 
+                hnew = pd.merge(left=result.iloc[[0]], right=df.iloc[[0]], sort=False,
                                 left_index=True, right_index=True, how="outer")
                 result = pd.concat([hnew, pd.merge(left=result.iloc[1:,:], right=df.iloc[1:,:], how=type, on=None,
-                                                   left_index=True, right_index=True, 
+                                                   left_index=True, right_index=True,
                                                    sort=False, suffixes=('','_'+ myalias))],
                                     axis=0, ignore_index=False, sort=False)
             else:
                 result = pd.merge(left=result, right=df, how=type, on=None,
-                                  left_index=True, right_index=True, 
+                                  left_index=True, right_index=True,
                                   sort=False, suffixes=('','_'+ myalias))
     # The column merged on accumulates a duplicate for each table. Drop them.
-    # If the index columns are not exact duplicates (due to gappy rows), 
+    # If the index columns are not exact duplicates (due to gappy rows),
     # dedup_columns can be used afterwards on the merged file).
     if dedup:
         result.drop(columns=getDuplicateColumns(result), inplace=True)
@@ -871,7 +871,7 @@ def dedup_columns(flist, cols=[0,1], colSep=["\t"], merge=True):
         df = get_columns(FilesList(files=[myfile], aliases=[myalias]), cols=allcols,
         						colSep=colSep, header=False, merge=False, index=None)[0]
         # Collect duplicated values, drop duplicated columns, assign values to new column.
-        v = df.iloc[:, cols].apply(lambda x: next(s for s in x.unique() if s), axis=1)
+        v = df.iloc[:, cols].apply(lambda x: next(s if s else "" for s in x.unique()), axis=1)
         df.drop(df.columns[cols], axis=1, inplace=True)
         df = pd.concat([df, v], axis=1, join='outer', sort=False, ignore_index=False)
         if not keyhead:
@@ -881,8 +881,9 @@ def dedup_columns(flist, cols=[0,1], colSep=["\t"], merge=True):
     if merge:
         result = [pd.concat(result, axis=1, join='outer', ignore_index=False, sort=False), ]
         result[0].index.name = keyhead
-    return result    
-    
+    return result
+
+
 def get_crosspoints(flist, cols=[0], rows=[0], colSep=["\t"], header=False, index=None, merge=True):
     """ Get the values at selected rows and columns.
 
@@ -1529,7 +1530,7 @@ def main(args):
                 idx = 0
             df = append_columns(flist, colSep=params.sep, header=params.labels, index=idx, type=params.appnd)
         else:
-            df = merge_tables(flist, colSep=params.sep, header=params.labels, index=0, type=params.merge[0], 
+            df = merge_tables(flist, colSep=params.sep, header=params.labels, index=0, type=params.merge[0],
                               saveHeader=params.merge[1] == "yes", dedup=params.merge[2] == "yes")
         try:
             if params.comments:
@@ -1541,7 +1542,7 @@ def main(args):
             sys.stdout.write(df.to_csv(sep=params.sep[0], header=params.relabel, index=params.index))
             if params.STDERRcomments:
                 if params.appnd:
-                    sys.stderr.write(ml.donestring(params.appnd[0] +" append of columns, index "+ str(idx is not None)))
+                    sys.stderr.write(ml.donestring(params.appnd +" append of columns, index "+ str(idx is not None)))
                 else:
                     sys.stderr.write(ml.donestring(params.merge[0] +" merge of tables"))
         except IOError:
