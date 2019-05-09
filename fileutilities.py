@@ -227,8 +227,7 @@ def do_foreach(flist, comm, comments=False, progress=True, out=(None,None,None),
     controlled by this library will need to be inserted in real time.
 
     Args:
-        flist[]: A FilesList. If a plain list is given, aliases will be
-                    automatically computed.
+        flist[]: A FilesList.
         comm[str]: The components of an arbitrary command, with place-holders:
                     {abs} : absolute path of file.
                     {dir} : absolute path of the file's directory.
@@ -248,11 +247,6 @@ def do_foreach(flist, comm, comments=False, progress=True, out=(None,None,None),
         log(bool): Log to /commands.log each individual call.
     """
     outstream= sys.stdout
-    # Test if it is a FilesList or plain list. Upgrade it if it's plain.
-    try:
-        flist.aliases[0]
-    except AttributeError:
-        flist = FilesList(flist)
     # Create output files. [] if out contains None.
     outfiles = make_names(flist, out)
     for i, (myfile, myalias) in flist.enum():
