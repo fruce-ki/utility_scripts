@@ -130,6 +130,55 @@ def gtf2premrna(gtfs, filter=True):
     return result
 
 
+def samPatternStats(pattern, sam=sys.stdin, bco=-4, bcl=4):
+    """Find a pattern's positions and flanking sequences in an uncompressed header-less SAM.
+
+    Meant to be used to verify the position of a known spacer sequence and identify
+    the demultiplexing barcodes adjacent to it.
+
+    Args:
+        pattern(str): A sequence literal or regex pattern.
+        sam(IO): An input stream (STDIN)
+        bco(int): How many positions before the tracer's start (-n) or after the
+                    tracer's end (+n) is the barcode (-4)?
+        bcl(int): How many nucleotides long is the barcode (4)?
+    Returns:
+        Nested lists:
+                    [1] Total number of reads
+                    [2] collections.Counter object fo read lengths
+                    [2] collections.Counter object with positions of pattern and respective number of reads
+                    [3] collections.Counter object with barcodeSeq_@_position and respective number of reads
+                        The barcode sequence is "out_of_range" when the barcode is hanging over either end of the read
+                        due to very shifter tracer position.
+    """
+    p = re.compile(pattern)
+    # Prepare places to store findings.
+    lengths = list()
+    reads = 0
+    matches = 0
+    positions = list()
+    barcodes = list()
+    # Search the pattern line by line.
+    for line in sam:
+        seq = line.split("\t")[9]
+        reads = reads + 1
+        lengths.append(len(seq))
+        m = p.search(seq)
+        if m:
+            matches = matches + 1
+            positions.append(m.start() + 1)
+            # Optionally also report the sequence in the up/down-stream region.
+            if bco is not None and bcl is not None:
+                l = int(bco)
+                pos = m.end() + l if l > 0 else m.start() + l
+                if pos >= 0 and (pos + l) < len(seq):
+                    barcodes.append( seq[pos:(pos + int(bcl))] + "_@_" + str(pos + 1) )
+                    # Sequence_at_position ie: ACGT_@_7
+                else:
+                    barcodes.append("out_of_range_@_" + str(pos + 1))
+    return [reads, Counter(lengths).most_common(), matches, Counter(positions).most_common(), Counter(barcodes).most_common()]
+
+
 def main(args):
     # Organize arguments and usage help:
     parser = argparse.ArgumentParser(description="Utility tasks relevant to sequencing.\
@@ -350,48 +399,26 @@ def main(args):
     elif params.samPatternStats:
         if not params.INPUTTYPE == 'D':
             sys.exit("The only allowed INPUTTYPE is 'D' for streaming of header-less SAM content.")
-        p = re.compile(params.samPatternStats[0])
-        # Prepare places to store findings.
-        lengths = list()
-        reads = 0
-        matches = 0
-        positions = list()
-        barcodes = list()
-        # Search the pattern line by line.
-        for line in sys.stdin:
-            seq = line.split("\t")[9]
-            reads = reads + 1
-            lengths.append(len(seq))
-            m = p.search(seq)
-            if m:
-                matches = matches + 1
-                positions.append(m.start() + 1)
-                # Optionally also report the sequence in the up/down-stream region.
-                if params.samPatternStats[2]:
-                    l = int(params.samPatternStats[1])
-                    pos = m.end() + l if l > 0 else m.start() + l
-                    if pos >= 0 and (pos + l) < len(seq):
-                        barcodes.append( seq[pos:(pos + int(params.samPatternStats[2]))] + "_@_" + str(pos + 1) )
-                        # Sequence_at_position ie: ACGT_@_7
-                    else:
-                        barcodes.append("out_of_range_@_" + str(pos + 1))
-        print("Reads: " + str(reads))
-        print("Lengths: ")
-        print( Counter(lengths) )
-        print("Matches " + params.samPatternStats[0] + " : " + str(matches))
+        # Do.
+        result = samPatternStats(pattern=params.samPatternStats[0], sam=sys.stdin, bco=params.samPatternStats[1], bcl=params.samPatternStats[2])
+        # Print.
+        print("Reads:", str(result[0]))
+        print("Lengths:")
+        for v,c in result[1]:
+            print(v, c,  '(' + "{:.2f}".format(c / result[0] * 100) + '% total)')
+        print("Matches " + params.samPatternStats[0] + ' : ' + str(result[2]) + '(' + "{:.2f}".format(result[2] / result[0] * 100) + '% total)')
         print("Match positions: ")
-        for v,c in Counter(positions).most_common():
-            print(v, c)
+        for v,c in result[3]:
+            print(v, c,  '(' + "{:.2f}".format(c / result[0] * 100) + '% total)')
         if params.samPatternStats[2]:
             print("Barcode and location frequencies")
-            for v,c in Counter(barcodes).most_common():
-                print(v, c)
+            for v,c in result[4]:
+                print(v, c, '(' + "{:.2f}".format(c / result[0] * 100) + '% total)')
         if params.STDERRcomments:
             try:
                 sys.stderr.write(ml.donestring("pattern stats in SAM stream"))
             except IOError:
                 pass
-
 
 
 #     # All done.
