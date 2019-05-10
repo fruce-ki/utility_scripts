@@ -750,34 +750,6 @@ def append_columns(flist, colSep=["\t"], header=False, index=None, merge=True, t
     return result
 
 
-# Helper function
-def getDuplicateColumns(df):
-    '''
-    Get a list of duplicate columns.
-    It will iterate over all the columns in dataframe and find the columns whose contents are duplicate.
-
-    Stolen from https://thispointer.com/how-to-find-drop-duplicate-columns-in-a-dataframe-python-pandas/ .
-
-    Args:
-    	df: Dataframe object
-    Returns:
-        List of columns whose contents are redudnant (one occurence will of each will not be included in the list).
-    '''
-    duplicateColumnNames = set()
-    # Iterate over all the columns in dataframe
-    for x in range(df.shape[1]):
-        # Select column at xth index.
-        col = df.iloc[:, x]
-        # Iterate over all the columns in DataFrame from (x+1)th index till end
-        for y in range(x + 1, df.shape[1]):
-            # Select column at yth index.
-            otherCol = df.iloc[:, y]
-            # Check if two columns at x 7 y index are equal
-            if col.equals(otherCol):
-                duplicateColumnNames.add(df.columns.values[y])
-    return list(duplicateColumnNames)
-
-
 def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='outer', saveHeader=False, dedup=False):
     """Incrementally merge tables.
 
@@ -834,6 +806,34 @@ def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='
     return result
 
 
+# Helper function
+def getDuplicateColumns(df):
+    '''
+    Get a list of duplicate columns.
+    It will iterate over all the columns in dataframe and find the columns whose contents are duplicate.
+
+    Stolen from https://thispointer.com/how-to-find-drop-duplicate-columns-in-a-dataframe-python-pandas/ .
+
+    Args:
+    	df: Dataframe object
+    Returns:
+        List of columns whose contents are redudnant (one occurence will of each will not be included in the list).
+    '''
+    duplicateColumnNames = set()
+    # Iterate over all the columns in dataframe
+    for x in range(df.shape[1]):
+        # Select column at xth index.
+        col = df.iloc[:, x]
+        # Iterate over all the columns in DataFrame from (x+1)th index till end
+        for y in range(x + 1, df.shape[1]):
+            # Select column at yth index.
+            otherCol = df.iloc[:, y]
+            # Check if two columns at x 7 y index are equal
+            if col.equals(otherCol):
+                duplicateColumnNames.add(df.columns.values[y])
+    return list(duplicateColumnNames)
+
+
 def dedup_columns(flist, cols=[0,1], colSep=["\t"], merge=True):
     """Merge duplicate columns from the files, as they are.
 
@@ -865,7 +865,7 @@ def dedup_columns(flist, cols=[0,1], colSep=["\t"], merge=True):
         df = get_columns(FilesList(files=[myfile], aliases=[myalias]), cols=allcols,
         						colSep=colSep, header=False, merge=False, index=None)[0]
         # Collect duplicated values, drop duplicated columns, assign values to new column.
-        v = df.iloc[:, cols].apply(lambda x: next(s if s else "" for s in x.unique()), axis=1)
+        v = df.iloc[:, cols].apply(lambda x: next(s for s in x.unique() if s), axis=1)
         df.drop(df.columns[cols], axis=1, inplace=True)
         df = pd.concat([df, v], axis=1, join='outer', sort=False, ignore_index=False)
         if not keyhead:
