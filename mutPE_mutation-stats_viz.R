@@ -1,5 +1,10 @@
 #!/users/kimon.froussios/miniconda3/envs/mybasics/bin/Rscript
 
+# Plots 
+# - mutation frequencies and read coverage statically for each input in a collective PDF
+# - mutation frequencies interactively overlayed for all the input files
+# - read coverage interactively overlayed for all the input files
+
 args <- commandArgs(trailingOnly = TRUE)
 outdir <- args[1]
 prefix <- args[2]             # for the collective PDF and HTML output files
