@@ -27,7 +27,7 @@ umi=6
 demux=4
 bcmm=1
 revcomp="no"
-entrezfield=2
+entrezfield=1   # 0-based index
 # Parse options.
 while getopts 'i:l:b:r:n:c:m:r:C:G:z:Z:p:s:u:d:M:E' flag; do
   case "${flag}" in
@@ -47,7 +47,7 @@ while getopts 'i:l:b:r:n:c:m:r:C:G:z:Z:p:s:u:d:M:E' flag; do
     u) umi="${OPTARG}" ;;             # UMI length (6)
     d) demux="${OPTARG}" ;;           # De-multiplexing barcode length (4)
     M) bcmm="${OPTARG}" ;;            # Barcode mismatch allowance (1)
-    E) entrezfield="${OPTARG}" ;;     # 0-based index position in the undesrcore-separated composite guide IDs that represents the gene Entrez ID (2).
+    E) entrezfield="${OPTARG}" ;;     # 0-based index position in the undesrcore-separated composite guide IDs that represents the gene Entrez ID (1).
     *) usage ;;
   esac
 done
@@ -100,7 +100,7 @@ echo ''
 echo "Extract entrez IDs from sgRNA IDs."
 # Also use the re-grouped group field.
 lib="$(dirname $library)"
-srun cut -f 1 $library | perl -e '$pat = join "|", split ",", $ARGV[0]; while($line=<STDIN>){ if ($line=~/(?<!\w)id(?!\w)/) { print "Entrez\n" } elsif ( $line=~/^($pat)/ ){ print "$1\n" } else { @a = split(/_/, $line); print "$a[$ARGV[2]]\n" }}' $ctrlguides $entrezfield > ${lib}/entrez.txt
+srun cut -f 1 $library | perl -e '$pat = join "|", split ",", $ARGV[0]; while($line=<STDIN>){ if ($line=~/(?<!\w)id(?!\w)/) { print "Entrez\n" } elsif ( $line=~/^($pat)/ ){ print "$1\n" } else { @a = split(/_/, $line); print "$a[$ARGV[1]]\n" }}' $ctrlguides $entrezfield > ${lib}/entrez.txt
 srun fileutilities.py T $library ${lib}/entrez.txt -r --appnd outer | cut -f 1,3,4 > ${library}_entrez.txt
 srun cut -f 1,2 $counts > tmp.txt
 srun fileutilities.py T tmp.txt ${library}_entrez.txt -i -r --appnd outer > ${library}_forguides.txt
