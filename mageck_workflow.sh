@@ -104,7 +104,8 @@ srun cut -f 1 $library | perl -e '$pat = join "|", split ",", $ARGV[0]; while($l
 srun fileutilities.py T $library ${lib}/entrez.txt -r --appnd outer | cut -f 1,3,4 > ${library}_entrez.txt
 srun cut -f 1,2 $counts > tmp.txt
 srun fileutilities.py T tmp.txt ${library}_entrez.txt -i -r --appnd outer > ${library}_forguides.txt
-srun cut -f 2,4 ${library}_forguides.txt | sort | uniq > ${library}_forgenes.txt
+head -n 1 ${library}_forguides.txt | cut -f 2,4 > ${library}_forgenes.txt
+srun tail -n +1 ${library}_forguides.txt | cut -f 2,4 | sort | uniq >> ${library}_forgenes.txt    # prevent header from getting sorted to another row
 rm tmp.txt
 
 echo ''
