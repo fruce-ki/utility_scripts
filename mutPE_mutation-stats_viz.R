@@ -2,8 +2,9 @@
 
 args <- commandArgs(trailingOnly = TRUE)
 outdir <- args[1]
-prefix <- args[2]                       # for the collective PDF and HTML output files
-ymax <- args[3]                         # "NULL" for automatic
+prefix <- args[2]             # for the collective PDF and HTML output files
+ymax <- args[3]               # "NULL" for automatic
+collectiveonly <- args[4]       # 'yes'/'no' useful to prevent file spam when many stats files are input
 statsfiles <- args[4:length(args)]       # TSV input files: seq \t pos \t type \t count \t depth
 # statsfiles <- '/Volumes/groups/pavri/Kimon/ursi/mutPEseq/mutpe/process/B18_GCB/B18_GCB_KO_x25.extendedFrags_sorted_3-10.stats'
 
@@ -107,28 +108,29 @@ for (sf in statsfiles){
             panel.grid.minor.y = element_line(colour='grey95'))
   )
   
-  # Plot interactive mutations pileup
-  htmlwidgets::saveWidget(ggplotly(posdata %>% 
-    filter(mutated) %>%
-    mutate(type = factor(type, levels=c("A>C", "A>G", "A>T", "C>A", "C>G", "C>T", "G>A", "G>C", "G>T", "T>A", "T>C", "T>G", "indel", "other"))) %>%
-    ggplot(aes(x = pos, y = freq)) + 
-      facet_wrap( . ~ seq) +
-      geom_hline(aes(yintercept=quantile(aggrfreq, 0.25)), linetype='dotted', alpha=0.4) +
-      geom_hline(aes(yintercept=median(aggrfreq)), linetype='dotdash', alpha=0.4) +
-      geom_hline(aes(yintercept=quantile(aggrfreq, 0.75)), linetype='dashed', alpha=0.4) +
-      geom_bar(aes(fill=type), stat = 'identity', position=position_stack()) +
-      scale_x_continuous('Position', limits = c(minpos, maxpos)) +
-      ylab("Frequency") +
-      coord_cartesian(ylim=c(0, 1.1 * maxfreq)) +
-      ggtitle("Fraction of reads with mutation at each position.", subtitle=basename(sf)) +
-      guides(ncol=4, by.row=TRUE) +
-      theme(panel.background = element_rect(fill="white"), 
-            panel.grid.major.y = element_line(colour='grey95'),
-            panel.grid.minor.y = element_line(colour='grey95'))
-    ), 
-    file.path(outdir, paste0(basename(sf), '_pileup_types.html'))
-  )
-  
+  if(collectiveonly=='yes'){
+    # Plot interactive mutations pileup
+    htmlwidgets::saveWidget(ggplotly(posdata %>% 
+      filter(mutated) %>%
+      mutate(type = factor(type, levels=c("A>C", "A>G", "A>T", "C>A", "C>G", "C>T", "G>A", "G>C", "G>T", "T>A", "T>C", "T>G", "indel", "other"))) %>%
+      ggplot(aes(x = pos, y = freq)) + 
+        facet_wrap( . ~ seq) +
+        geom_hline(aes(yintercept=quantile(aggrfreq, 0.25)), linetype='dotted', alpha=0.4) +
+        geom_hline(aes(yintercept=median(aggrfreq)), linetype='dotdash', alpha=0.4) +
+        geom_hline(aes(yintercept=quantile(aggrfreq, 0.75)), linetype='dashed', alpha=0.4) +
+        geom_bar(aes(fill=type), stat = 'identity', position=position_stack()) +
+        scale_x_continuous('Position', limits = c(minpos, maxpos)) +
+        ylab("Frequency") +
+        coord_cartesian(ylim=c(0, 1.1 * maxfreq)) +
+        ggtitle("Fraction of reads with mutation at each position.", subtitle=basename(sf)) +
+        guides(ncol=4, by.row=TRUE) +
+        theme(panel.background = element_rect(fill="white"), 
+              panel.grid.major.y = element_line(colour='grey95'),
+              panel.grid.minor.y = element_line(colour='grey95'))
+      ), 
+      file.path(outdir, paste0(basename(sf), '_pileup_types.html'))
+    )
+  }
   
   # Concatenate all the files in one big table with the file as a variable, to plot overlay
   mega <- rbind(mega, posdata %>% filter(mutated) %>% mutate(file=basename(sf)))
