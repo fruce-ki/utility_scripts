@@ -3,7 +3,7 @@
 """sequtilities.py
 
 Author: Kimon Froussios
-Date last revised: 15/11/2016
+Date last revised: 13/05/2019
 Python tested: 3.5.2
 
 Library of utility functions relevant to sequencing tasks.
@@ -31,7 +31,7 @@ def collect_starFinalLogs(flist, all=False):
     """
     rows = None
     if all:
-        # Still discording some irrelevant stuff and blank columns.
+        # Still discarding some irrelevant stuff and blank columns.
         rows = [2,4,5,7,8,9,10,11,12,13,14,15,16,17,18,19,20,22,23,24,25,27,28,29]
     else:
         rows = [4, 5, 8, 9, 23, 25, 27, 28, 29]

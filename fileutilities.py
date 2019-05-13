@@ -4,7 +4,7 @@
 
 Author: Kimon Froussios
 Compatibility tested: python 3.5.2
-Last reviewed: 26/03/2019
+Last reviewed: 10/05/2019
 
 This module is a solution for Frequently Performed Generic Tasks that involve
 multiple files:
