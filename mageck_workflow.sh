@@ -94,7 +94,7 @@ nextflow run zuberlab/crispr-mageck-nf --contrasts $contrasts --counts $counts -
 echo ''
 echo "Rename columns."
 renamed="/renamed"
-srun fileutilities.py T $mageckdir --dir | fileutilities.py P --loop S sh ~/utility_scripts/rename_mageck_columns.sh {abs} {abs}${renamed}
+srun fileutilities.py T $mageckdir --dir | fileutilities.py P --loop S sh ~/utility_scripts/mageck_rename_columns.sh {abs} {abs}${renamed}
 
 echo ''
 echo "Extract entrez IDs from sgRNA IDs."
@@ -104,43 +104,28 @@ srun cut -f 1 $library | perl -e '$pat = join "|", split ",", $ARGV[0]; while($l
 srun fileutilities.py T $library ${lib}/entrez.txt -r --appnd outer | cut -f 1,3,4 > ${library}_entrez.txt
 srun cut -f 1,2 $counts > tmp.txt
 srun fileutilities.py T tmp.txt ${library}_entrez.txt -i -r --appnd outer > ${library}_forguides.txt
-head -n 1 ${library}_forguides.txt | cut -f 2,4 > ${library}_forgenes.txt
-srun tail -n +1 ${library}_forguides.txt | cut -f 2,4 | sort | uniq >> ${library}_forgenes.txt    # prevent header from getting sorted to another row
+head -n 1 ${library}_forguides.txt | cut -f 2,4 > ${library}_forgenes.txt                         # prevent header from getting sorted to another row
+srun tail -n +2 ${library}_forguides.txt | cut -f 2,4 | sort | uniq >> ${library}_forgenes.txt    # prevent header from getting sorted to another row
 rm tmp.txt
 
 echo ''
 echo "Merge all gene-level outputs."
 genes="${mageckdir}/genes_all.tsv"
-srun --mem=10000 fileutilities.py T ${mageckdir}/*${renamed}/genes_pos_stats.txt ${mageckdir}/*${renamed}/genes_neg_stats.txt ${library}_forgenes.txt -r -i --appnd outer > $genes
-nc=$(perl -e '$ARGV[0] =~/^(\d+)/; print $1' $(fileutilities.py T $genes --cntcols))
-srun --mem=10000 fileutilities.py T $genes -r --cols 0 $(expr $nc - 1) 1:$(expr $nc - 2) > ${genes/.tsv/_reord.tsv}
-genes=${genes/.tsv/_reord.tsv}
+srun --mem=10000 fileutilities.py T ${library}_forgenes.txt ${mageckdir}/*${renamed}/genes_pos_stats.txt ${mageckdir}/*${renamed}/genes_neg_stats.txt -r -i --appnd outer > $genes
 
 echo ''
 echo "Merge all guide-level outputs and clean up redundant columns."
 guides="${mageckdir}/guides_all.tsv"
-srun --mem=10000 fileutilities.py T ${mageckdir}/*${renamed}/guides_stats.txt ${library}_forguides.txt -r -i --appnd outer > $guides
+srun --mem=10000 fileutilities.py T ${library}_forguides.txt ${mageckdir}/*${renamed}/guides_stats.txt -r -i --appnd outer > $guides
 dups=$(head -n1 $guides | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++} print "\n";')
 srun --mem=10000 fileutilities.py T $guides -r --mrgdups $dups > ${guides/.tsv/_dedup.tsv}
 guides="${guides/.tsv/_dedup.tsv}"
 nc=$(perl -e '$ARGV[0] =~/^(\d+)/; print $1' $(fileutilities.py T $guides --cntcols))
-srun --mem=10000 fileutilities.py T $guides -r --cols 0 $(expr $nc - 1) $(expr $nc - 2) $(expr $nc - 3) 1:$(expr $nc - 4) > ${guides/.tsv/_reord.tsv}
+srun --mem=10000 fileutilities.py T $guides -r --cols 0 $(expr $nc - 1) 1:$(expr $nc - 2) > ${guides/.tsv/_reord.tsv}
 guides="${guides/.tsv/_reord.tsv}"
-
-# echo ''
-# echo "Merge guide-level and gene-level outputs and clean up redundant columns."
-# out="${mageckdir}/guides+genes.tsv"
-# srun --mem=10000 fileutilities.py T $guides $genes -r --merge outer yes no > $out
-# dups=$(head -n1 $out | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++}')
-# srun --mem=10000 fileutilities.py T $out -r --mrgdups $dups > ${out/.tsv/_dedup.tsv}
-# out="${out/.tsv/_dedup.tsv}"
-# nc=$(perl -e '$ARGV[0] =~/^(\d+)/; print $1' $(fileutilities.py T $out --cntcols))
-# srun --mem=10000 fileutilities.py T $out -r --cols $(expr $nc - 1) 0:$(expr $nc - 2) > ${out/.tsv/_reord.tsv}
-# out="${out/.tsv/_reord.tsv}"
 
 echo ''
 echo "Add -log10(p)."
-# srun --mem=10000 add_log10p.R $out ${out/.tsv/_l10p.tsv}
 srun --mem=10000 add_log10p.R -i $genes -o ${genes/.tsv/_l10p.tsv} -r group
 srun --mem=10000 add_log10p.R -i $guides -o ${guides/.tsv/_l10p.tsv}
 
@@ -150,13 +135,9 @@ rm ${library}_entrez.txt
 rm ${library}_forguides.txt
 rm ${library}_forgenes.txt
 rm ${mageckdir}/genes_all.tsv
-rm ${mageckdir}/genes_all_reord.tsv
 rm ${mageckdir}/guides_all.tsv
 rm ${mageckdir}/guides_all_dedup.tsv
 rm ${mageckdir}/guides_all_dedup_reord.tsv
-# rm ${mageckdir}/guides+genes.tsv
-# rm ${mageckdir}/guides+genes_dedup.tsv
-# rm ${mageckdir}/guides+genes_dedup_reord.tsv
 rm -r ${mageckdir}/*${renamed}
 
 echo "All done!"
