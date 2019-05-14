@@ -1,4 +1,4 @@
-#!/users/kimon.froussios/miniconda3/envs/mybasics/bin/Rscript
+#!/users/kimon.froussios/miniconda3/envs/bioinfo/bin/Rscript
 
 library(getopt)
 
@@ -53,6 +53,6 @@ saveRDS(dds, file=file.path(opt$baseDir, opt$RDSoutdir, paste0(autoname, '_deseq
 coefficients <- resultsNames(dds)
 for (name in coefficients[2:length(coefficients)]) {
   res <- lfcShrink(dds, coef=name, type='apeglm')
-  write.csv(res, file=file.path(opt$baseDir, opt$resultsDir, paste0(autoname, '_', name, '.tsv')), 
+  write.csv(res, file=file.path(opt$baseDir, opt$resultsDir, paste0(autoname, '_', name, '.tsv')),
             sep="\t", row.names=TRUE, col.names=TRUE)
 }

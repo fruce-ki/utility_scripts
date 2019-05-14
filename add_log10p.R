@@ -1,4 +1,4 @@
-#!/users/kimon.froussios/miniconda3/envs/mybasics/bin/Rscript
+#!/users/kimon.froussios/miniconda3/envs/bioinfo/bin/Rscript
 
 # Identify p-value columns as containing '.p.',
 # compute their -log10(p)

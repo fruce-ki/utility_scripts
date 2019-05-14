@@ -1,4 +1,4 @@
-#!/users/kimon.froussios/miniconda3/envs/mybasics/bin/Rscript
+#!/users/kimon.froussios/miniconda3/envs/bioinfo/bin/Rscript
 
 library(getopt)
 
@@ -53,7 +53,7 @@ for (gr in groupNames){
     # Specified samples only.
     meanCount <- rowMeans(dt[, c(opt$reference), with=FALSE])
   }
-  
+
   aux <- data.table(id = dt$sexyid666,
                     grp = dt$sexygroup666,
                     cnt = meanCount,
@@ -69,27 +69,27 @@ for (gr in groupNames){
   # above-threshold group is divisible by the number of guides per gene.
   remainder <- nx %% opt$guidesPerGene
   if (remainder != 0){
-    if ((nx - remainder > opt$guidesPerGene && 
+    if ((nx - remainder > opt$guidesPerGene &&
          remainder <= opt$guidesPerGene / 2) ||
         nz < opt$guidesPerGene - remainder) {
-      # If there are enough guides for at least one above-threshold group, 
-      # and the remainder is not big enough to justify rounding up, 
+      # If there are enough guides for at least one above-threshold group,
+      # and the remainder is not big enough to justify rounding up,
       # or if there wouldn't be enough below-threshold guides to substract from,
       # reclassify the `remainder` bottom-count guides that are above threshold into below-threshold.
-      aux[(nz + 1):(nz + remainder), nonzero := FALSE] 
+      aux[(nz + 1):(nz + remainder), nonzero := FALSE]
       nx <- nx - remainder
       nz <- nz + remainder
-      
+
     } else {
       difference <- opt$guidesPerGene - remainder
       # Reclassify the `difference` top-count guides that are below threshold into above-threshold.
-      aux[(nz - difference + 1):nz, nonzero := TRUE] 
+      aux[(nz - difference + 1):nz, nonzero := TRUE]
       # Round up.
       nx <- nx + difference
       nz <- nz - difference
     }
   }
-  
+
   # Number of subgroups to split into, decimals rounded up. The last group will have fewer guides if division was not whole.
   splitX <- floor(nx / opt$guidesPerGene) + 1  # By now nx should be divisible, but allow freak case of nx < guidesPerGene.
   splitZ <- floor(nz / opt$guidesPerGene) + 1
@@ -106,7 +106,7 @@ for (gr in groupNames){
   }
   aux[(nonzero), grp := newGroupsX]
   aux[(!nonzero), grp := newGroupsZ]
-  
+
   # And put the new values back into the table
   setkey(aux, id)
   setkey(dt, sexyid666)

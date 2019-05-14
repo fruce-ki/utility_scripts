@@ -1,4 +1,4 @@
-#!/users/kimon.froussios/miniconda3/envs/mybasics/bin/python3
+#!/users/kimon.froussios/miniconda3/envs/bioinfo/bin/python3
 
 """sequtilities.py
 

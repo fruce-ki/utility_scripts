@@ -1,9 +1,9 @@
-#!~/miniconda3/envs/mybasics/bin/Rscript
+#!/users/kimon.froussios/miniconda3/envs/bioinfo/bin/Rscript
 
 ################################################################################
 # process library text file
 # part of CRISPR / shRNA screen pre-processing pipeline
-# 
+#
 # Jesse J. Lipp
 # Institute of Molecular Pathology (IMP), Vienna, Austria
 # 2017/08/30
@@ -57,4 +57,3 @@ raw$sequence %>%
 #               End    = seq_length,
 #               Strand = "*") %>%
 #  readr::write_tsv(paste0(library_name, ".saf"))
-

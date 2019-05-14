@@ -1,4 +1,4 @@
-#!/users/kimon.froussios/miniconda3/envs/mybasics/bin/perl
+#!/users/kimon.froussios/miniconda3/envs/bioinfo/bin/perl
 
 $counter = 0 ;
 while( $line = <STDIN> ) {
@@ -8,9 +8,9 @@ while( $line = <STDIN> ) {
 		next;
 	}
 	# Reads
-	$line =~/MD\:Z\:(.*?)\s/ ; 
-	$a = $1 ; 
-	@mis = split /\d+/, $a ; 
+	$line =~/MD\:Z\:(.*?)\s/ ;
+	$a = $1 ;
+	@mis = split /\d+/, $a ;
 	$num = $#mis ;
 	if ($num >= $ARGV[0] && $num <= $ARGV[1]) {
 		$counter++ ;

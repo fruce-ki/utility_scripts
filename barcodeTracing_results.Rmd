@@ -14,7 +14,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r pdfstart}
-pdf('/Volumes/groups/obenauf/Kimon_Froussios/chris/YUMM17_barcode_tracing/paper/experiment1.pdf', paper="a4")
+#pdf('/Volumes/groups/obenauf/Kimon_Froussios/chris/YUMM17_barcode_tracing/paper/experiment1.pdf', paper="a4")
 ```
 
 # Preparation
@@ -190,7 +190,7 @@ print(
     filter(count_Good) %>%
     ggplot(aes(x=Sample, y=Proportion)) +
       geom_violin(aes(fill=treatment), width=1) +
-      geom_boxplot(fill="white", width=0.1, outlier.colour="transparent") +
+      geom_boxplot(fill="white", width=0.1, outlier.size=1, outlier.alpha=0.5) +
       geom_hline(yintercept = abund_thresh, linetype='dotted') +
       scale_y_log10() +
       scale_fill_manual(values=treatCols) +
@@ -225,9 +225,9 @@ print( as.data.table(all_tidy %>%
 
 The colours identify shared barcodes across samples. Samples without barcodes meeting the threshold are not shown.
 
-```{r complexity_plots}
+```{r complexity_plots, fig.height = 4, fig.width = 4}
 # Prepare colour fill.
-all_tidy[, sharedFill := as.factor(ifelse(bc_id %in% sharedBarcodes$bc_id, bc_id, NA))]
+all_tidy[, sharedFill := factor(ifelse(bc_id %in% sharedBarcodes$bc_id, bc_id, NA), levels=c(-1, -2, 0, unique(ifelse(bc_id %in% sharedBarcodes$bc_id, bc_id, NA))))]
 
 # Numbers of Barcodes
 secScale <- max(numBarcodesThresh) / max(numBarcodes)
@@ -238,18 +238,30 @@ tmp <- all_tidy %>%
   filter(prop_Top) %>%
   arrange(desc(Proportion))
 dropped <- unique(all_tidy$Sample)[! unique(all_tidy$Sample) %in% unique(tmp$Sample)]
-tmp <- rbind(tmp, data.frame(Sample=dropped, bc_id=0, Reads=0, Proportion=0, count_Good=NA, prop_Top=FALSE, treatment=NA, is_Shared=NA, sharedFill=NA))
+tmp <- rbind(tmp, data.frame(Sample=dropped, bc_id=-2, Reads=0, Proportion=0, count_Good=NA, prop_Top=FALSE, treatment=NA, is_Shared=NA, sharedFill=NA))
 
-ggplotly(
-  ggplot(data=tmp, aes(x=Sample, y=Proportion, fill=sharedFill, group="A", label=bc_id)) +
+# Pad Samples to 100%
+pad <- tmp %>%
+  group_by(Sample) %>%
+  summarise(Proportion = 1 - sum(Proportion))
+tmp <- rbind(tmp, data.frame(Sample=pad$Sample, bc_id=-1, Reads=0, Proportion=pad$Proportion, count_Good=NA, prop_Top=FALSE, treatment=NA, is_Shared=NA, sharedFill=-1))
+
+p <- ggplot(data=tmp, aes(x=Sample, y=Proportion, fill=sharedFill, group="A", label=bc_id)) +
          geom_bar(stat='identity', position=position_stack(), colour="black", width=0.9, size=0.2) +
          scale_y_continuous(expand = c(0, 0), limits= c(0,1),
                             sec.axis = sec_axis(trans = ~ .)) +
-         scale_fill_discrete(getPalette(nrow(sharedBarcodes)), na.value="grey90") +
+         scale_fill_manual(values=c("black", getPalette(1 + nrow(sharedBarcodes))), na.value="grey90") +
          ylab("Individual barcode proportion") +
          ggtitle(paste0("Barcodes with at least ", abund_thresh * 100,"% representation")) +
          gth + theme(panel.grid.major.x = element_blank(), legend.position="none")
-)
+
+# Static (for PDF)
+print(p)
+```
+
+```{r complexity_plots2, fig.height = 4, fig.width = 4}
+# Interactive for HTML.
+ggplotly(p)
 rm(tmp)
 ```
 
@@ -305,7 +317,7 @@ for (bc in sharedBarcodes$bc_id) {
   
   print(paste('Barcode', bc))
   print(counts$barcode[counts$bc_id==bc])
-  print(
+  # print(
   #   ggplot(data=tmp, aes(x=Sample, y=Proportion, fill=treatment)) +
   #     geom_hline(yintercept=abund_thresh, linetype='dotted') +
   #     geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
@@ -315,27 +327,27 @@ for (bc in sharedBarcodes$bc_id) {
   #     ggtitle(paste("Abundance of barcode",bc)) +
   #     gth + theme(panel.grid.minor.y = element_line(colour='grey95'))
   # )
-  print(
-    ggplot(data=tmp, aes(x=Sample, y=Proportion, fill=treatment)) +
-      geom_hline(yintercept=abund_thresh, linetype='dotted') +
-      geom_violin() +
-      geom_boxplot(fill='transparent', width=1, outlier.size = 0.8, outlier.alpha = 0.5) +
-      geom_point(data=all_tidy[(bc_id == bc), ], fill="orange", size=2, shape=23) +
-      scale_y_log10() +
-      scale_fill_manual(values=treatCols) +
-      ggtitle(paste("Abundance of barcode",bc)) +
-      gth + theme(panel.grid.minor.y = element_line(colour='grey95'))
-  )
   # print(
   #   ggplot(data=tmp, aes(x=Sample, y=Proportion, fill=treatment)) +
   #     geom_hline(yintercept=abund_thresh, linetype='dotted') +
-  #     geom_boxplot(outlier.size = 0.8, outlier.alpha = 0.5) +
+  #     geom_violin() +
+  #     geom_boxplot(fill='transparent', width=1, outlier.size = 0.8, outlier.alpha = 0.5) +
   #     geom_point(data=all_tidy[(bc_id == bc), ], fill="orange", size=2, shape=23) +
   #     scale_y_log10() +
   #     scale_fill_manual(values=treatCols) +
   #     ggtitle(paste("Abundance of barcode",bc)) +
   #     gth + theme(panel.grid.minor.y = element_line(colour='grey95'))
   # )
+  print(
+    ggplot(data=tmp, aes(x=Sample, y=Proportion, fill=treatment)) +
+      geom_hline(yintercept=abund_thresh, linetype='dotted') +
+      geom_boxplot(outlier.size = 0.8, outlier.alpha = 0.5) +
+      geom_point(data=all_tidy[(bc_id == bc), ], fill="orange", size=2, shape=23) +
+      scale_y_log10() +
+      scale_fill_manual(values=treatCols) +
+      ggtitle(paste("Abundance of barcode",bc)) +
+      gth + theme(panel.grid.minor.y = element_line(colour='grey95'))
+  )
 }
 ```
 
@@ -364,5 +376,5 @@ all_tidy %>%
 
 
 ```{r pdfend}
-dev.off()
+#dev.off()
 ```

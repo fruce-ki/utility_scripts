@@ -1,4 +1,4 @@
-#!~/miniconda3/envs/mybasics/bin/Rscript
+#!/users/kimon.froussios/miniconda3/envs/bioinfo/bin/Rscript
 
 args <- commandArgs(trailingOnly=TRUE)
 infile <- args[1]
