@@ -1,4 +1,4 @@
-#!/users/kimon.froussios/miniconda3/envs/mybasics/bin/python3
+#!/users/kimon.froussios/miniconda3/envs/bioinfo/bin/python3
 
 """fileutilities.py
 
@@ -994,7 +994,7 @@ class FilesList(list):
             # If still empty, it was an empty call to the constructor.
             files = []
         # Create the basic list.
-        super(FilesList, self).__init__(files, verbatim=verbatim)
+        super().__init__(files)
         # Add a plain list attribute for the aliases with default values.
         self.aliases = autonumerate(aliases)
 
