@@ -93,8 +93,8 @@ nextflow run zuberlab/crispr-mageck-nf --contrasts $contrasts --counts $counts -
 
 echo ''
 echo "Rename columns."
-renamed="/renamed"
-srun fileutilities.py T $mageckdir --dir | fileutilities.py P --loop S sh ~/utility_scripts/mageck_rename_columns.sh {abs} {abs}${renamed}
+renamed="renamed"
+srun fileutilities.py T $mageckdir --dir | fileutilities.py P --loop S sh ~/utility_scripts/mageck_rename_columns.sh {abs} {abs}/${renamed}
 
 echo ''
 echo "Extract entrez IDs from sgRNA IDs."
@@ -111,12 +111,12 @@ rm tmp.txt
 echo ''
 echo "Merge all gene-level outputs."
 genes="${mageckdir}/genes_all.tsv"
-srun --mem=10000 fileutilities.py T ${library}_forgenes.txt ${mageckdir}/*${renamed}/genes_pos_stats.txt ${mageckdir}/*${renamed}/genes_neg_stats.txt -r -i --appnd outer > $genes
+srun --mem=10000 fileutilities.py T ${library}_forgenes.txt ${mageckdir}/*/${renamed}/genes_pos_stats.txt ${mageckdir}/*/${renamed}/genes_neg_stats.txt -r -i --appnd outer > $genes
 
 echo ''
 echo "Merge all guide-level outputs and clean up redundant columns."
 guides="${mageckdir}/guides_all.tsv"
-srun --mem=10000 fileutilities.py T ${library}_forguides.txt ${mageckdir}/*${renamed}/guides_stats.txt -r -i --appnd outer > $guides
+srun --mem=10000 fileutilities.py T ${library}_forguides.txt ${mageckdir}/*/${renamed}/guides_stats.txt -r -i --appnd outer > $guides
 dups=$(head -n1 $guides | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++} print "\n";')
 srun --mem=10000 fileutilities.py T $guides -r --mrgdups $dups > ${guides/.tsv/_dedup.tsv}
 guides="${guides/.tsv/_dedup.tsv}"
@@ -138,6 +138,6 @@ rm ${mageckdir}/genes_all.tsv
 rm ${mageckdir}/guides_all.tsv
 rm ${mageckdir}/guides_all_dedup.tsv
 rm ${mageckdir}/guides_all_dedup_reord.tsv
-rm -r ${mageckdir}/*${renamed}
+rm -r ${mageckdir}/*/${renamed}
 
 echo "All done!"
