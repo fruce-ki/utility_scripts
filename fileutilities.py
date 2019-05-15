@@ -1261,6 +1261,9 @@ def main(args):
                                 help=" Number of metadata lines at the \
                                 beginning of input data (Default 0). Metadate will be read separately \
                                 and re-added verbatim into the output.")
+    parser.add_argument('-R','--expand_ranges', action='store_true',
+                                help=" If numeric ranges exist among the targets expand them as individual vlaues. \
+                                Ranges must be in from:to format, inclusive of both end values. (Default False)")
     parser.add_argument('-V','--verbatim', action='store_true',
                                 help=" Preserve the target values from a list file, do not try to expand them into absolute paths. (Default impute absolute paths)")
     # General tasks.
@@ -1274,9 +1277,6 @@ def main(args):
                                 otherwise the aliases or basenames will be used, enumerated when necessary.")
     parser.add_argument('--loop', type=str, nargs='+',
                                 help=" Repeat the specified shell command for each target value. \
-                                The first argument determines whether the target values contain numeric ranges \
-                                that should be expanded (given in from:to (inclusive) format): \
-                                'S'= only string literals, 'R'= mix of strings and numeric ranges. \
                                 Available PLACEHOLDERS to insert the targets into the commands: \
                                 {abs} full path, {dir} path of directory portion, {val} target value such as filename, \
                                 {bas} basename (filename minus outermost extension), {ali} file alias. \
@@ -1286,6 +1286,9 @@ def main(args):
                                 with each call to fileutilities loop. The placeholders will take the values \
                                 of the targets of the respectively nested call.")
     # Delimited file tasks.
+    parser.add_argument('--concat', type=str,
+                                help="Create an X-separated list out of the target values, where X is the string specified as argument here. \
+                                Useful for creating comma-separated lists of files.")
     parser.add_argument('--swap', type=str,
                                 help=" Replace all occurrences of the --sep values with the value supplied here.\
                                 ** Bash syntax for tab: $'\\t'. Compatible with 'D' as INPUTTYPE.")
@@ -1329,6 +1332,7 @@ def main(args):
             targets.append(t)
         else:
             targets.extend(v)
+
     flist = None
     if params.INPUTTYPE == 'P':
         # Read files list from STDIN
@@ -1352,6 +1356,17 @@ def main(args):
         flist = FilesList(verbatim=params.verbatim)
     else:
         sys.exit(ml.errstring("Unknown INPUTTYPE."))
+
+    if params.expand_ranges:
+        # Generate the range.
+        myrange = []
+        for t in params.TARGET:   # Look for multiple ranges.
+            v = t.split(":")
+            if len(v) > 1:
+                myrange.extend(list(range(int(v[0]), int(v[1]) + 1)))
+            else:
+                myrange.extend(t)   # Assume string literal. Allows mixing numeric and string target values.
+        flist = FilesList(myrange, verbatim=True)  # If some values are mere numbers, it's unlikely that any others are file paths.
 
     # Metadata. ---------------------------------------------------------------
     metadata = ""
@@ -1390,26 +1405,15 @@ def main(args):
 
     # LOOP arbitrary command. -------------------------------------------------
     elif params.loop:
-        if params.loop[0] == 'R':
-            # Generate the range.
-            myrange = []
-            for t in params.TARGET:   # Look for multiple ranges.
-                v = t.split(":")
-                if len(v) > 1:
-                    myrange.extend(list(range(int(v[0]), int(v[1]) + 1)))
-                else:
-                    myrange.extend(t)   # Assume string literal. Allows mixing numeric and string target values.
-            flist = FilesList(myrange, verbatim=True)
-        # Strip left and/or right padding first.
         command = []
-        for c in params.loop[1:]:
+        for c in params.loop:
             command.append(c.lstrip("+"))
         try:
             do_foreach(flist, command, out=(outdir, outpref, outsuff),
                        progress=(params.STDERRcomments), comments=params.comments,
                        log=params.log)
             if params.STDERRcomments:
-                sys.stderr.write(ml.donestring("looping-"+ params.loop[0]))
+                sys.stderr.write(ml.donestring("looping"))
         except IOError:
             pass
 
@@ -1419,6 +1423,13 @@ def main(args):
         slink(flist, dir=params.link[0], aliases=params.link[1:])
         if params.STDERRcomments:
             sys.stderr.write(ml.donestring("linking"))
+
+
+    # CONCATENATE strings. --------------------------------------------------------
+    if params.concat:
+        sys.stdout.write(params.concat.join(flist))
+        if params.STDERRcomments:
+            sys.stderr.write(ml.donestring("concatenating values"))
 
 
     # SWAP substrings. --------------------------------------------------------
