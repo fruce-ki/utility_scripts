@@ -1178,7 +1178,7 @@ class FilesList(list):
         if pathname is None:
             return None
         else:
-            return os.path.splitext(os.path.basename(pathname))[0]
+            return os.path.splitext(os.path.basename(str(pathname)))[0]
 
     def sorted(self):
         """Sorted copy.
@@ -1392,13 +1392,13 @@ def main(args):
         if params.loop[0] == 'R':
             # Generate the range.
             myrange = []
-            for t in targets:   # Look for multiple ranges.
+            for t in params.TARGET:   # Look for multiple ranges.
                 v = t.split(":")
                 if len(v) > 1:
                     myrange.extend(list(range(int(v[0]), int(v[1]) + 1)))
                 else:
                     sys.exit(ml.errstring("No numeric ranges specified. Use -h for help with the newest syntax."))
-            flist = FilesList(myrange)
+            flist = FilesList(myrange, verbatim=True)
         # Strip left and/or right padding first.
         command = []
         for c in params.loop[1:]:
