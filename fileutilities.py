@@ -1066,8 +1066,8 @@ class FilesList(list):
         """
         if myfile is not None:
             if not verbatim:
-                myfile = os.path.abspath(os.path.expanduser(myfile))
-        super(FilesList, self).append(myfile)
+                myfile = expand_fpaths([myfile])[0]
+        super().append(myfile)
         if not myalias:
             myalias = self.autoalias(myfile)
         self.aliases.append(myalias)
@@ -1274,8 +1274,9 @@ def main(args):
                                 otherwise the aliases or basenames will be used, enumerated when necessary.")
     parser.add_argument('--loop', type=str, nargs='+',
                                 help=" Repeat the specified shell command for each target value. \
-                                The first value of this parameter determines what the target values are: \
-                                'S'= strings, including paths or files, 'R'= numeric ranges of positive integers in from:to (inclusive) format. \
+                                The first argument determines whether the target values contain numeric ranges \
+                                that should be expanded (given in from:to (inclusive) format): \
+                                'S'= only string literals, 'R'= mix of strings and numeric ranges. \
                                 Available PLACEHOLDERS to insert the targets into the commands: \
                                 {abs} full path, {dir} path of directory portion, {val} target value such as filename, \
                                 {bas} basename (filename minus outermost extension), {ali} file alias. \
@@ -1397,7 +1398,7 @@ def main(args):
                 if len(v) > 1:
                     myrange.extend(list(range(int(v[0]), int(v[1]) + 1)))
                 else:
-                    sys.exit(ml.errstring("No numeric ranges specified. Use -h for help with the newest syntax."))
+                    myrange.extend(t)   # Assume string literal. Allows mixing numeric and string target values.
             flist = FilesList(myrange, verbatim=True)
         # Strip left and/or right padding first.
         command = []
