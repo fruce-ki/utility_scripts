@@ -14,7 +14,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r pdfstart}
-#pdf('/Volumes/groups/obenauf/Kimon_Froussios/chris/YUMM17_barcode_tracing/paper/experiment1.pdf', paper="a4")
+#pdf('/Volumes/groups/obenauf/Kimon_Froussios/chris/YUMM17_barcode_tracing/paper/experiment2.pdf', paper="a4")
 ```
 
 # Preparation
@@ -59,7 +59,7 @@ counts <- fread('/Volumes/groups/obenauf/Kimon_Froussios/chris/YUMM17_barcode_tr
 counts[is.na(counts)] <- 0
 
 # Assign a numeric ID to barcodes by abundance in reference.
-counts[, bc_id := order(Reference, decreasing=TRUE)]
+counts[, bc_id := frank(counts, -Reference, ties.method='first')]
 setkey(counts, bc_id)
 
 # counts columns with counts
@@ -77,9 +77,9 @@ Set sample order.
 
 ```{r order}
 # Tidy up sample names.
-sampleNames <- c("Reference", "UT_313", "UT_319", "UT_321", "UT_322", "D+T_312", "D+T_314", "D+T_316", "D+T_317", "D+T_320", "D+T_323")
+sampleNames <- c("Reference", "UT_414", "UT_416", "UT_417", "UT_475", "D+T_411",  "D+T_412", "D+T_413", "D+T_415", "D+T_418")
 samples_tidy <- data.frame(name=factor(sampleNames, levels=sampleNames, ordered=TRUE), 
-                           treatment=c('ref', rep('UT', 4), rep('DT', 6)))
+                           treatment=c('ref', rep('UT', 4), rep('DT', 5)))
 ```
 
 Calculate proportions and tidy up the data format.
@@ -100,7 +100,7 @@ relative <- as.data.table(lapply(names(counts[, -1, with=FALSE]), function(x) {
 names(relative) <- names(counts[, -1, with=FALSE])
 setkey(relative, bc_id)
 
-# Minimum barcode representation threshold
+# BArcodes passing the abundance threshold.
 numBarcodesThresh <- sapply(relative[, 1:(length(relative)-1)], function (x) { sum(x >= abund_thresh) } )
 
 # Make tidy summary of counts.
@@ -167,17 +167,16 @@ rm(samples_tidy)
 
 ```{r counts}
 # Basic faceted barplot
-print ( 
-  ggplot(data=droplevels(count_summary[(Type != "top_Barcodes"), ]), aes(x=Sample, y=Count, fill=Type))  +
-          facet_grid(Type ~ ., scales = "free") +
-          geom_bar(stat='identity', width=0.7, size=0.2) +
-          scale_fill_manual(values = c(all_BCs = "mediumorchid2", 
-                                       fltr_BCs = "mediumorchid3", 
-                                       Reads= "darkgoldenrod2")) +
-          scale_y_continuous(expand = expand_scale(mult = c(0, .15)), limits = c(0, NA)) +
-          ggtitle("Total # of reads, and # of detected barcodes") +
+p <- ggplot(data=droplevels(count_summary[(Type != "top_Barcodes"), ]), aes(x=Sample, y=Count, fill=Type))  +
+        facet_grid(Type ~ ., scales = "free") +
+        geom_bar(stat='identity', width=0.7, size=0.2) +
+        scale_fill_manual(values = c(all_BCs = "mediumorchid2", 
+                                     fltr_BCs = "mediumorchid3", 
+                                     Reads= "darkgoldenrod2")) +
+        ggtitle("Total # of reads, and # of detected barcodes") +
           gth + theme(legend.position = "none")
-)
+print( p + scale_y_continuous(expand = expand_scale(mult = c(0, .15)), limits = c(0, NA)) )
+# print( p + scale_y_sqrt(expand = expand_scale(mult = c(0, .15)), limits = c(0, NA)) )
 ```
 
 # Distribution of barcode abundances above threshold
@@ -190,7 +189,7 @@ print(
     filter(count_Good) %>%
     ggplot(aes(x=Sample, y=Proportion)) +
       geom_violin(aes(fill=treatment), width=1) +
-      geom_boxplot(fill="white", width=0.1, outlier.size=1, outlier.alpha=0.5) +
+      geom_boxplot(fill="white", width=0.1, outlier.size=1.3, outlier.alpha=0.33) +
       geom_hline(yintercept = abund_thresh, linetype='dotted') +
       scale_y_log10() +
       scale_fill_manual(values=treatCols) +
@@ -256,7 +255,7 @@ p <- ggplot(data=tmp, aes(x=Sample, y=Proportion, fill=sharedFill, group="A", la
          gth + theme(panel.grid.major.x = element_blank(), legend.position="none")
 
 # Static (for PDF)
-print(p)
+# print(p)
 ```
 
 ```{r complexity_plots2, fig.height = 4, fig.width = 4}
@@ -270,17 +269,17 @@ Number of barcodes passing the counts threshold vs. number of barcodes passing t
 ```{r complexity_plots3}
 # The labels can create terrible clutter if the plot is small with lots of points. 
 # Plotly enables hover-over to get Sample info
-ggplotly(
-  ggplot(data=all_tidy %>% 
-                filter(count_Good) %>%
-                group_by(Sample) %>% 
-                summarise(n_Barcodes=n(), n_TopBarcodes=sum(prop_Top), Treatment=unique(treatment)), 
-         aes(label=Sample, x=n_Barcodes, y=n_TopBarcodes, colour=Treatment)) +
-    geom_point(shape=16, size=1, alpha=0.6) +
-    scale_colour_manual(values=treatCols) +
-    ggtitle("Barcode Diversity") +
-    gth
-)
+# ggplotly(
+#   ggplot(data=all_tidy %>% 
+#                 filter(count_Good) %>%
+#                 group_by(Sample) %>% 
+#                 summarise(n_Barcodes=n(), n_TopBarcodes=sum(prop_Top), Treatment=unique(treatment)), 
+#          aes(label=Sample, x=n_Barcodes, y=n_TopBarcodes, colour=Treatment)) +
+#     geom_point(shape=16, size=1, alpha=0.6) +
+#     scale_colour_manual(values=treatCols) +
+#     ggtitle("Barcode Diversity") +
+#     gth
+# )
 
 # Static version with labels.
 print(
@@ -317,31 +316,11 @@ for (bc in sharedBarcodes$bc_id) {
   
   print(paste('Barcode', bc))
   print(counts$barcode[counts$bc_id==bc])
-  # print(
-  #   ggplot(data=tmp, aes(x=Sample, y=Proportion, fill=treatment)) +
-  #     geom_hline(yintercept=abund_thresh, linetype='dotted') +
-  #     geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
-  #     geom_point(data=all_tidy[(bc_id == bc), ], fill="orange", size=2, shape=21) +
-  #     scale_y_log10() +
-  #     scale_fill_manual(values=treatCols) +
-  #     ggtitle(paste("Abundance of barcode",bc)) +
-  #     gth + theme(panel.grid.minor.y = element_line(colour='grey95'))
-  # )
-  # print(
-  #   ggplot(data=tmp, aes(x=Sample, y=Proportion, fill=treatment)) +
-  #     geom_hline(yintercept=abund_thresh, linetype='dotted') +
-  #     geom_violin() +
-  #     geom_boxplot(fill='transparent', width=1, outlier.size = 0.8, outlier.alpha = 0.5) +
-  #     geom_point(data=all_tidy[(bc_id == bc), ], fill="orange", size=2, shape=23) +
-  #     scale_y_log10() +
-  #     scale_fill_manual(values=treatCols) +
-  #     ggtitle(paste("Abundance of barcode",bc)) +
-  #     gth + theme(panel.grid.minor.y = element_line(colour='grey95'))
-  # )
   print(
     ggplot(data=tmp, aes(x=Sample, y=Proportion, fill=treatment)) +
       geom_hline(yintercept=abund_thresh, linetype='dotted') +
-      geom_boxplot(outlier.size = 0.8, outlier.alpha = 0.5) +
+      geom_violin(draw_quantiles = c(0.25, 0.5, 0.75)) +
+      geom_boxplot(colour="transparent", fill="transparent", outlier.colour="black", outlier.size = 1, outlier.alpha = 0.33) +
       geom_point(data=all_tidy[(bc_id == bc), ], fill="orange", size=2, shape=23) +
       scale_y_log10() +
       scale_fill_manual(values=treatCols) +
@@ -360,16 +339,19 @@ top <- all_tidy %>%
   arrange(bc_id) %>%
   unique()
 
-all_tidy %>%
+p <- all_tidy %>%
   arrange(bc_id) %>%
   filter(bc_id %in% top$bc_id) %>%
   select(Sample, bc_id, Proportion) %>%
   mutate(bc_id=factor(as.character(bc_id), levels=as.character(top$bc_id))) %>%
   ggplot(aes(x=Sample, y=bc_id, fill=Proportion)) +
-    geom_tile(colour='black') +
+    geom_tile() +
     scale_fill_gradient(low="white", high="midnightblue") +
+    scale_colour_gradient(low="white", high="midnightblue") +
     theme(axis.text.x=element_text(angle=90),
           legend.position = "right")
+ggplotly(p)
+#print(p)
 ```
 
 
