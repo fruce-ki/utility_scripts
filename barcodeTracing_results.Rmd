@@ -346,9 +346,10 @@ p <- all_tidy %>%
   mutate(bc_id=factor(as.character(bc_id), levels=as.character(top$bc_id))) %>%
   ggplot(aes(x=Sample, y=bc_id, fill=Proportion)) +
     geom_tile() +
-    scale_fill_gradient(low="white", high="midnightblue") +
-    scale_colour_gradient(low="white", high="midnightblue") +
+    scale_fill_gradient(low="transparent", high="red4") +
     theme(axis.text.x=element_text(angle=90),
+          panel.background = element_rect(fill="white"),
+          panel.grid.major = element_line(colour="grey97"),
           legend.position = "right")
 ggplotly(p)
 #print(p)
