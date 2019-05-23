@@ -1,4 +1,4 @@
-#!/users/kimon.froussios/miniconda3/envs/bioinfo/bin/Rscript
+#!/usr/bin/env Rscript
 
 ################################################################################
 # process library text file

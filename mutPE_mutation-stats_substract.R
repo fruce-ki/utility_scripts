@@ -1,4 +1,4 @@
-#!/users/kimon.froussios/miniconda3/envs/bioinfo/bin/Rscript
+#!/usr/bin/env Rscript
 
 # Substracts one (or more) stats files from another stats file.
 # Individual mutation types at each position are summed, and the sums are then substracted across files.

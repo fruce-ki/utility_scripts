@@ -1,4 +1,4 @@
-#!/users/kimon.froussios/miniconda3/envs/bioinfo/bin/python3
+#!/user/bin/env python3
 
 """mylogs.py
 

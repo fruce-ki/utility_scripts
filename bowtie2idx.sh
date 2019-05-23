@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env sh
 
 module load bowtie2/2.2.9-foss-2017a
 
@@ -7,5 +7,3 @@ pref=$1 ; shift
 params=( "$@" )
 
 bowtie2-build $fa $pref $params
-
-

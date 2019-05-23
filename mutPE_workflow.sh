@@ -1,4 +1,4 @@
-#!/usr/bin/sh
+#!/usr/bin/env sh
 
 # Process the samples of one Run, from .sra to _barcode_report.pdf
 

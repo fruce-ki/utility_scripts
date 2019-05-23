@@ -1,6 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env sh
 
-# Send array job for STAR. 
+# Send array job for STAR.
 # SGE_TASK_ID <-> replicate number
 
 
@@ -23,7 +23,7 @@ function usage() {
     echo "Usage:"
     echo "      $0 -c PREFIX -a ANNOTATION -n INDEX  [-A ANNOTDIR] [-i FASTQDIR] [-o SAMDIR] [-N INDEXDIR] [-t THREADS] [-m MAXMEMORY] [-X path/star] [-D PROJECTDIR] [-L]"
     echo "Defaults:"
-    echo "      -A $annotdir -i $fastqdir -o $samdir -N ${indexdir} -t ${threads} -m $maxram -X $tool -D $project -L $log"  
+    echo "      -A $annotdir -i $fastqdir -o $samdir -N ${indexdir} -t ${threads} -m $maxram -X $tool -D $project -L $log"
     echo "All directories must be relative to PROJECTDIR. -L requires ${scriptsdir}/mylogs.py"
     exit 1
 }
@@ -74,17 +74,8 @@ fi
 # Log and Execute.
 
 command="$tool $input $myparams $miscparams"
-if [ "$log" = true ] ; then  
+if [ "$log" = true ] ; then
 	python "${scriptsdir}/mylogs.py" "$command"
 fi
 
 $command
- 
- 
- 
- 
- 
-
-  
- 
-

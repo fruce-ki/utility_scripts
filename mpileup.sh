@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env sh
 
 module load samtools/1.9-foss-2017a
 

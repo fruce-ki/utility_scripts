@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env sh
 
 module load bowtie2/2.2.9-foss-2017a
 module load samtools/1.9-foss-2017a
@@ -22,4 +22,3 @@ fi
 
 samtools sort -@ $threads -o ${outdir}/${pref}_sorted.bam ${outdir}/${pref}.bam
 samtools index -b ${outdir}/${pref}_sorted.bam
-

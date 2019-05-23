@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env sh
 
 function usage() {
     echo "Usage:"

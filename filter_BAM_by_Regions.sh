@@ -1,4 +1,4 @@
-#!/usr/bin/sh
+#!/usr/bin/env sh
 
 bam=$1      # input BAM
 regions=$2  # SAM header file, with only the sequences to keep

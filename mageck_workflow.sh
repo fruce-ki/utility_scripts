@@ -1,4 +1,4 @@
-#!/usr/bin/sh
+#!/usr/bin/env sh
 #
 #SBATCH --get-user-env
 #SBATCH -J mageck-wf

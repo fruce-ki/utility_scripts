@@ -1,4 +1,4 @@
-#!/users/kimon.froussios/miniconda3/envs/bioinfo/bin/Rscript
+#!/usr/bin/env Rscript
 
 # Plots
 # - mutation frequencies and read coverage statically for each input in a collective PDF

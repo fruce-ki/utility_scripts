@@ -1,4 +1,4 @@
-#!/usr/bin/sh
+#!/usr/bin/env sh
 
 # Number and length of reads in UNZIPPED FastQ.
 

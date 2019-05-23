@@ -1,4 +1,4 @@
-#!/usr/bin/sh
+#!/usr/bin/env sh
 
 comparisondir=$1 ; shift
 outputdir=$1 ; shift
@@ -13,12 +13,12 @@ reference=$(perl -e '$ARGV[0]=~/\/(\w+)_vs_(\w+)$/;print $2;' $comparisondir)
 echo "Treat: ${treatment}   Ref: ${reference}"
 
 cat ${comparisondir}/guides_stats.txt \
-	| perl -e '$header = <STDIN>; 
+	| perl -e '$header = <STDIN>;
 		   chomp $header ;
-		   @fields = split /\t/, $header; 
+		   @fields = split /\t/, $header;
 		   foreach $name (@fields) {
 		   	if ($name ne "id" && $name ne "group") {
-			   	$header =~s/(?<![\w.])$name(?![\w.])/M.sg.$name.$ARGV[0].vs.$ARGV[1]/; 
+			   	$header =~s/(?<![\w.])$name(?![\w.])/M.sg.$name.$ARGV[0].vs.$ARGV[1]/;
 			}
 		   }
 		   #$header =~s/_/./g;
@@ -30,12 +30,12 @@ cat ${comparisondir}/guides_stats.txt \
 
 
 cat ${comparisondir}/genes_pos_stats.txt \
-	| perl -e '$header = <STDIN>; 
+	| perl -e '$header = <STDIN>;
 		   chomp $header ;
 		   @fields = split /\t/, $header;
 		   foreach $name (@fields) {
 		   	if ($name ne "group") {
-			   	$header =~s/(?<![\w.])$name(?![\w.])/M.g+.$name.$ARGV[0].vs.$ARGV[1]/; 
+			   	$header =~s/(?<![\w.])$name(?![\w.])/M.g+.$name.$ARGV[0].vs.$ARGV[1]/;
 			}
 		   }
 		   #$header =~s/_/./g;
@@ -47,12 +47,12 @@ cat ${comparisondir}/genes_pos_stats.txt \
 
 
 cat ${comparisondir}/genes_neg_stats.txt \
-	| perl -e '$header = <STDIN>; 
+	| perl -e '$header = <STDIN>;
 		   chomp $header ;
-		   @fields = split /\t/, $header; 
+		   @fields = split /\t/, $header;
 		   foreach $name (@fields) {
 		   	if ($name ne "group") {
-			   	$header =~s/(?<![\w.])$name(?![\w.])/M.g-.$name.$ARGV[0].vs.$ARGV[1]/; 
+			   	$header =~s/(?<![\w.])$name(?![\w.])/M.g-.$name.$ARGV[0].vs.$ARGV[1]/;
 			}
 		   }
 		   #$header =~s/_/./g;

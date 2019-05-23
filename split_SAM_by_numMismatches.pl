@@ -1,4 +1,4 @@
-#!/users/kimon.froussios/miniconda3/envs/bioinfo/bin/perl
+#!/usr/bin/env perl
 
 $counter = 0 ;
 while( $line = <STDIN> ) {
