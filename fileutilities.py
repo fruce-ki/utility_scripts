@@ -750,7 +750,7 @@ def append_columns(flist, colSep=["\t"], header=False, index=None, merge=True, t
     return result
 
 
-def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='outer', saveHeader=False, dedup=False):
+def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='outer', saveHeader=False, dedup=True):
     """Incrementally merge tables.
 
 	Join the first two files and then join the third file to the merged first two, etc.
@@ -760,13 +760,14 @@ def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='
     Args:
         flist: A list/FilesList of files to combine.
         colSep[str]: A list of characters used as field delimiters.
-                    (Default ["\t"])
+                     (Default ["\t"])
         header(bool): Crop first non-comment line as column labels. (Default False)
         index(int): Column to use as row index (same in all files).
                     (Default 0)
         type(str): 'left', 'right', 'outer' or 'inner' merge. (Default outer)
         saveHeader(bool): Exclude the first row from sorting upon merging. (False)
-                        Necessary when the header is not to be cropped.
+                          Necessary when the header is not to be cropped.
+        dedup(bool): Remove repeated index columns (one per file).
     Returns:
         pandas.Dataframe
     """
@@ -798,11 +799,12 @@ def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='
                 result = pd.merge(left=result, right=df, how=type, on=None,
                                   left_index=True, right_index=True,
                                   sort=False, suffixes=('','_'+ myalias))
-    # The column merged on accumulates a duplicate for each table. Drop them.
+    # In addition to the new row_ID columns, the index column was kept for each table. Drop them as redundant.
     # If the index columns are not exact duplicates (due to gappy rows),
     # dedup_columns can be used afterwards on the merged file).
     if dedup:
-        result.drop(columns=getDuplicateColumns(result), inplace=True)
+        index_cols = [col for col in result.columns if '_|' + str(index) in col]
+        result.drop(columns=index_cols, inplace=True)
     return result
 
 
