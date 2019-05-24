@@ -26,7 +26,7 @@ while getopts 'd:D:b:p:r:a:i:sf' flag; do
 		a) aux="${OPTARG}" ;;     		# Dir where the bowtie index is located, relative to base
     i) bowtie2idx="${OPTARG}" ;;  # Bowtie2 index prefix
 		s) issra="${OPTARG}" ;;       # Input is .sra format
-		f) renamefq="${OPTARG}" ;;    # Files are uncompressed .fq instead of compressed .fastq.fq
+		f) renamefq="${OPTARG}" ;;    # Files are uncompressed .fq instead of compressed .fastq.gz
 		*) usage ;;
   esac
 done
