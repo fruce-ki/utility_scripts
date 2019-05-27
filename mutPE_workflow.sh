@@ -51,6 +51,9 @@ if [[ -z $issra ]]; then
 	fileutilities.py T ${base}/${data}/${run} --dir .sra | fileutilities.py P --loop S srun ~/utility_scripts/sra2fastq.sh ${base}/${data}/${run} ${base}/${data}/${run}/{val}
 fi
 
+echo "Extracting to FASTQ."
+fileutilities.py T ${base}/${data}/${run} --dir .bam | fileutilities.py P --loop samtools fastq ,-c 1 ,-1 {dir}/{ali}_1.fastq.gz ,-2 {dir}/{ali}_2.fastq.gz {abs}
+
 echo "Merging pairs."
 fileutilities.py T ${base}/${data}/${run} --dir _1.fastq.gz | perl -e 'while(<>){~s/_1\.fastq$//;print}' | fileutilities.py P --loop S srun flash ,-t 1 ,-M 150 ,-x 0.25 ,-d ${base}/${process}/${run} ,-o {ali}_x25 ,-z ${base}/${data}/${run}/{ali}_1.fastq.gz ${base}/${data}/${run}/{ali}_2.fastq.gz
 
