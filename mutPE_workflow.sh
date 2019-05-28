@@ -32,6 +32,10 @@ while getopts 'd:D:b:p:r:a:i:sf' flag; do
 done
 
 
+# For R to save plotly widgets
+module load pandoc/2.0.5
+
+
 if [[ ! -d "${base}/${process}/${run}" ]]; then
 	mkdir -p "${base}/${process}/${run}"
   echo "Created destination: ${base}/${process}/${run}"
@@ -74,7 +78,7 @@ fileutilities.py T ${base}/${process}/${run} --dir '\d+-\d+.bam$' | fileutilitie
 echo "Counting."
 fileutilities.py T ${base}/${process}/${run} --dir '\d+-\d+.pileup$' | fileutilities.py P --loop python3 ./analysis/MutPE_quantification.py ,-p {abs} \> {dir}/{bas}.stats
 
-echo "Visualising ${base}/${process}/${run}/*.stats into ${base}/${results}/${run}/${run/\//_}*.html/pdf"
+echo "Visualising ${base}/${process}/${run}/*.stats into ${base}/${results}/${run}/${run//\//_}*.html/pdf"
 mutPE_mutation-stats_viz.R ${base}/${results}/${run} ${run/\//_} NULL yes ${base}/${process}/${run}/*.stats
 
 echo "Finished."
