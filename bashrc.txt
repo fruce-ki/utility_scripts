@@ -72,7 +72,7 @@ shopt -s cdable_vars
 # My additions
 
 # Colourful prompt
-PS1="\[\e[1;41m\]\u\[\e[m\] \[\e[46m\]\h\[\e[m\] \[\e[44m\]\W\[\e[m\]\$ "
+PS1="\[\e[1;41m\]\u\[\e[m\] \[\e[45m\]\h\[\e[m\] \[\e[44m\]\W\[\e[m\]\$ "
 
 # Colourful directories
 alias ls='ls --color=always'
