@@ -7,7 +7,7 @@ set -e
 ## Parameters ##
 function usage() {
     echo "Usage:"
-    echo "      $0 -d BASEDIR -b BATCHDIR -i BOWTIE2_IDX [-D DATADIR] [-p PROCESSING_DIR] [-r RESULTS_DIR] [-a AUX_DIR] [[-s] | [-f]]"
+    echo "      $0 -d BASEDIR -b BATCHDIR -i BOWTIE2_IDX [-D DATADIR] [-p PROCESSING_DIR] [-r RESULTS_DIR] [-a AUX_DIR] [-o OFFSET] [[-s] | [-f]]"
 		exit 1
 }
 # Defaults
@@ -15,8 +15,9 @@ data='data'
 process='process'
 results='results'
 aux='aux'
+offsets='-:0:0'
 # Parse options.
-while getopts 'd:D:b:p:r:a:i:sf' flag; do
+while getopts 'd:D:b:p:r:a:i:o:l:sf' flag; do
   case "${flag}" in
     d) base="${OPTARG}" ;;        # Base dir
 		D) data="${OPTARG}" ;;     		# Data dir in which the batch is located, relative to base
@@ -25,15 +26,17 @@ while getopts 'd:D:b:p:r:a:i:sf' flag; do
 		r) results="${OPTARG}" ;;     # Dir for the final files, relative to base
 		a) aux="${OPTARG}" ;;     		# Dir where the bowtie index is located, relative to base
     i) bowtie2idx="${OPTARG}" ;;  # Bowtie2 index prefix
-		s) issra="${OPTARG}" ;;       # Input is .sra format
+    o) offsets="${OPTARG}" ;;     # Reference deletions: "REF:START:LENGTH" ie. "HDR2:280:6,HDR2:280:6"
+    s) issra="${OPTARG}" ;;       # Input is .sra format
 		f) renamefq="${OPTARG}" ;;    # Files are uncompressed .fq instead of compressed .fastq.gz
 		*) usage ;;
   esac
 done
 
 
-# For R to save plotly widgets
 module load pandoc/2.0.5
+module load flash/1.2.11-foss-2017a
+module load samtools/1.9-foss-2017a
 
 
 if [[ ! -d "${base}/${process}/${run}" ]]; then
@@ -79,6 +82,6 @@ echo "Counting."
 fileutilities.py T ${base}/${process}/${run} --dir '\d+-\d+.pileup$' | fileutilities.py P --loop python3 ./analysis/MutPE_quantification.py ,-p {abs} \> {dir}/{bas}.stats
 
 echo "Visualising ${base}/${process}/${run}/*.stats into ${base}/${results}/${run}/${run//\//_}*.html/pdf"
-mutPE_mutation-stats_viz.R ${base}/${results}/${run} ${run/\//_} NULL yes ${base}/${process}/${run}/*.stats
+mutPE_mutation-stats_viz.R ${base}/${results}/${run} ${run/\//_} NULL no $offsets ${base}/${process}/${run}/*.stats
 
 echo "Finished."

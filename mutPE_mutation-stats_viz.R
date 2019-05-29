@@ -5,16 +5,29 @@
 # - mutation frequencies interactively overlayed for all the input files
 # - read coverage interactively overlayed for all the input files
 
+## REQUIRES: pandoc
+
+#args <- c('~/', 'test', 'NULL', 'no', 'HDR1:280:6,HDR2:280:6', '/Volumes/groups/pavri/Kimon/ursi/mutPEseq/round5/process/in-vivo/HDR2/86754_B18_C2_G_e1_x25.extendedFrags_sorted_3-10.stats')
+#args <- c('~/', 'test', 'NULL', 'no', '-:0:0', '/Volumes/groups/pavri/Kimon/ursi/mutPEseq/round5/process/in-vivo/HDRc/86752_B18_Cc_G_e1_x25.extendedFrags_sorted_1-2.stats')
 args <- commandArgs(trailingOnly = TRUE)
 outdir <- args[1]
 prefix <- args[2]             # for the collective PDF and HTML output files
 ymax <- args[3]               # "NULL" for automatic
-collectiveonly <- args[4]       # 'yes'/'no' useful to prevent file spam when many stats files are input
-statsfiles <- args[5:length(args)]       # TSV input files: seq \t pos \t type \t count \t depth
+collectiveonly <- args[4]     # 'yes'/'no' useful to prevent file spam when many stats files are input
+trimmedstart <- 10            # shorten reference name. Keep from here
+trimmedend <- 19              # shorten reference name. Keep to here
+offsets <- args[5]            # Correct for deletions in references. "REF:START:LENGTH,REF:START:LENGTH" ie. "HDR2:280:6"
+                              # For no corrections needed you can use "-:0:0". REF will be grepl'ed.
+statsfiles <- args[6:length(args)]       # TSV input files: seq \t pos \t type \t count \t depth
 
 library(tidyverse)
 library(ggrepel)
 library(plotly)
+
+# Expand the corrections string. 
+offsets <- strsplit(offsets, ',', fixed=TRUE)[[1]]
+offsets <- as.data.frame(t(as.data.frame(strsplit(offsets, ':', fixed=TRUE))), stringsAsFactors=FALSE)
+row.names(offsets) <- NULL
 
 mega=data.frame(seq=NA_character_,
                 pos=NA_integer_,
@@ -28,13 +41,24 @@ mega=data.frame(seq=NA_character_,
 
 pdf(file.path(outdir, paste0(prefix, '.pdf')))
 
-# sf <- statsfile[1]
+# sf <- statsfiles[1]
 for (sf in statsfiles){
   # Input
   posdata <- read_tsv(sf)
   if (all(names(posdata) == c('amplicon', 'pos', 'type', 'freq', 'total')))
     names(posdata) <- c('seq', 'pos', 'type', 'count', 'depth')
   stopifnot(all(names(posdata) == c('seq', 'pos', 'type', 'count', 'depth')))
+
+  # Correct for reference deletions
+  for (ref in 1:dim(offsets)[1]) {
+    #ref <- 2
+    sel <- (grepl(offsets[[ref,1]], posdata$seq) & posdata$pos >= as.integer(offsets[[ref,2]]))
+    posdata$pos[sel] <- posdata$pos[sel] + as.integer(offsets[[ref,3]])
+  }
+  
+  # Shorten the reference name so it fits in the facet bars.
+  posdata <- posdata %>% 
+    mutate(seq = substr(seq, trimmedstart, trimmedend))
 
   # Calculate frequencies and aggregate frequencies by position
   posdata <- posdata %>%
@@ -43,6 +67,21 @@ for (sf in statsfiles){
     mutate(aggrfreq = sum(freq)) %>%
     ungroup()
 
+  # Create interruptions for coordinates without info.
+  missing <- which(! 1:max(posdata$pos) %in% unique(posdata$pos))  # Maybe there is more info missing than just the deletions?
+  if(length(missing) > 0){
+    posdata <- rbind(posdata,
+                     data.frame(seq=posdata$seq[1],      # A single .stats file should contain one sample, mapped to one reference.
+                                pos=missing,
+                                type='ref_indel',
+                                count=0,
+                                depth=0,
+                                freq=0,
+                                mutated=TRUE,
+                                aggrfreq=0) )
+  }
+  
+  
   # Collapse all insertion and deletions respectively, and allow for unexpected categories
   deletions <- grepl('^del', posdata$type)
   insertions <- grepl('^ins', posdata$type)
@@ -57,10 +96,11 @@ for (sf in statsfiles){
     group_by(seq, type) %>%
     summarise(frequency = sum(count>0)) %>%
     ggplot(aes(x = type, y = frequency, fill=type)) +
-      facet_wrap( . ~ seq) +
+      facet_grid( . ~ seq) +
       geom_bar(stat = 'identity', width = 0.9) +
       ylab('Number of positions') +
-      ggtitle("Number of positions per mutation type.", subtitle=basename(sf))
+      ggtitle("Number of positions per mutation type.", subtitle=basename(sf)) +
+      guides(fill="none")
   )
 
   # Plot number of reads per mutation type
@@ -72,28 +112,29 @@ for (sf in statsfiles){
       facet_wrap( . ~ seq) +
       geom_bar(stat = 'identity', width=0.9) +
       ylab('Number of reads') +
-      ggtitle("Number of reads showing each mutation type.", subtitle=basename(sf))
+      ggtitle("Number of reads showing each mutation type.", subtitle=basename(sf)) +
+      guides(fill="none")
   )
 
   # Pileup plot axis limits
   maxdepth <- max(posdata$depth)
   minpos <- min(posdata$pos)
   maxpos <- max(posdata$pos)
-  maxfreq <- max(posdata$aggrfreq)
+  maxfreq <- max(posdata %>% filter(type != 'ref_indel') %>% select(aggrfreq))
   if(ymax != 'NULL')
     maxfreq <- as.numeric(ymax)
-
+  
   # Plot mutations pileup
   print(posdata %>%
     filter(mutated) %>%
     select(seq, pos, aggrfreq, depth) %>%
     unique() %>%
     ggplot(aes(x = pos)) +
-      facet_wrap( . ~ seq) +
+      facet_grid(seq ~ .) +
       geom_hline(aes(yintercept=quantile(aggrfreq, 0.25)), linetype='dotted', alpha=0.4) +
       geom_hline(aes(yintercept=median(aggrfreq)), linetype='dotdash', alpha=0.4) +
       geom_hline(aes(yintercept=quantile(aggrfreq, 0.75)), linetype='dashed', alpha=0.4) +
-      geom_line(aes(y=depth / maxdepth * maxfreq * 1.1), colour='grey50') +
+      geom_line(aes(y=depth / maxdepth * maxfreq * 1.1), colour='grey80') +
       geom_bar(aes(y = aggrfreq, fill=aggrfreq), stat = 'identity') +
       geom_label_repel(data=posdata %>%
                        filter(mutated) %>%
@@ -112,13 +153,13 @@ for (sf in statsfiles){
             panel.grid.minor.y = element_line(colour='grey95'))
   )
 
-  if(collectiveonly=='yes'){
-    # Plot interactive mutations pileup
+  if(collectiveonly != 'yes'){
+    # Plot interactive mutations pileup for each input
     htmlwidgets::saveWidget(ggplotly(posdata %>%
       filter(mutated) %>%
       mutate(type = factor(type, levels=c("A>C", "A>G", "A>T", "C>A", "C>G", "C>T", "G>A", "G>C", "G>T", "T>A", "T>C", "T>G", "indel", "other"))) %>%
       ggplot(aes(x = pos, y = freq)) +
-        facet_wrap( . ~ seq) +
+        facet_grid(seq ~ .) +
         geom_hline(aes(yintercept=quantile(aggrfreq, 0.25)), linetype='dotted', alpha=0.4) +
         geom_hline(aes(yintercept=median(aggrfreq)), linetype='dotdash', alpha=0.4) +
         geom_hline(aes(yintercept=quantile(aggrfreq, 0.75)), linetype='dashed', alpha=0.4) +
@@ -132,7 +173,7 @@ for (sf in statsfiles){
               panel.grid.major.y = element_line(colour='grey95'),
               panel.grid.minor.y = element_line(colour='grey95'))
       ),
-      file.path(outdir, paste0(basename(sf), '_pileup_types.html'))
+      file.path(outdir, paste0(basename(sf), '_pileup_MutTypes.html'))
     )
   }
 
@@ -142,15 +183,15 @@ for (sf in statsfiles){
 
 dev.off()
 
-# Plot mutations pileup
+# Plot mutations collective pileups
 htmlwidgets::saveWidget(ggplotly(
   mega %>%
     filter(mutated==TRUE) %>%
     select(seq, pos, aggrfreq, depth, file) %>%
     unique() %>%
-    ggplot(aes(x = pos, y = aggrfreq, colour=file, fill=file)) +
-      facet_wrap( . ~ seq) +
-      geom_bar(stat = 'identity', position=position_identity(), alpha=0.3) +
+    ggplot(aes(x = pos, y = aggrfreq, fill=file)) +
+      facet_grid(seq ~ .) +
+      geom_bar(stat = 'identity', position=position_identity(), alpha=0.4, colour='transparent') +
       scale_x_continuous("Position", limits = c(minpos, maxpos)) +
       scale_y_continuous('Frequency') +
       ggtitle("Fraction of reads with mutation at each position.") +
@@ -161,15 +202,15 @@ htmlwidgets::saveWidget(ggplotly(
   file.path(outdir, paste0(prefix, '_pileups.html'))
 )
 
-# Plot mutations pileup
+# Plot collective coverages
 htmlwidgets::saveWidget(ggplotly(
   mega %>%
     filter(mutated==TRUE) %>%
     select(seq, pos, aggrfreq, depth, file) %>%
     unique() %>%
-    ggplot(aes(x = pos, y=depth, colour=file, fill=file)) +
-    facet_wrap( . ~ seq) +
-    geom_line() +
+    ggplot(aes(x = pos, y=depth, colour=file)) +
+    facet_grid(seq ~ .) +
+    geom_line(alpha=0.4) +
     scale_x_continuous('Position', limits = c(minpos, maxpos)) +
     scale_y_continuous('Coverage') +
     ggtitle("Fraction of reads with mutation at each position.") +
