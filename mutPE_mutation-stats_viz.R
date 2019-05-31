@@ -24,7 +24,7 @@ library(tidyverse)
 library(ggrepel)
 library(plotly)
 
-# Expand the corrections string. 
+# Expand the corrections string.
 offsets <- strsplit(offsets, ',', fixed=TRUE)[[1]]
 offsets <- as.data.frame(t(as.data.frame(strsplit(offsets, ':', fixed=TRUE))), stringsAsFactors=FALSE)
 row.names(offsets) <- NULL
@@ -55,9 +55,9 @@ for (sf in statsfiles){
     sel <- (grepl(offsets[[ref,1]], posdata$seq) & posdata$pos >= as.integer(offsets[[ref,2]]))
     posdata$pos[sel] <- posdata$pos[sel] + as.integer(offsets[[ref,3]])
   }
-  
+
   # Shorten the reference name so it fits in the facet bars.
-  posdata <- posdata %>% 
+  posdata <- posdata %>%
     mutate(seq = substr(seq, trimmedstart, trimmedend))
 
   # Calculate frequencies and aggregate frequencies by position
@@ -80,8 +80,8 @@ for (sf in statsfiles){
                                 mutated=TRUE,
                                 aggrfreq=0) )
   }
-  
-  
+
+
   # Collapse all insertion and deletions respectively, and allow for unexpected categories
   deletions <- grepl('^del', posdata$type)
   insertions <- grepl('^ins', posdata$type)
@@ -92,7 +92,7 @@ for (sf in statsfiles){
 
   # Plot number of positions per mutation type
   print(posdata %>%
-    filter(mutated) %>%
+    filter(mutated & type != 'ref_indel') %>%
     group_by(seq, type) %>%
     summarise(frequency = sum(count>0)) %>%
     ggplot(aes(x = type, y = frequency, fill=type)) +
@@ -105,7 +105,7 @@ for (sf in statsfiles){
 
   # Plot number of reads per mutation type
   print(posdata %>%
-    filter(mutated) %>%
+    filter(mutated & type != 'ref_indel') %>%
     group_by(seq, type) %>%
     summarise(frequency = sum(count)) %>%
     ggplot(aes(x = type, y = frequency, fill=type)) +
@@ -123,7 +123,7 @@ for (sf in statsfiles){
   maxfreq <- max(posdata %>% filter(type != 'ref_indel') %>% select(aggrfreq))
   if(ymax != 'NULL')
     maxfreq <- as.numeric(ymax)
-  
+
   # Plot mutations pileup
   print(posdata %>%
     filter(mutated) %>%
