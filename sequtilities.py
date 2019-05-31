@@ -14,6 +14,8 @@ import sys, argparse, re, csv
 import pandas as pd
 from collections import Counter
 
+import Levenshtein as lev
+
 import fileutilities as fu
 import mylogs as ml
 
@@ -130,7 +132,7 @@ def gtf2premrna(gtfs, filter=True):
     return result
 
 
-def samPatternStats(pattern, sam=sys.stdin, bco=-4, bcl=4):
+def samPatternStats(pattern, sam=sys.stdin, bco=-4, bcl=4, literal=True, mmCap=2, wild='N', minFreq=0.01):
     """Find a pattern's positions and flanking sequences in an uncompressed header-less SAM.
 
     Meant to be used to verify the position of a known spacer sequence and identify
@@ -142,41 +144,87 @@ def samPatternStats(pattern, sam=sys.stdin, bco=-4, bcl=4):
         bco(int): How many positions before the tracer's start (-n) or after the
                     tracer's end (+n) is the barcode (-4)?
         bcl(int): How many nucleotides long is the barcode (4)?
+        literal(bool): Is the pattern a literal sequence (True)? If so, mismatch patterns will also be created.
+        mmCap(int): Set upper limit to number of mismatch positions that are allowed (2).
+        wild(char): What singular character(s) is/are used for unknown values (N).
+        minCount(int): Discard results occuring in fewer than 100 reads.
     Returns:
-        Nested lists:
-                    [1] Total number of reads
-                    [2] collections.Counter object fo read lengths
-                    [2] collections.Counter object with positions of pattern and respective number of reads
-                    [3] collections.Counter object with barcodeSeq_@_position and respective number of reads
-                        The barcode sequence is "out_of_range" when the barcode is hanging over either end of the read
-                        due to very shifter tracer position.
+        List of Counters:
+                    [0] Total number of reads (int)
+                    [1] collections.Counter object for read lengths
+                    [2] collections.Counter object with read count of tracer matches
+                    [3] collections.Counter object with read count of barcodes found
+                        The barcode sequence is 'out_of_range' when the barcode is hanging over either end of the read
+                        due to a very shifted tracer position.
+                    [4] collection.Counter object with wildcard count downstream of the adapter region.
     """
-    p = re.compile(pattern)
+    p = None
+    if not literal:
+        # Compile as is.
+        p = re.compile(pattern)
+    else:
+        # Infer a mismatch pattern that allows a wildchard in every position (calculate edit distance later).
+        Npattern = ''
+        for c in pattern:
+            Npattern = ''.join([Npattern, '[', c, wild, ']'])
+        p = re.compile(Npattern)
     # Prepare places to store findings.
     lengths = list()
     reads = 0
-    matches = 0
     positions = list()
     barcodes = list()
+    wilds = list()
     # Search the pattern line by line.
     for line in sam:
         seq = line.split("\t")[9]
         reads = reads + 1
-        lengths.append(len(seq))
-        m = p.search(seq)
-        if m:
-            matches = matches + 1
-            positions.append(m.start() + 1)
-            # Optionally also report the sequence in the up/down-stream region.
+        lengths.append( "\t".join(['Length', str(len(seq)), '.', '.']) )
+        candidates = list(p.finditer(seq))
+        minDist = len(pattern)      # Start with the largest possible hamming distance of all-mismatches.
+        whichMinDist = None         # Keep track of which candidate has the least distance. Not accounting for ties.
+        if literal:
+            for i, m in enumerate(candidates):
+                dist = None
+                dist = lev.hamming(m.group(), pattern)
+                if dist < mmCap:
+                    if dist < minDist:
+                        minDist = dist
+                        whichMinDist = i
+        else:
+            whichMinDist = 0       # No tie-breker if anchor matches more than once. Just take the first. Provide more explicit patterns to reduce this occurence.
+        if whichMinDist is not None:        # if there is a match
+            m = candidates[whichMinDist]
+            positions.append( "\t".join(['Anchor', str(minDist), m.group(0), str(m.start() + 1)]) )
+                # ie. Anchor    2   TTCCAGCATNGCTCTNAAAC    11
             if bco is not None and bcl is not None:
-                l = int(bco)
-                pos = m.end() + l if l > 0 else m.start() + l
-                if pos >= 0 and (pos + l) < len(seq):
-                    barcodes.append( seq[pos:(pos + int(bcl))] + "_@_" + str(pos + 1) )
-                    # Sequence_at_position ie: ACGT_@_7
-                else:
-                    barcodes.append("out_of_range_@_" + str(pos + 1))
-    return [reads, Counter(lengths).most_common(), matches, Counter(positions).most_common(), Counter(barcodes).most_common()]
+                pos = m.end() + bco if bco > 0 else m.start() + bco
+                if pos >= 0 and (pos + bcl) < len(seq):
+                    barcodes.append( "\t".join(['Barcode', '.', seq[pos:(pos + bcl)], str(pos + 1)]) )
+                        # ie. Barcode   .    ACGT 7
+            # Count wildcards downstream.
+            guidePos = max(pos + bcl, m.end())      # whichever comes last, the barcode or the spacer.
+            waggr = 0
+            for w in wild:      # allow more than one wildcard characters
+                waggr = waggr + seq.count(w, guidePos)
+            wilds.append( "\t".join(['Wildcards', str(waggr), '.', '.']))
+    # Filter out rare events to keep output uncluttered.
+    Lengths = Counter(lengths)
+    for k in Lengths.keys():
+        if Lengths[k] / reads * 100 < minCount:
+            del Lengths[k]
+    Positions = Counter(positions)
+    for k in Positions.keys():
+        if Positions[k] / reads * 100 < minCount:
+            del Positions[k]
+    Barcodes = Counter(barcodes)
+    for k in Barcodes.keys():
+        if Barcodes[k] / reads * 100 < minCount:
+            del Barcodes[k]
+    Wilds = Counter(wilds)
+    for k in Wilds.keys():
+        if Wilds[k] / reads * 100 < minCounts:
+            del Wilds[k]
+    return [reads, Lengths.most_common(), Positions.most_common(), Barcodes.most_common(), Wilds.most_common()]
 
 
 def main(args):
@@ -229,14 +277,13 @@ def main(args):
                                 The input stream is typically the output of `samtools view <somefile.bam>`. \
                                 The output is streamed to STDOUT, typically to be piped back to `samtools view -b`. \
                                 The header file will be prepended to the output stream.")
-    parser.add_argument('--samPatternStats', type=str, nargs='+',
+    parser.add_argument('--samPatternStats', type=str, nargs=6,
                                 help="Number and location of matches of the pattern in the reads of a SAM stream. \
-                                This works only with the 'D' INPUTTYPE. \
-                                The first argument is the sequence pattern to search. \
-                                Optionally, it can also report the sequence frequencies \
-                                in a region before or after the match, by specifying the second and third arguments: \
-                                * the offset from the match (+n downstream of match end, \-n upstream of match start, escaping the minus sign is important) \
-                                and * the length of the region.")
+                                This works only with the 'D' INPUTTYPE. Arguments: \
+                                [1] (str) anchor sequence, [2] (int) mismatches allowed in the anchor (use 'None' if anchor is regex),\
+                                [3] (char) wildcard character(s) (like 'N' for unknown nucleotides),\
+                                [4] (int) barcode offset (+n downstream of match end, \\-n upstream of match start, \
+                                escaping the minus sign is important), [5] (int) barode length., [6] (float) Minimum frequency of things to report.")
     params = parser.parse_args(args)
 
 
@@ -400,20 +447,19 @@ def main(args):
         if not params.INPUTTYPE == 'D':
             sys.exit("The only allowed INPUTTYPE is 'D' for streaming of header-less SAM content.")
         # Do.
-        result = samPatternStats(pattern=params.samPatternStats[0], sam=sys.stdin, bco=params.samPatternStats[1], bcl=params.samPatternStats[2])
-        # Print.
-        print("Reads:", str(result[0]))
-        print("Lengths:")
+        result = samPatternStats(pattern=params.samPatternStats[0], sam=sys.stdin, mmCap=int(params.samPatternStats[1]),
+                                bco=int(params.samPatternStats[3]), bcl=int(params.samPatternStats[4]), minFreq=float(params.samPatternStats[5]),
+                                literal=(params.samPatternStats[1] != "None"), wild=params.samPatternStats[2])
+        # Print. The output should be an almost-tidy tab-delimited table.
+        print( "\t".join(["Reads", '.', '.', '.', str(result[0]), '(100% total)']) )
         for v,c in result[1]:
-            print(v, c,  '(' + "{:.2f}".format(c / result[0] * 100) + '% total)')
-        print("Matches " + params.samPatternStats[0] + ' : ' + str(result[2]) + '(' + "{:.2f}".format(result[2] / result[0] * 100) + '% total)')
-        print("Match positions: ")
+            print( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)']) )
+        for v,c in result[2]:
+            print( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)']) )
         for v,c in result[3]:
-            print(v, c,  '(' + "{:.2f}".format(c / result[0] * 100) + '% total)')
-        if params.samPatternStats[2]:
-            print("Barcode and location frequencies")
-            for v,c in result[4]:
-                print(v, c, '(' + "{:.2f}".format(c / result[0] * 100) + '% total)')
+            print( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)']) )
+        for v,c in result[4]:
+            print( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)']) )
         if params.STDERRcomments:
             try:
                 sys.stderr.write(ml.donestring("pattern stats in SAM stream"))
