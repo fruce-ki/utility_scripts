@@ -160,56 +160,64 @@ def samPatternStats(pattern, sam=sys.stdin, bco=-4, bcl=4, literal=True, mmCap=2
                         due to a very shifted tracer position.
                     [5] collection.Counter object with wildcard count downstream of the adapter region.
     """
-    p = None
-    if not literal:
-        # Compile as is.
-        p = re.compile(pattern)
-    else:
-        # Infer a mismatch pattern that allows a wildchard in every position (calculate edit distance later).
-        Npattern = ''
-        for c in pattern:
-            Npattern = ''.join([Npattern, '[', c, wild, ']'])
-        p = re.compile(Npattern)
-    # Prepare places to store findings.
+    patlen = len(pattern)   # if literal
     lengths = list()
     reads = 0
     matched = 0
     positions = list()
     barcodes = list()
     wilds = list()
+
+    p = None
+    if not literal:
+        p = re.compile(pattern)
     # Search the pattern line by line.
     for line in sam:
-        seq = line.split("\t")[9]
         reads = reads + 1
-        lengths.append( "\t".join(['Length', str(len(seq)), '.', '.']) )
-        candidates = list(p.finditer(seq))
-        minDist = len(pattern)      # Start with the largest possible hamming distance of all-mismatches.
-        whichMinDist = None         # Keep track of which candidate has the least distance. Not accounting for ties.
+        seq = line.split("\t")[9]
+        seqlen = len(seq)
+        lengths.append( "\t".join(['Length', str(seqlen), '.', '.']) )
+
+        whichMinDist = None
+        hit = None
         if literal:
-            for i, m in enumerate(candidates):
-                dist = lev.hamming(m.group(), pattern)
-                if dist < mmCap:
-                    if dist < minDist:
-                        minDist = dist
-                        whichMinDist = i
+            # Crawl along the sequence. When there is an exact match, this should break out after a few iterations. If there is any mismatch, it will have to go to the end.
+            minDist = patlen      # Start with the largest possible hamming distance of all-mismatches.
+            for i in range(0, seqlen - patlen):
+                dist = lev.hamming(pattern, seq[i:(i+patlen)])
+                if dist < mmCap and dist < minDist:
+                    minDist = dist
+                    whichMinDist = i
+                    if dist == 0:
+                        break   # Can't get any better.
         else:
-            whichMinDist = 0       # No tie-breaker if anchor matches more than once. Just take the first. Provide more explicit patterns to reduce this occurence.
+            m = pattern.search(seq)
+            if m :
+                whichMinDist = m.start()       # No tie-breaker if anchor matches more than once. Just take the first. Provide more explicit patterns to reduce this occurence.
+                hit = m.group(0)
+
         if whichMinDist is not None:        # if there is a match
-            matched = matched + 1
-            m = candidates[whichMinDist]
-            positions.append( "\t".join(['Anchor', str(minDist), m.group(0), str(m.start() + 1)]) )
-                # ie. Anchor    2   TTCCAGCATNGCTCTNAAAC    11
-            if bco is not None and bcl is not None:
-                pos = m.end() + bco if bco > 0 else m.start() + bco
-                if pos >= 0 and (pos + bcl) < len(seq):
-                    barcodes.append( "\t".join(['Barcode', '.', seq[pos:(pos + bcl)], str(pos + 1)]) )
-                        # ie. Barcode   .    ACGT 7
-            # Count wildcards downstream.
-            guidePos = max(pos + bcl, m.end())      # whichever comes last, the barcode or the spacer.
-            waggr = 0
-            for w in wild:      # allow more than one wildcard characters
-                waggr = waggr + seq.count(w, guidePos)
-            wilds.append( "\t".join(['Wildcards', str(waggr), '.', '.']))
+            patend = whichMinDist + patlen
+            if patend - 1 <= seqlen:    # Make sure nothing hangs off the end
+                matched = matched + 1
+                if literal:
+                    hit = seq[whichMinDist:patend]
+                positions.append( "\t".join(['Anchor', str(minDist), hit, str(whichMinDist + 1)]) )
+                    # ie. Anchor    2   TTCCAGCATNGCTCTNAAAC    11
+                # Identify the barcode
+                if bco is not None and bcl is not None:
+                    pos = patend - 1 + bco if bco > 0 else whichMinDist + bco
+                    bcend = pos + bcl
+                    if pos >= 0 and (bcend - 1) <= seqlen:  # Make sure nothing hangs off the end
+                        barcodes.append( "\t".join(['Barcode', '', seq[pos:bcend], str(pos + 1)]) )
+                            # ie. Barcode   .    ACGT 7
+                # Count wildcards downstream.
+                guidePos = max(bcend if bcend else 0, patend)      # whichever comes last, the barcode or the spacer.
+                waggr = 0
+                for w in wild:      # allow more than one wildcard characters
+                    waggr = waggr + seq.count(w, guidePos)
+                wilds.append( "\t".join(['Wildcards', str(waggr), '', '']))
+
     Lengths = Counter(lengths)
     Positions = Counter(positions)
     Barcodes = Counter(barcodes)
@@ -281,13 +289,13 @@ def main(args):
                                 The input stream is typically the output of `samtools view <somefile.bam>`. \
                                 The output is streamed to STDOUT, typically to be piped back to `samtools view -b`. \
                                 The header file will be prepended to the output stream.")
-    parser.add_argument('--samPatternStats', type=str, nargs=6,
+    parser.add_argument('--samPatternStats', type=str, nargs=5,
                                 help="Number and location of matches of the pattern in the reads of a SAM stream. \
                                 This works only with the 'D' INPUTTYPE. Arguments: \
                                 [1] (str) anchor sequence, [2] (int) mismatches allowed in the anchor (use 'None' if anchor is regex),\
                                 [3] (char) wildcard character(s) (like 'N' for unknown nucleotides),\
                                 [4] (int) barcode offset (+n downstream of match end, \\-n upstream of match start, \
-                                escaping the minus sign is important), [5] (int) barode length., [6] (float) Minimum frequency of things to report.")
+                                escaping the minus sign is important), [5] (int) barode length.")
     params = parser.parse_args(args)
 
 
@@ -452,13 +460,13 @@ def main(args):
             sys.exit("The only allowed INPUTTYPE is 'D' for streaming of header-less SAM content.")
         # Do.
         result = samPatternStats(pattern=params.samPatternStats[0], sam=sys.stdin, mmCap=int(params.samPatternStats[1]),
-                                bco=int(params.samPatternStats[3]), bcl=int(params.samPatternStats[4]), minFreq=float(params.samPatternStats[5]),
+                                bco=int(params.samPatternStats[3]), bcl=int(params.samPatternStats[4]),
                                 literal=(params.samPatternStats[1] != "None"), wild=params.samPatternStats[2], filtered=False)
         # Print. The output should be an almost-tidy tab-delimited table.
-        print( "\t".join(["Reads", '.', '.', '.', str(result[0]), '(100% total)']) )
+        print( "\t".join(["Reads", '', '', '', str(result[0]), '(100% total)']) )
         for v,c in result[2]:
             print( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)']) )
-        print( "\t".join(["Matched", '.', '.', '.', str(result[1]), '(' + "{:.2f}".format(result[1] / result[0] * 100) + '% total)']) )
+        print( "\t".join(["Matched", '', '', '', str(result[1]), '(' + "{:.2f}".format(result[1] / result[0] * 100) + '% total)']) )
         for v,c in result[3]:
             print( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)']) )
         for v,c in result[4]:
