@@ -132,7 +132,7 @@ def gtf2premrna(gtfs, filter=True):
     return result
 
 
-def samPatternStats(pattern, sam=sys.stdin, bco=-4, bcl=4, literal=True, mmCap=2, wild='N', minFreq=0.01):
+def samPatternStats(pattern, sam=sys.stdin, bco=-4, bcl=4, literal=True, mmCap=2, wild='N', minFreq=0.01, filtered=False):
     """Find a pattern's positions and flanking sequences in an uncompressed header-less SAM.
 
     Meant to be used to verify the position of a known spacer sequence and identify
@@ -147,16 +147,18 @@ def samPatternStats(pattern, sam=sys.stdin, bco=-4, bcl=4, literal=True, mmCap=2
         literal(bool): Is the pattern a literal sequence (True)? If so, mismatch patterns will also be created.
         mmCap(int): Set upper limit to number of mismatch positions that are allowed (2).
         wild(char): What singular character(s) is/are used for unknown values (N).
-        minCount(int): Discard results occuring in fewer than 100 reads.
+        minFreq(int): Discard results occuring in fewer than 100 reads.
+        filtered(bool): The return Counters are filtered to remove rare events.
     Returns:
         List of Counters:
                     [0] Total number of reads (int)
-                    [1] collections.Counter object for read lengths
-                    [2] collections.Counter object with read count of tracer matches
-                    [3] collections.Counter object with read count of barcodes found
+                    [1] Number of reads that matched the anchor (int)
+                    [2] collections.Counter object for read lengths
+                    [3] collections.Counter object with read count of tracer matches
+                    [4] collections.Counter object with read count of barcodes found
                         The barcode sequence is 'out_of_range' when the barcode is hanging over either end of the read
                         due to a very shifted tracer position.
-                    [4] collection.Counter object with wildcard count downstream of the adapter region.
+                    [5] collection.Counter object with wildcard count downstream of the adapter region.
     """
     p = None
     if not literal:
@@ -171,6 +173,7 @@ def samPatternStats(pattern, sam=sys.stdin, bco=-4, bcl=4, literal=True, mmCap=2
     # Prepare places to store findings.
     lengths = list()
     reads = 0
+    matched = 0
     positions = list()
     barcodes = list()
     wilds = list()
@@ -184,15 +187,15 @@ def samPatternStats(pattern, sam=sys.stdin, bco=-4, bcl=4, literal=True, mmCap=2
         whichMinDist = None         # Keep track of which candidate has the least distance. Not accounting for ties.
         if literal:
             for i, m in enumerate(candidates):
-                dist = None
                 dist = lev.hamming(m.group(), pattern)
                 if dist < mmCap:
                     if dist < minDist:
                         minDist = dist
                         whichMinDist = i
         else:
-            whichMinDist = 0       # No tie-breker if anchor matches more than once. Just take the first. Provide more explicit patterns to reduce this occurence.
+            whichMinDist = 0       # No tie-breaker if anchor matches more than once. Just take the first. Provide more explicit patterns to reduce this occurence.
         if whichMinDist is not None:        # if there is a match
+            matched = matched + 1
             m = candidates[whichMinDist]
             positions.append( "\t".join(['Anchor', str(minDist), m.group(0), str(m.start() + 1)]) )
                 # ie. Anchor    2   TTCCAGCATNGCTCTNAAAC    11
@@ -207,24 +210,25 @@ def samPatternStats(pattern, sam=sys.stdin, bco=-4, bcl=4, literal=True, mmCap=2
             for w in wild:      # allow more than one wildcard characters
                 waggr = waggr + seq.count(w, guidePos)
             wilds.append( "\t".join(['Wildcards', str(waggr), '.', '.']))
-    # Filter out rare events to keep output uncluttered.
     Lengths = Counter(lengths)
-    for k in Lengths.keys():
-        if Lengths[k] / reads * 100 < minCount:
-            del Lengths[k]
     Positions = Counter(positions)
-    for k in Positions.keys():
-        if Positions[k] / reads * 100 < minCount:
-            del Positions[k]
     Barcodes = Counter(barcodes)
-    for k in Barcodes.keys():
-        if Barcodes[k] / reads * 100 < minCount:
-            del Barcodes[k]
     Wilds = Counter(wilds)
-    for k in Wilds.keys():
-        if Wilds[k] / reads * 100 < minCounts:
-            del Wilds[k]
-    return [reads, Lengths.most_common(), Positions.most_common(), Barcodes.most_common(), Wilds.most_common()]
+    # Filter out rare events to keep output uncluttered.
+    if filtered:
+        for k in list(Lengths.keys()):      # List gets all the values of the iterator before I edit the dict. That way the iterator doesn't crash.
+            if Lengths[k] / reads * 100 < minFreq:
+                del Lengths[k]
+        for k in list(Positions.keys()):
+            if Positions[k] / reads * 100 < minFreq:
+                del Positions[k]
+        for k in list(Barcodes.keys()):
+            if Barcodes[k] / reads * 100 < minFreq:
+                del Barcodes[k]
+        for k in list(Wilds.keys()):
+            if Wilds[k] / reads * 100 < minFreq:
+                del Wilds[k]
+    return [reads, matched, Lengths.most_common(), Positions.most_common(), Barcodes.most_common(), Wilds.most_common()]
 
 
 def main(args):
@@ -449,16 +453,17 @@ def main(args):
         # Do.
         result = samPatternStats(pattern=params.samPatternStats[0], sam=sys.stdin, mmCap=int(params.samPatternStats[1]),
                                 bco=int(params.samPatternStats[3]), bcl=int(params.samPatternStats[4]), minFreq=float(params.samPatternStats[5]),
-                                literal=(params.samPatternStats[1] != "None"), wild=params.samPatternStats[2])
+                                literal=(params.samPatternStats[1] != "None"), wild=params.samPatternStats[2], filtered=False)
         # Print. The output should be an almost-tidy tab-delimited table.
         print( "\t".join(["Reads", '.', '.', '.', str(result[0]), '(100% total)']) )
-        for v,c in result[1]:
-            print( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)']) )
         for v,c in result[2]:
             print( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)']) )
+        print( "\t".join(["Matched", '.', '.', '.', str(result[1]), '(' + "{:.2f}".format(result[1] / result[0] * 100) + '% total)']) )
         for v,c in result[3]:
             print( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)']) )
         for v,c in result[4]:
+            print( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)']) )
+        for v,c in result[5]:
             print( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)']) )
         if params.STDERRcomments:
             try:
