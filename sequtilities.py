@@ -3,18 +3,18 @@
 """sequtilities.py
 
 Author: Kimon Froussios
-Date last revised: 13/05/2019
-Python tested: 3.5.2
+Date last revised: 04/06/2019
 
 Library of utility functions relevant to sequencing tasks.
 """
 
 
-import sys, argparse, re, csv
+import os, sys, argparse, re, csv
 import pandas as pd
 from collections import Counter
 
 import Levenshtein as lev
+import pysam
 
 import fileutilities as fu
 import mylogs as ml
@@ -132,7 +132,7 @@ def gtf2premrna(gtfs, filter=True):
     return result
 
 
-def samPatternStats(pattern, sam=sys.stdin, bco=-4, bcl=4, literal=True, mmCap=2, wild='N', minFreq=0.01, filtered=False):
+def samPatternStats(pattern, bam='-', bco=-4, bcl=4, literal=True, mmCap=2, wild='N', minFreq=0.01, filtered=False):
     """Find a pattern's positions and flanking sequences in an uncompressed header-less SAM.
 
     Meant to be used to verify the position of a known spacer sequence and identify
@@ -140,7 +140,7 @@ def samPatternStats(pattern, sam=sys.stdin, bco=-4, bcl=4, literal=True, mmCap=2
 
     Args:
         pattern(str): A sequence literal or regex pattern.
-        sam(IO): An input stream (STDIN)
+        sam(str): A BAM file.
         bco(int): How many positions before the tracer's start (-n) or after the
                     tracer's end (+n) is the barcode (-4)?
         bcl(int): How many nucleotides long is the barcode (4)?
@@ -161,23 +161,22 @@ def samPatternStats(pattern, sam=sys.stdin, bco=-4, bcl=4, literal=True, mmCap=2
                     [5] collection.Counter object with wildcard count downstream of the adapter region.
     """
     patlen = len(pattern)   # if literal
-    lengths = list()
+    Lengths = Counter()
     reads = 0
     matched = 0
-    positions = list()
-    barcodes = list()
-    wilds = list()
-
+    Positions = Counter()
+    Barcodes = Counter()
+    Wilds = Counter()
+    samin = pysam.AlignmentFile(bam, 'rb', check_sq=False)  # Checking for reference sequences in the header has to be disabled for unaligned BAM.
     p = None
     if not literal:
         p = re.compile(pattern)
     # Search the pattern line by line.
-    for line in sam:
+    for line in samin:
         reads = reads + 1
-        seq = line.split("\t")[9]
+        seq = line.get_forward_sequence()
         seqlen = len(seq)
-        lengths.append( "\t".join(['Length', str(seqlen), '.', '.']) )
-
+        Lengths.update( ["\t".join(['Length', str(seqlen), '.', '.'])] )
         whichMinDist = None
         hit = None
         if literal:
@@ -195,33 +194,28 @@ def samPatternStats(pattern, sam=sys.stdin, bco=-4, bcl=4, literal=True, mmCap=2
             if m :
                 whichMinDist = m.start()       # No tie-breaker if anchor matches more than once. Just take the first. Provide more explicit patterns to reduce this occurence.
                 hit = m.group(0)
-
         if whichMinDist is not None:        # if there is a match
             patend = whichMinDist + patlen
             if patend - 1 <= seqlen:    # Make sure nothing hangs off the end
                 matched = matched + 1
                 if literal:
                     hit = seq[whichMinDist:patend]
-                positions.append( "\t".join(['Anchor', str(minDist), hit, str(whichMinDist + 1)]) )
+                Positions.update( ["\t".join(['Anchor', str(minDist), hit, str(whichMinDist + 1)])] )
                     # ie. Anchor    2   TTCCAGCATNGCTCTNAAAC    11
                 # Identify the barcode
                 if bco is not None and bcl is not None:
                     pos = patend - 1 + bco if bco > 0 else whichMinDist + bco
                     bcend = pos + bcl
                     if pos >= 0 and (bcend - 1) <= seqlen:  # Make sure nothing hangs off the end
-                        barcodes.append( "\t".join(['Barcode', '', seq[pos:bcend], str(pos + 1)]) )
+                        Barcodes.update( ["\t".join(['Barcode', '', seq[pos:bcend], str(pos + 1)])] )
                             # ie. Barcode   .    ACGT 7
                 # Count wildcards downstream.
                 guidePos = max(bcend if bcend else 0, patend)      # whichever comes last, the barcode or the spacer.
                 waggr = 0
                 for w in wild:      # allow more than one wildcard characters
                     waggr = waggr + seq.count(w, guidePos)
-                wilds.append( "\t".join(['Wildcards', str(waggr), '', '']))
-
-    Lengths = Counter(lengths)
-    Positions = Counter(positions)
-    Barcodes = Counter(barcodes)
-    Wilds = Counter(wilds)
+                Wilds.update( ["\t".join(['Wildcards', str(waggr), '', ''])] )
+    samin.close()
     # Filter out rare events to keep output uncluttered.
     if filtered:
         for k in list(Lengths.keys()):      # List gets all the values of the iterator before I edit the dict. That way the iterator doesn't crash.
@@ -291,8 +285,7 @@ def main(args):
                                 The header file will be prepended to the output stream.")
     parser.add_argument('--samPatternStats', type=str, nargs=5,
                                 help="Number and location of matches of the pattern in the reads of a SAM stream. \
-                                This works only with the 'D' INPUTTYPE. Arguments: \
-                                [1] (str) anchor sequence, [2] (int) mismatches allowed in the anchor (use 'None' if anchor is regex),\
+                                Arguments: [1] (str) anchor sequence, [2] (int) mismatches allowed in the anchor (use 'None' if anchor is regex),\
                                 [3] (char) wildcard character(s) (like 'N' for unknown nucleotides),\
                                 [4] (int) barcode offset (+n downstream of match end, \\-n upstream of match start, \
                                 escaping the minus sign is important), [5] (int) barode length.")
@@ -330,12 +323,14 @@ def main(args):
         sys.exit(ml.errstring("Unknown INPUTTYPE."))
 
     # OUTPUT.
+    outstream = sys.stdout
+    outfiles = None
     outdir, outpref, outsuff = None, None, None
     if params.out:
         outdir = fu.expand_fpaths([params.out[0]])[0]
         outpref = params.out[1]
         outsuff = params.out[2]
-
+        outfiles = fu.make_names(flist.aliases, (outdir, outpref, outsuff))
 
     ### TASKS ###
 
@@ -365,9 +360,6 @@ def main(args):
         # Import data and calculate the result.
         gtfs = gtf2pandas(flist)
         result = gtf2premrna(gtfs, filter=(params.premRNA == 'f'))
-        # Create output filenames, if applicable. If [], then STDOUT.
-        outfiles = fu.make_names(flist.aliases, (outdir, outpref, outsuff))
-        outstream = sys.stdout
         # I need the for loop to iterate at least once. Relevant for STDIN input, since I have no input files listed then.
         if flist == []:
             flist.append("<STDIN>")
@@ -385,19 +377,13 @@ def main(args):
                     # Don't want to accidentally close STDOUT.
                     outstream.close()
         if params.STDERRcomments:
-            try:
-                sys.stderr.write(ml.donestring("creating pre-mRNA annotation"))
-            except IOError:
-                pass
+            sys.stderr.write(ml.donestring("creating pre-mRNA annotation"))
 
 
     # Extract transcript and gene ID PAIRS from GTF
     elif params.t2g:
         # Import GTF.
         gtfs = gtf2pandas(flist)
-        # Create output filenames, if applicable. If [], then STDOUT.
-        outfiles = fu.make_names(flist.aliases, (outdir, outpref, outsuff))
-        outstream = sys.stdout
         # I need the for loop to iterate at least once. Relevant for STDIN input, since I have no input files listed then.
         if flist == []:
             flist.append("<STDIN>")
@@ -421,10 +407,7 @@ def main(args):
                     # Don't want to accidentally close STDOUT.
                     outstream.close()
         if params.STDERRcomments:
-            try:
-                sys.stderr.write(ml.donestring("extracting gene/transcript ID pairs."))
-            except IOError:
-                pass
+            sys.stderr.write(ml.donestring("extracting gene/transcript ID pairs."))
 
 
     # FILTER a BAM file by REGION
@@ -448,36 +431,38 @@ def main(args):
             if m and m.group(1) in regions:
                 sys.stdout.write(r)
         if params.STDERRcomments:
-            try:
-                sys.stderr.write(ml.donestring("filtering regions in SAM stream"))
-            except IOError:
-                pass
+            sys.stderr.write(ml.donestring("filtering regions in SAM stream"))
+
 
     # Adapter STATS from SAM stream
     # read length distribution, pattern position distribution, pattern match
     elif params.samPatternStats:
-        if not params.INPUTTYPE == 'D':
-            sys.exit("The only allowed INPUTTYPE is 'D' for streaming of header-less SAM content.")
         # Do.
-        result = samPatternStats(pattern=params.samPatternStats[0], sam=sys.stdin, mmCap=int(params.samPatternStats[1]),
-                                bco=int(params.samPatternStats[3]), bcl=int(params.samPatternStats[4]),
-                                literal=(params.samPatternStats[1] != "None"), wild=params.samPatternStats[2], filtered=False)
-        # Print. The output should be an almost-tidy tab-delimited table.
-        print( "\t".join(["Reads", '', '', '', str(result[0]), '(100% total)']) )
-        for v,c in result[2]:
-            print( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)']) )
-        print( "\t".join(["Matched", '', '', '', str(result[1]), '(' + "{:.2f}".format(result[1] / result[0] * 100) + '% total)']) )
-        for v,c in result[3]:
-            print( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)']) )
-        for v,c in result[4]:
-            print( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)']) )
-        for v,c in result[5]:
-            print( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)']) )
+        for i,f in enumerate(flist):
+            result = samPatternStats(pattern=params.samPatternStats[0], bam=f, mmCap=int(params.samPatternStats[1]),
+                                    bco=int(params.samPatternStats[3]), bcl=int(params.samPatternStats[4]),
+                                    literal=(params.samPatternStats[1] != "None"), wild=params.samPatternStats[2], filtered=False)
+            if outfiles:
+                # Send to individual file instead of STDOUT.
+                outstream = open(outfiles[i], 'w')
+            # Print. The output should be an almost-tidy tab-delimited table.
+            outstream.write( "\t".join(["Reads", '', '', '', str(result[0]), '(100% total)', os.path.basename(f) + "\n"]) )
+            for v,c in result[2]:
+                outstream.write( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)', os.path.basename(f) + "\n"]) )
+            outstream.write( "\t".join(["Matched", '', '', '', str(result[1]), '(' + "{:.2f}".format(result[1] / result[0] * 100) + '% total)', os.path.basename(f) + "\n"]) )
+            for v,c in result[3]:
+                outstream.write( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)', os.path.basename(f) + "\n"]) )
+            for v,c in result[4]:
+                outstream.write( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)', os.path.basename(f) + "\n"]) )
+            for v,c in result[5]:
+                outstream.write( "\t".join([v, str(c), '(' + "{:.2f}".format(c / result[0] * 100) + '% total)', os.path.basename(f) + "\n"]) )
+            if outfiles:
+                # Don't want to accidentally close STDOUT.
+                outstream.close()
+            if params.STDERRcomments:
+                sys.stderr.write(ml.donestring("pattern stats in " + f))
         if params.STDERRcomments:
-            try:
-                sys.stderr.write(ml.donestring("pattern stats in SAM stream"))
-            except IOError:
-                pass
+            sys.stderr.write(ml.donestring("pattern stats in all BAMs"))
 
 
 #     # All done.
