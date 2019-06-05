@@ -11,4 +11,4 @@ out=$2
 pattern='TTCCAGCATAGCTCTTAAAC'
 
 sequtilities.py T $in --samPatternStats $pattern ${#pattern} N \-4 4 > $out
-bam_barcode_report.R $out
+bam_barcode_report.R $out $(dirname $out)
