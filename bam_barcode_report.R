@@ -10,7 +10,7 @@ library(tidyverse)
 
 dt <- read_tsv(file,
                col_names = FALSE, na = '.', quoted_na = FALSE)
-names(dt) <- c('type', 'score', 'seq', 'pos', 'reads', 'pc', 'bam')
+names(dt) <- c('bam', 'type', 'score', 'seq', 'pos', 'reads', 'pc')
 
 total <- dt[[1, 'reads']]
 
