@@ -233,7 +233,9 @@ def samPatternStats(pattern, bam='-', bco=-4, bcl=4, literal=True, mmCap=2, wild
     return [reads, matched, Lengths.most_common(), Positions.most_common(), Barcodes.most_common(), Wilds.most_common()]
 
 
-def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, bcOffset=-4, anchorSeq='TTCCAGCATAGCTCTTAAAC', anchorRegex=False, bcmm=1, smm=2, abort=30, qualOffset=33, unmatched=False):
+def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, 
+                anchorSeq='TTCCAGCATAGCTCTTAAAC', anchorRegex=False, smm=2,
+                bcOffset=-4, bcmm=1, abort=30, qualOffset=33, unmatched=False, inferOutDir=True):
     """
     Demultiplexing with variable length 5' construct of barcode and spacers.
 
@@ -249,7 +251,7 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, bcOffse
                         Positive for downstream of the spacer end, negative for upstream of the spacer start.
                         Negative signs must be excaped.
         anchorSeq :     Spacer sequence to anchor.
-        anchorRegex :   anchorSeq is a regex.
+        anchorRegex :   `anchorSeq` is a regex.
         barcodes :      Demultiplexing table, tab-delimited (lane, sample_name, barcode, position). 
                         Position is 1-based and refers to the start of the anchoring !!SPACER!!, NOT the barcode start!
                         If omitted, anchoring will fall back to regex search.
@@ -259,6 +261,7 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, bcOffse
         unmatched :     Create a FASTQ file for all the reads that did not match the anchor or barcode within the given tolerances. 
                         Otherwise they will simply be ignored.
         abort :         Upper limit for how far into the read to search for the anchor, when no explicit positions are given in the barcodes file.
+        inferOutDir:    Will create a subdir in `outputdir` according to the value of `bam`.
 
     Returns:
         True    on completion
@@ -308,8 +311,8 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, bcOffse
         raise Exception("It looks like no info was parsed from the barcodes table. Does the value of --lane match a value in the 'lane' column of the barcodes table?")
     # Open output files
     fqOut = dict()
+    laneout = os.path.join(outputdir, lane) if inferOutDir else outputdir
     for barcode in demuxS.keys():
-        laneout = os.path.join(outputdir, lane)
         try:
             os.makedirs(laneout)
         except OSError:   # path already exists. Hopefully you have permission to write where you want to, so that won't be the cause.
@@ -643,7 +646,7 @@ def main(args):
             demuxWAnchor(f, barcodes=params.demuxA[0], outputdir=outfiles[i], tally=None, 
                 anchorSeq=params.demuxA[1], anchorRegex=rx, smm=(int(params.demuxA[2]) if not rx else 0),
                 bcOffset=int(params.demuxA[3]),  bcmm=int(params.demuxA[4]), 
-                abort=int(params.demuxA[5]), qualOffset=int(params.demuxA[6]), unmatched=False)
+                abort=int(params.demuxA[5]), qualOffset=int(params.demuxA[6]), unmatched=False, inferOutDir=False)
             if params.STDERRcomments:
                 sys.stderr.write(ml.donestring("demultiplexing of " + f))
         if params.STDERRcomments:
