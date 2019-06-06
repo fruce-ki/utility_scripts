@@ -267,7 +267,7 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, bcOffse
         Exception
     """
     # Clean up the lane name
-    lane = os.path.basename(args.bam)
+    lane = os.path.basename(bam)
     if lane[(len(lane)-4):len(lane)] == '.bam':
         lane = lane[0:(len(lane)-4)]         # crop .bam suffix
     # Demultiplexing dictionaries
@@ -276,41 +276,40 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, bcOffse
     demuxB = dict()  # demuxB[position] = [barcodes]
     withPos = False  # Explicit anchor positions provided
     # Parse barcodes
-    if args.barcodes:
-        with open(args.barcodes, "rt") as bcFile:
-            csvreader = csv.DictReader(bcFile, delimiter="\t")
-            for i, row in enumerate(csvreader):
-                if i == 0:
-                    if not ("lane" in row.keys() or "sample_name" in row.keys() or "barcode" in row.keys()):
-                        raise Exception("Error: 'lane', 'sample_name', or 'barcode' field is missing from the barcodes table.")
-                    if 'position' in row.keys():
-                        withPos = True              # Spacer start positions have been defined.
-                if row['lane'] == lane or row['lane'] == lane + '.bam':    # Only interested in the details for the lane being demultiplexed by this instance of the script.
-                    demuxS[ row['barcode'] ] = row['sample_name']
-                    if withPos:
-                        pos = int(row['position']) - 1  # 0-based indexing
-                        if pos < 0:
-                            raise ValueError(' '.join("Invalid barcode position definition for", row['lane'], row['barcode'], row['sample_name']))
+    with open(barcodes, "rt") as bcFile:
+        csvreader = csv.DictReader(bcFile, delimiter="\t")
+        for i, row in enumerate(csvreader):
+            if i == 0:
+                if not ("lane" in row.keys() or "sample_name" in row.keys() or "barcode" in row.keys()):
+                    raise Exception("Error: 'lane', 'sample_name', or 'barcode' field is missing from the barcodes table.")
+                if 'position' in row.keys():
+                    withPos = True              # Spacer start positions have been defined.
+            if row['lane'] == lane or row['lane'] == lane + '.bam':    # Only interested in the details for the lane being demultiplexed by this instance of the script.
+                demuxS[ row['barcode'] ] = row['sample_name']
+                if withPos:
+                    pos = int(row['position']) - 1  # 0-based indexing
+                    if pos < 0:
+                        raise ValueError(' '.join("Invalid barcode position definition for", row['lane'], row['barcode'], row['sample_name']))
+                    if pos not in spacerP:
+                        spacerP.append(pos)
+                    if pos not in demuxB.keys():
+                        demuxB[pos] = list()
+                    demuxB[pos].append(row['barcode'])
+                else:
+                    # Any position is now fair game
+                    for pos in range(0, abort):
                         if pos not in spacerP:
                             spacerP.append(pos)
                         if pos not in demuxB.keys():
                             demuxB[pos] = list()
                         demuxB[pos].append(row['barcode'])
-                    else:
-                        # Any position is now fair game
-                        for pos in range(0, args.abort):
-                            if pos not in spacerP:
-                                spacerP.append(pos)
-                            if pos not in demuxB.keys():
-                                demuxB[pos] = list()
-                            demuxB[pos].append(row['barcode'])
     # Maybe the lane specifications did not match?
     if len(demuxS) == 0:
         raise Exception("It looks like no info was parsed from the barcodes table. Does the value of --lane match a value in the 'lane' column of the barcodes table?")
     # Open output files
     fqOut = dict()
     for barcode in demuxS.keys():
-        laneout = os.path.join(args.outputdir, lane)
+        laneout = os.path.join(outputdir, lane)
         try:
             os.makedirs(laneout)
         except OSError:   # path already exists. Hopefully you have permission to write where you want to, so that won't be the cause.
@@ -318,15 +317,15 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, bcOffse
         file = lane + '_' + demuxS[barcode] + '.fq'
         fqOut[demuxS[barcode]] = open(os.path.join(laneout, file), "w")
     unmatched = None
-    if args.unmatched:
-        unmatched = open(os.path.join(args.outputdir, laneout + '_unmatched.fq'), "w")
+    if unmatched:
+        unmatched = open(os.path.join(outputdir, laneout + '_unmatched.fq'), "w")
     # Spacer pattern
-    anchor = re.compile(args.anchorSeq) # Pattern matching
-    anchorLen = len(args.anchorSeq)     # Will be overwritten later if anchorSeq is a regex
+    anchor = re.compile(anchorSeq) # Pattern matching
+    anchorLen = len(anchorSeq)     # Will be overwritten later if anchorSeq is a regex
     # Statistics
     counter = Counter()
     # Parse SAM
-    samin = pysam.AlignmentFile(args.bam, "rb", check_sq=False)
+    samin = pysam.AlignmentFile(bam, "rb", check_sq=False)
     for r in samin:
         #D00689:401:CDM9JANXX:3:1101:1593:1999	4	*	0	0	*	*	0	0	CGGCTNGTCAGTATTTTACCAATGACCAAATCAAAGAAATGACTCGCAAG	BBBBB#<BBFFFFFFFFFFFFFFF<FFFFFFFFFFFFFBFFFFFFFFFFF	B2:Z:NCNNNNCCT	Q2:Z:#<####BBB	BC:Z:GCATTNNNC	RG:Z:CDM9JANXX.3	QT:Z://///###/
         # 0                                     1   2   3   4   5   6   7   8   9                                                   10                                                  11              [12]            [13]            [14]                [15]
@@ -345,25 +344,25 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, bcOffse
         anchorFoundAt = None
         for pos in spacerP:     # Scan through predefined positions. T
                                 # This also covers the case where no positions were explicitly defined, as all the positions within the allowed range will have been generated instead.
-            if args.anchorRegex:    # Just try to match the regex at the required position. Might be less efficient than anchor.search() when all positions are possible. But it's cleaner not creating a separate use case for it.
+            if anchorRegex:    # Just try to match the regex at the required position. Might be less efficient than anchor.search() when all positions are possible. But it's cleaner not creating a separate use case for it.
                 m = anchor.match(seq, pos)
                 if m:
                     anchorFoundAt = m.start()
                     anchorLen = m.end() - m.start()
                     break
             else:       # Calculate edit distance, not allowing indels in the anchor.
-                if lev.hamming(args.anchorSeq, seq[pos:(pos + anchorLen)]) <= args.smm:
+                if lev.hamming(anchorSeq, seq[pos:(pos + anchorLen)]) <= smm:
                     anchorFoundAt = pos
                     break
         # Demultiplex, trim
         if anchorFoundAt is not None:   # The anchor could be matched at the given positions with the given mismatch allowance
             anchorEnd = anchorFoundAt + anchorLen
-            bcPos = anchorEnd - 1 + args.bcOffset if args.bcOffset > 0 else anchorFoundAt + args.bcOffset
+            bcPos = anchorEnd - 1 + bcOffset if bcOffset > 0 else anchorFoundAt + bcOffset
             # Scan through the barcodes expected at this anchor position
             bcfound = False
             for bc in demuxB[anchorFoundAt]:
                 bcEnd = bcPos + len(bc)
-                if lev.hamming(bc, seq[bcPos:bcEnd]) <= args.bcmm:
+                if lev.hamming(bc, seq[bcPos:bcEnd]) <= bcmm:
                     bcFound = True
                     trimPos = max(bcEnd, anchorEnd) # Remember, bc can be either up- or down-stream of anchor
                     # Print FASTQ entry
@@ -373,18 +372,18 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, bcOffse
             if not bcFound:
                 unmatched.write('@' + name + "\n" + seq + "\n+\n" + qual + "\n")
                 counter.update(['BC unmatched'])
-        elif args.unmatched:
+        elif unmatched:
             unmatched.write('@' + name + "\n" + seq + "\n+\n" + qual + "\n")
             counter.update(['Anchor unmatched'])
     samin.close()
     # Close output files
     for file in fqOut.values():
         file.close()
-    if args.unmatched:
+    if unmatched:
         unmatched.close()
     # Print tally
-    if args.tally:
-        lf = open(args.tally, "w")
+    if tally:
+        lf = open(tally, "w")
         for k,v in counter.most_common():
             lf.write( "\t".join([lane, k, str(v)]) + "\n")
         lf.close()
@@ -450,6 +449,14 @@ def main(args):
                                 [3] (char) wildcard character(s) (like 'N' for unknown nucleotides),\
                                 [4] (int) barcode offset (+n downstream of match end, \\-n upstream of match start, \
                                 escaping the minus sign is important), [5] (int) barode length.")
+    parser.add_argument('--demuxA', type=str, nargs=7,
+                                help="Demultiplex a BAM using an anchor sequence to locate the barcodes. \
+                                Arguments: [1] (str) barcodes file, [2] (str) anchor sequence (literal or regex),\
+                                [3] (int) number of mismatches in anchor (use 'None' to indicate anchor is a regex),\
+                                [4] (int) barcode offset (+n downstream of match end, \\-n upstream of match start, \
+                                escaping the minus sign is important), [5] (int) number of mismatches in the barcodes,\
+                                [6] (int) number of bases from read start beyond which to give up looking for the anchor,\
+                                [7] base quality encoding offset.")
     params = parser.parse_args(args)
 
 
@@ -600,9 +607,10 @@ def main(args):
     elif params.samPatternStats:
         # Do.
         for i,f in enumerate(flist):
-            result = samPatternStats(pattern=params.samPatternStats[0], bam=f, mmCap=int(params.samPatternStats[1]),
+            rx = (params.samPatternStats[1] == "None")
+            result = samPatternStats(pattern=params.samPatternStats[0], bam=f, mmCap=(int(params.samPatternStats[1]) if not rx else 0),
                                     bco=int(params.samPatternStats[3]), bcl=int(params.samPatternStats[4]),
-                                    literal=(params.samPatternStats[1] != "None"), wild=params.samPatternStats[2], filtered=False)
+                                    literal=(not rx), wild=params.samPatternStats[2], filtered=False)
             if outfiles:
                 # Send to individual file instead of STDOUT.
                 outstream = open(outfiles[i], 'w')
@@ -624,6 +632,22 @@ def main(args):
                 sys.stderr.write(ml.donestring("pattern stats in " + f))
         if params.STDERRcomments:
             sys.stderr.write(ml.donestring("pattern stats in all BAMs"))
+
+
+    # DEMULTIPLEX BAM by ANCHOR
+    elif params.demuxA:
+        if not outfiles or len(outfiles) != len(flist):
+            exit("Insufficient output directories specified. Use -O to specify output directory pattern.")
+        rx = (params.demuxA[2] == 'None')
+        for i,f in enumerate(flist):
+            demuxWAnchor(f, barcodes=params.demuxA[0], outputdir=outfiles[i], tally=None, 
+                anchorSeq=params.demuxA[1], anchorRegex=rx, smm=(int(params.demuxA[2]) if not rx else 0),
+                bcOffset=int(params.demuxA[3]),  bcmm=int(params.demuxA[4]), 
+                abort=int(params.demuxA[5]), qualOffset=int(params.demuxA[6]), unmatched=False)
+            if params.STDERRcomments:
+                sys.stderr.write(ml.donestring("demultiplexing of " + f))
+        if params.STDERRcomments:
+            sys.stderr.write(ml.donestring("demultiplexing of all BAMs"))
 
 
 #     # All done.
