@@ -85,25 +85,36 @@ else
   module load subread/1.5.0-p1-foss-2017a
   module load python-levenshtein/0.12.0-foss-2017a-python-2.7.13
   module load pysam/0.14.1-foss-2017a-python-2.7.13
+  module load fastqc/0.11.5-java-1.8.0_121
+  module load multiqc/1.3-foss-2017a-python-2.7.13
   libname=$(basename $library)
   libname=${libname/.txt/}
   mkdir -p ${countsdir}/fastq ${countsdir}/counts/${libname} ${countsdir}/aligned/${libname}
   echo "Demultiplex BAM using anchor sequence."
   # Demultiplex
-  srun --mem=5000 fileutilities.py T ${indir}/*.bam --loop  ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq/ ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33
-  srun --mem=10000 fileutilities.py T ${countsdir}/fastq/*/*.fq --loop gzip {abs}
+  #srun --mem=5000 fileutilities.py T ${indir}/*.bam --loop  ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33
+  #srun --mem=10000 fileutilities.py T ${countsdir}/fastq/*/*.fq --loop gzip {abs}
+  echo "FastQC"
+  mkdir -p ${countsdir}/fastq/fastqc
+  srun --mem=10000 --cpus-per-task 8 --ntasks=1 fastqc -q -o ${countsdir}/fastq/fastqc ${countsdir}/fastq/*/*.fq.gz
   echo "Guides library to FASTA."
-  srun ~/crispr-process-nf/bin/process_library.R $library C
+  #srun ~/crispr-process-nf/bin/process_library.R $library C
   echo "Bowtie2 index."
-  srun bowtie2-build ${library/.txt/.fa} $libname
+  #srun bowtie2-build ${library/.txt/.fa} $(dirname $library)/$libname
   echo "Bowtie2 align."
-  srun --mem=10000 --cpus-per-task=8 fileutilities.py T ${countsdir}/fastq/*.fq.gz --loop bowtie2 ,-x ${library/.txt/}  ,-U {abs} ,--threads 8 ,-L 20 ,--score-min 'C,0,-1' ,-N 0 ,--seed 42 '2>' ${countsdir}/aligned/${libname}/{bas}.log \> ${countsdir}/aligned/${libname}/{bas}.sam
+  #srun --mem=50000 --cpus-per-task=4 fileutilities.py T ${countsdir}/fastq/${libname}/*.fq.gz --loop bowtie2 ,-x ${library/.txt/}  ,-U {abs} ,--threads 3 ,-L 20 ,--score-min 'C,0,-1' ,-N 0 ,--seed 42 '2>' ${countsdir}/aligned/${libname}/{bas}.log \> ${countsdir}/aligned/${libname}/{bas}.sam
   # Quantify.
-  srun --mem=10000 --cpus-per-task=8 fileutilities.py T ${countsdir}/aligned/${libname}/*.sam --loop featureCounts ,-T 8 ,-a ${library/.txt/.saf} ,-F SAF ,-o ${countsdir}/counts/${libname}/{bas}.txt {abs}
+  echo "Quantify with featureCounts"
+  #srun --mem=10000 --cpus-per-task=8 fileutilities.py T ${countsdir}/aligned/${libname}/*.sam --loop featureCounts ,-T 4 ,-a ${library/.txt/.saf} ,-F SAF ,-o ${countsdir}/counts/${libname}/{bas}.txt {abs}
   # Combine tables.
-  fileutilities.py T ${countsdir}/counts/${libname}/*.txt --loop combine_counts.R $library {abs} > ${countsdir}/counts/${libname}/counts_mageck.txt
-  
+  #srun --mem=5000 ~/crispr-process-nf/bin/combine_counts.R $library ${countsdir}/counts/${libname}/*.fq.txt > ${countsdir}/counts/${libname}/counts_mageck.txt
+  echo "MultiQC"
+  export LC_ALL=C.UTF-8
+  export LANG=C.UTF-8
+  srun multiqc -f -x *.run ${countsdir}/fastq/fastqc ${countsdir}/align/${libname} ${countsdir}/counts/${libname}
 fi
+
+exit 0
 
 # echo "Merge some columns, add some columns."
 # Rscript ~/utility_scripts/sum_cols.R ./process/crispr_nf/counts/library/counts_mageck.txt ${counts/.txt/_merged.txt} 'NoIFNG_d0,NoIFNG_d0_3,NoIFNG_d0_4' NoIFNG_d0 TRUE TRUE
