@@ -235,7 +235,7 @@ def samPatternStats(pattern, bam='-', bco=-4, bcl=4, literal=True, mmCap=2, wild
 
 def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, 
                 anchorSeq='TTCCAGCATAGCTCTTAAAC', anchorRegex=False, smm=2,
-                bcOffset=-4, bcmm=1, abort=30, qualOffset=33, unmatched=False, inferOutDir=True):
+                bcOffset=-4, bcmm=1, abort=30, qualOffset=33, unmatched=False):
     """
     Demultiplexing with variable length 5' construct of barcode and spacers.
 
@@ -261,7 +261,6 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None,
         unmatched :     Create a FASTQ file for all the reads that did not match the anchor or barcode within the given tolerances. 
                         Otherwise they will simply be ignored.
         abort :         Upper limit for how far into the read to search for the anchor, when no explicit positions are given in the barcodes file.
-        inferOutDir:    Will create a subdir in `outputdir` according to the value of `bam`.
 
     Returns:
         True    on completion
@@ -311,17 +310,16 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None,
         raise Exception("It looks like no info was parsed from the barcodes table. The 'lane' column of the barcodes table include " + lane + ' or ' + lane + '.bam ?')
     # Open output files
     fqOut = dict()
-    laneout = os.path.join(outputdir, lane) if inferOutDir else outputdir
     for barcode in demuxS.keys():
         try:
-            os.makedirs(laneout)
+            os.makedirs(outputdir)
         except OSError:   # path already exists. Hopefully you have permission to write where you want to, so that won't be the cause.
             pass
         file = lane + '_' + demuxS[barcode] + '.fq'
-        fqOut[demuxS[barcode]] = open(os.path.join(laneout, file), "w")
+        fqOut[demuxS[barcode]] = open(os.path.join(outputdir, file), "w")
     unknown = None
     if unmatched:
-        unknown = open(os.path.join(outputdir, laneout + '_unmatched.fq'), "w")
+        unknown = open(os.path.join(outputdir, outputdir + '_unmatched.fq'), "w")
     # Spacer pattern
     anchor = re.compile(anchorSeq) # Pattern matching
     anchorLen = len(anchorSeq)     # Will be overwritten later if anchorSeq is a regex
@@ -650,7 +648,7 @@ def main(args):
             demuxWAnchor(f, barcodes=params.demuxA[0], outputdir=outfiles[i], tally=None, 
                 anchorSeq=params.demuxA[1], anchorRegex=rx, smm=(int(params.demuxA[2]) if not rx else 0),
                 bcOffset=int(params.demuxA[3]),  bcmm=int(params.demuxA[4]), 
-                abort=int(params.demuxA[5]), qualOffset=int(params.demuxA[6]), unmatched=False, inferOutDir=False)
+                abort=int(params.demuxA[5]), qualOffset=int(params.demuxA[6]), unmatched=False)
             if params.STDERRcomments:
                 sys.stderr.write(ml.donestring("demultiplexing of " + f))
         if params.STDERRcomments:
