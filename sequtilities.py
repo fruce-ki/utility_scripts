@@ -308,7 +308,7 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None,
                         demuxB[pos].append(row['barcode'])
     # Maybe the lane specifications did not match?
     if len(demuxS) == 0:
-        raise Exception("It looks like no info was parsed from the barcodes table. Does the value of --lane match a value in the 'lane' column of the barcodes table?")
+        raise Exception("It looks like no info was parsed from the barcodes table. The 'lane' column of the barcodes table include " + lane + ' or ' + lane + '.bam ?')
     # Open output files
     fqOut = dict()
     laneout = os.path.join(outputdir, lane) if inferOutDir else outputdir
@@ -319,9 +319,9 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None,
             pass
         file = lane + '_' + demuxS[barcode] + '.fq'
         fqOut[demuxS[barcode]] = open(os.path.join(laneout, file), "w")
-    unmatched = None
+    unknown = None
     if unmatched:
-        unmatched = open(os.path.join(outputdir, laneout + '_unmatched.fq'), "w")
+        unknown = open(os.path.join(outputdir, laneout + '_unmatched.fq'), "w")
     # Spacer pattern
     anchor = re.compile(anchorSeq) # Pattern matching
     anchorLen = len(anchorSeq)     # Will be overwritten later if anchorSeq is a regex
@@ -333,6 +333,9 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None,
         #D00689:401:CDM9JANXX:3:1101:1593:1999	4	*	0	0	*	*	0	0	CGGCTNGTCAGTATTTTACCAATGACCAAATCAAAGAAATGACTCGCAAG	BBBBB#<BBFFFFFFFFFFFFFFF<FFFFFFFFFFFFFBFFFFFFFFFFF	B2:Z:NCNNNNCCT	Q2:Z:#<####BBB	BC:Z:GCATTNNNC	RG:Z:CDM9JANXX.3	QT:Z://///###/
         # 0                                     1   2   3   4   5   6   7   8   9                                                   10                                                  11              [12]            [13]            [14]                [15]
         counter.update(['total'])
+        if counter['total'] % 1000000 == 0:
+            sys.stderr.write(str(lane + ' : ' + str(counter['total']) + " reads processed\n"))
+            sys.stderr.flush()
         name = r.query_name
         seq = r.query_sequence
         quals = r.query_qualities
@@ -361,29 +364,30 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None,
         if anchorFoundAt is not None:   # The anchor could be matched at the given positions with the given mismatch allowance
             anchorEnd = anchorFoundAt + anchorLen
             bcPos = anchorEnd - 1 + bcOffset if bcOffset > 0 else anchorFoundAt + bcOffset
-            # Scan through the barcodes expected at this anchor position
-            bcfound = False
-            for bc in demuxB[anchorFoundAt]:
-                bcEnd = bcPos + len(bc)
-                if lev.hamming(bc, seq[bcPos:bcEnd]) <= bcmm:
-                    bcFound = True
-                    trimPos = max(bcEnd, anchorEnd) # Remember, bc can be either up- or down-stream of anchor
-                    # Print FASTQ entry
-                    fqOut[demuxS[bc]].write('@' + name + "\n" + seq[trimPos:] + "\n+\n" + qual[trimPos:] + "\n")
-                    # Keep count
-                    counter.update(['assigned', demuxS[bc]])
-            if not bcFound:
-                unmatched.write('@' + name + "\n" + seq + "\n+\n" + qual + "\n")
+            bcFound = False
+            if bcPos >= 0:
+                # Scan through the barcodes expected at this anchor position
+                for bc in demuxB[anchorFoundAt]:
+                    bcEnd = bcPos + len(bc)
+                    if bcEnd <= len(seq) and lev.hamming(bc, seq[bcPos:bcEnd]) <= bcmm:
+                        bcFound = True
+                        trimPos = max(bcEnd, anchorEnd) # Remember, bc can be either up- or down-stream of anchor
+                        # Print FASTQ entry
+                        fqOut[demuxS[bc]].write('@' + name + "\n" + seq[trimPos:] + "\n+\n" + qual[trimPos:] + "\n")
+                        # Keep count
+                        counter.update(['assigned', demuxS[bc]])
+            if (not bcFound) and unmatched:
+                unknown.write('@' + name + "\n" + seq + "\n+\n" + qual + "\n")
                 counter.update(['BC unmatched'])
         elif unmatched:
-            unmatched.write('@' + name + "\n" + seq + "\n+\n" + qual + "\n")
+            unknown.write('@' + name + "\n" + seq + "\n+\n" + qual + "\n")
             counter.update(['Anchor unmatched'])
     samin.close()
     # Close output files
     for file in fqOut.values():
         file.close()
     if unmatched:
-        unmatched.close()
+        unknown.close()
     # Print tally
     if tally:
         lf = open(tally, "w")
