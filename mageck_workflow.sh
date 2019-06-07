@@ -9,27 +9,29 @@
 #SBATCH --output=mageck-wf.out
 #SBATCH --error=mageck-wf.err
 
-set -e
 
 ## Parameters ##
 function usage() {
     echo "Usage:"
     echo "      $0 -i INDIR -l GUIDES_LIB -b DEMUX_TABLE -n COUNTS_OUTDIR -c CONTRASTS_TABLE -m MAGECK_OUTDIR
-                [-r REVCOMP] [-p PAD_BASE] [-s SPACER_LENGTH] [-u UMI_LENGTH] [-d DEMUX_BC_LENGTH] [-M BC_MISMATCHES] [-z MINCOUNT] [-E ENTREZ_FIELD]
+                [-p PAD_BASE] [-s SPACER_SEQ] [-A SPACER_MISMATCHES] [-u UMI_LENGTH] [-d BC_LENGTH] [-M BC_MISMATCHES] [-z MINCOUNT] [-E ENTREZ_FIELD] [-r] [-V]
                 [-Z REF_SAMPLES -C CTRL_GUIDE_GRPS -G GUIDES_PER_GENE]"
 		exit 1
 }
 # Defaults
 pad="C"
 countthresh=50
-spacer=20
+spacer='TTCCAGCATAGCTCTTAAAC'
 umi=6
 demux=4
 bcmm=1
-revcomp="no"
+bcoffset=-4
+smm=2
 entrezfield=1   # 0-based index
+variable=0
+revcomp=0
 # Parse options.
-while getopts 'i:l:b:r:n:c:m:r:C:G:z:Z:p:s:u:d:M:E' flag; do
+while getopts 'i:l:b:n:c:m:r:C:G:z:Z:p:s:u:d:O:M:A:E:Vr' flag; do
   case "${flag}" in
     i) indir="${OPTARG}" ;;           # Input directory with unaligned BAMs
     l) library="${OPTARG}" ;;         # sgRNA library
@@ -37,40 +39,71 @@ while getopts 'i:l:b:r:n:c:m:r:C:G:z:Z:p:s:u:d:M:E' flag; do
     n) countsdir="${OPTARG}" ;;       # Output directory for FASTQs and counts table
     c) contrasts="${OPTARG}" ;;       # Comparison details for MAGECK nextflow: name \t control \t treatment \t norm_method \t fdr_method \t lfc_method \t cnv_correction \t filter
     m) mageckdir="${OPTARG}" ;;       # Output directory for MAGECK nextflow
-    r) revcomp="${OPTARG}" ;;         # Reverse complement the reads to match the barcodes? 'yes'\'no' (no)
-    C) ctrlguides="${OPTARG}" ;;      # Comma-separated list of control guide group names.
-    G) guidespergene="${OPTARG}" ;;   # Guides per gene
     z) countthresh="${OPTARG}" ;;     # Minimum read count per guide (50)
-    Z) refSamps="${OPTARG}" ;;        # Comma-separated sample-names to apply the counts threshold for control guide purposes
     p) pad="${OPTARG}" ;;             # Padding base ("C")
-    s) spacer="${OPTARG}" ;;          # Spacer length (20)
+    s) spacer="${OPTARG}" ;;          # Anchor sequence ('TTCCAGCATAGCTCTTAAAC')
     u) umi="${OPTARG}" ;;             # UMI length (6)
     d) demux="${OPTARG}" ;;           # De-multiplexing barcode length (4)
+    O) bcoffset="${OPTARG}" ;;           # De-multiplexing barcode postition relastive to anchor (-4)
     M) bcmm="${OPTARG}" ;;            # Barcode mismatch allowance (1)
+    A) smm="${OPTARG}" ;;            # Anchor mismatch allowance (2)
     E) entrezfield="${OPTARG}" ;;     # 0-based index position in the undesrcore-separated composite guide IDs that represents the gene Entrez ID (1).
+    Z) refSamps="${OPTARG}" ;;        # Comma-separated sample-names to apply the counts threshold for control guide purposes
+    C) ctrlguides="${OPTARG}" ;;      # Comma-separated list of control guide group names.
+    G) guidespergene="${OPTARG}" ;;   # Guides per gene
+    V) variable=1 ;;        # Demultiplex manually, for staggered libraries (no).
+    r) revcomp=1 ;;         # Reverse complement the reads to match the barcodes? (no)
     *) usage ;;
   esac
 done
 
-if [ "$revcomp" = "yes" ]; then
+# Check we got the minimum set
+if [ -z "$indir" ] || [ -z "$library" ] || [ -z "$barcodes" ] || [ -z "$contrasts" ] || [ -z "$countsdir" ] || [ -z "$mageckdir" ]; then
+  echo "-i $indir -l $library -b $barodes -c $contrasts -n $countsdir -m $mageckdir"
+  usage
+  exit 1
+fi
+
+if [ $revcomp -eq 1 ]; then
   revcomp="--reverse_complement"
 else
   revcomp=""
 fi
 
-# Check we got the minimum set
-if [ -z "$indir" ] || [ -z "$library" ] || [ -z "$barcodes" ] || [ -z "$contrasts" ] || [ -z "$countsdir" ] || [ -z "$mageckdir" ]; then
-  usage
-  exit 1
-fi
-
-
 ## Workflow ##
 
-echo "Pre-process to BAM to FASTQ, align, and count."
-nextflow run zuberlab/crispr-process-nf $revcomp --inputDir $indir --library $library --padding_base $pad --spacer_length $spacer --barcode_demux_length $demux --barcode_random_length $umi --barcode_demux_mismatches $bcmm --barcodes $barcodes --outputDir $countsdir -profile ii2
-ld=$(basename $library)
-counts="${countsdir}/counts/${ld/.txt/}/counts_mageck.txt"
+set -e
+
+#if [ -z "$variable" ]; then
+if [ $variable -eq 0 ]; then
+  echo "Demultiplex BAM, align and count. Using the standard pipeline."
+  nextflow run zuberlab/crispr-process-nf $revcomp --inputDir $indir --library $library --padding_base $pad --spacer_seq $spacer --spacer_length ${#spacer} --barcode_demux_length $demux --barcode_random_length $umi --barcode_demux_mismatches $bcmm --barcodes $barcodes --outputDir $countsdir -profile ii2
+  ld=$(basename $library)
+  counts="${countsdir}/counts/${ld/.txt/}/counts_mageck.txt"
+else
+  module load bowtie2/2.2.9-foss-2017a
+  module load subread/1.5.0-p1-foss-2017a
+  module load python-levenshtein/0.12.0-foss-2017a-python-2.7.13
+  module load pysam/0.14.1-foss-2017a-python-2.7.13
+  libname=$(basename $library)
+  libname=${libname/.txt/}
+  mkdir -p ${countsdir}/fastq ${countsdir}/counts/${libname} ${countsdir}/aligned/${libname}
+  echo "Demultiplex BAM using anchor sequence."
+  # Demultiplex
+  srun --mem=5000 fileutilities.py T ${indir}/*.bam --loop  ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq/ ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33
+  srun --mem=10000 fileutilities.py T ${countsdir}/fastq/*/*.fq --loop gzip {abs}
+  echo "Guides library to FASTA."
+  srun ~/crispr-process-nf/bin/process_library.R $library C
+  echo "Bowtie2 index."
+  srun bowtie2-build ${library/.txt/.fa} $libname
+  echo "Bowtie2 align."
+  srun --mem=10000 --cpus-per-task=8 fileutilities.py T ${countsdir}/fastq/*.fq.gz --loop bowtie2 ,-x ${library/.txt/}  ,-U {abs} ,--threads 8 ,-L 20 ,--score-min 'C,0,-1' ,-N 0 ,--seed 42 '2>' ${countsdir}/aligned/${libname}/{bas}.log \> ${countsdir}/aligned/${libname}/{bas}.sam
+  # Quantify.
+  srun --mem=10000 --cpus-per-task=8 fileutilities.py T ${countsdir}/aligned/${libname}/*.sam --loop featureCounts ,-T 8 ,-a ${library/.txt/.saf} ,-F SAF ,-o ${countsdir}/counts/${libname}/{bas}.txt {abs}
+  # Combine tables.
+  fileutilities.py T ${countsdir}/counts/${libname}/*.txt --loop combine_counts.R $library {abs} > ${countsdir}/counts/${libname}/counts_mageck.txt
+  
+fi
 
 # echo "Merge some columns, add some columns."
 # Rscript ~/utility_scripts/sum_cols.R ./process/crispr_nf/counts/library/counts_mageck.txt ${counts/.txt/_merged.txt} 'NoIFNG_d0,NoIFNG_d0_3,NoIFNG_d0_4' NoIFNG_d0 TRUE TRUE
