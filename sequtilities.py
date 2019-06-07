@@ -331,7 +331,7 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None,
         #D00689:401:CDM9JANXX:3:1101:1593:1999	4	*	0	0	*	*	0	0	CGGCTNGTCAGTATTTTACCAATGACCAAATCAAAGAAATGACTCGCAAG	BBBBB#<BBFFFFFFFFFFFFFFF<FFFFFFFFFFFFFBFFFFFFFFFFF	B2:Z:NCNNNNCCT	Q2:Z:#<####BBB	BC:Z:GCATTNNNC	RG:Z:CDM9JANXX.3	QT:Z://///###/
         # 0                                     1   2   3   4   5   6   7   8   9                                                   10                                                  11              [12]            [13]            [14]                [15]
         counter.update(['total'])
-        if counter['total'] % 1000000 == 0:
+        if counter['total'] % 10000000 == 0:
             sys.stderr.write(str(lane + ' : ' + str(counter['total']) + " reads processed\n"))
             sys.stderr.flush()
         name = r.query_name
