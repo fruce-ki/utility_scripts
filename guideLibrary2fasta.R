@@ -29,11 +29,11 @@ library(purrr)
 args         <- commandArgs(trailingOnly = TRUE)
 padding_base <- toupper(args[1])
 input_file   <- args[2]
-output_file <- args[3]
-#library_name <- stringr::str_replace(basename(input_file), ".txt", "")
+
+library_name <- stringr::str_replace(input_file, ".txt", "")
 
 ### import
-raw <- read_tsv(input_file)
+raw <- read_tsv(input_file, col_types='ccc')
 
 ### check for id and sequence duplication
 stopifnot(!any(duplicated(raw$id)))
@@ -45,15 +45,15 @@ seq_length <- max(nchar(raw$sequence))
 raw$sequence %>%
   toupper %>%
   str_pad(pad = padding_base, width = seq_length, side = "left") %>%
-  set_names(raw$id) %>%
-  DNAStringSet() %>%
-#  writeXStringSet(paste0(library_name, ".fasta"), format = "fasta")
-  writeXStringSet(output_file, format = "fasta")
+  purrr::set_names(raw$id) %>%
+  Biostrings::DNAStringSet() %>%
+#  Biostrings::writeXStringSet(paste0(library_name, ".fasta"), format = "fasta")
+  Biostrings::writeXStringSet(paste0(library_name, ".fa"), format = "fasta")
 
 ### generate SAF annotation file for featureCount (subread package)
-# tibble::tibble(GeneID = raw$id,
-#               Chr    = raw$id,
-#               Start  = 1,
-#               End    = seq_length,
-#               Strand = "*") %>%
-#  readr::write_tsv(paste0(library_name, ".saf"))
+tibble::tibble(GeneID = raw$id,
+              Chr    = raw$id,
+              Start  = 1,
+              End    = seq_length,
+              Strand = "*") %>%
+  readr::write_tsv(paste0(library_name, ".saf"))
