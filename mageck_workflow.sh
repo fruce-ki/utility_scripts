@@ -93,7 +93,7 @@ wait_for_jobs(){
   done
 }
 
-#set -e
+set -e
 
 #if [ -z "$variable" ]; then
 if [ $variable -eq 0 ]; then
@@ -108,36 +108,36 @@ else
   
   echo "Demultiplexing BAM using anchor sequence."
   # Demultiplex
-  #module load python-levenshtein/0.12.0-foss-2017a-python-2.7.13
-  #module load pysam/0.14.1-foss-2017a-python-2.7.13
-  #fileutilities.py T ${indir}/*.bam --loop srun ,--mem=5000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q \&
-  #module unload python-levenshtein/0.12.0-foss-2017a-python-2.7.13
-  #module unload pysam/0.14.1-foss-2017a-python-2.7.13
-  #wait_for_jobs demultip
+  module load python-levenshtein/0.12.0-foss-2017a-python-2.7.13
+  module load pysam/0.14.1-foss-2017a-python-2.7.13
+  fileutilities.py T ${indir}/*.bam --loop srun ,--mem=5000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q \&
+  module unload python-levenshtein/0.12.0-foss-2017a-python-2.7.13
+  module unload pysam/0.14.1-foss-2017a-python-2.7.13
+  wait_for_jobs demultip
   
   echo "FastQC (in the background)." # and don't wait for it. I don't need its output for a while.
-  #module load fastqc/0.11.5-java-1.8.0_121
-  #fileutilities.py T ${countsdir}/fastq/*/*.fqc --loop srun ,--mem=5000 ,--cpus-per-task 6 fastqc ,-q ,-t 6 ,-f fastq ,-o ${countsdir}/fastqc {abs} \&
-  #module unload fastqc/0.11.5-java-1.8.0_121
+  module load fastqc/0.11.5-java-1.8.0_121
+  fileutilities.py T ${countsdir}/fastq/*/*.fqc --loop srun ,--mem=5000 ,--cpus-per-task 6 fastqc ,-q ,-t 6 ,-f fastq ,-o ${countsdir}/fastqc {abs} \&
+  module unload fastqc/0.11.5-java-1.8.0_121
   
   echo "Compressing FASTQ (in the background)."
-  #fileutilities.py T ${countsdir}/fastq/*/*.fq --loop srun ,--mem=50000 gzip {abs} \&
+  fileutilities.py T ${countsdir}/fastq/*/*.fq --loop srun ,--mem=50000 gzip {abs} \&
   
   echo "Guides library to FASTA."
   cw=$(realpath $(pwd))
   cd $(dirname $library)
-  #srun ~/crispr-process-nf/bin/process_library.R $library C
+  srun ~/crispr-process-nf/bin/process_library.R $library C
   cd $cw
   
   echo "Bowtie2 indexing."
   module load bowtie2/2.2.9-foss-2017a
-  #srun bowtie2-build ${library/.txt/.fasta} ${library/.txt/}
+  srun bowtie2-build ${library/.txt/.fasta} ${library/.txt/}
   
   echo "... waiting for gzip to catch up."
-  #wait_for_jobs gzip
+  wait_for_jobs gzip
   
   echo "Bowtie2 aligning."
-  fileutilities.py T ${countsdir}/fastq/${libname}/*.fq.gz --loop srun ,--mem=50000 bowtie2 ,-x ${library/.txt/}  ,-U {abs} ,--threads 1 ,-L 20 ,--score-min 'C,0,-1' ,-N 0 ,--seed 42 '2>' ${countsdir}/aligned/${libname}/{bas}.log \> ${countsdir}/aligned/${libname}/{bas}.sam \&
+  fileutilities.py T ${countsdir}/fastq/*/*.fq.gz --loop srun ,--mem=10000 ,--cpus-per-task=4 bowtie2 ,-x ${library/.txt/}  ,-U {abs} ,--threads 4 ,-L 20 ,--score-min 'C,0,-1' ,-N 0 ,--seed 42 '2>' ${countsdir}/aligned/${libname}/{bas}.log \> ${countsdir}/aligned/${libname}/{bas}.sam \&
   module unload bowtie2/2.2.9-foss-2017a
   wait_for_jobs bowtie2
   
@@ -147,11 +147,11 @@ else
   module unload subread/1.5.0-p1-foss-2017a
   wait_for_jobs featureC
   
-  # Combine tables.
+  echo "Combining samples into one table."
   srun --mem=5000 ~/crispr-process-nf/bin/combine_counts.R $library ${countsdir}/counts/${libname}/*.fq.txt > ${countsdir}/counts/${libname}/counts_mageck.txt
   # Fix header
   head -n 1 ${countsdir}/counts/${libname}/counts_mageck.txt | perl -e 'while(<STDIN>){~s/$ARGV[0].*?$ARGV[1]\///g;~s/\.fq//g;print}' $(realpath ${countsdir}) ${libname} > tmp
-  tail -m +2 ${countsdir}/counts/${libname}/counts_mageck.txt >> tmp
+  tail -n +2 ${countsdir}/counts/${libname}/counts_mageck.txt >> tmp
   mv ${countsdir}/counts/${libname}/counts_mageck.txt ${countsdir}/counts/${libname}/_counts_mageck.txt
   mv tmp ${countsdir}/counts/${libname}/counts_mageck.txt
   
@@ -162,9 +162,10 @@ else
   module unload multiqc/1.3-foss-2017a-python-2.7.13
   
   #clean-up
-  #rm -r ${countsdir}/fastq/*/*.fqc
+  rm ${countsdir}/fastq/*/*.fqc
 fi
 
+echo 'OK'
 exit 0
 
 # echo "Merge some columns, add some columns."
