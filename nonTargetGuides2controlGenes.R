@@ -2,7 +2,8 @@
 
 library(getopt)
 
-spec = matrix(c(
+# opt <- list('controlGroups'='NONTARGETING', countsFile='/Volumes/groups/obenauf/Kimon_Froussios/felix/MHC1_screen/process/crispr-processed/counts/mm_gw_zuber_v1_original/counts_mageck.txt', guidesPerGene=6, mincount=50, reference='d0_unsorted_OFF_IFN,mPP')
+spec <- matrix(c(
   'controlGroups' , 'c', 1, "character", "Comma-separated list (no space) of group names for non-targeting sgRNAs.",
   'countsFile'    , 'f', 1, "character", "Tab-separated table of counts.",
   'groupCol'      , 'g', 2, "character", "Name of the column containing the group names ('group').",
@@ -15,7 +16,7 @@ spec = matrix(c(
   'targetCol'     , 't', 2, "character", "Name of the column containing the guide names ('id').",
   'reference'     , 'z', 2, "character", "Comma separated column names across which to apply mincount for the controls. (if NULL, then all)"
 ), byrow=TRUE, ncol=5)
-opt = getopt(spec)
+opt <- getopt(spec)
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
