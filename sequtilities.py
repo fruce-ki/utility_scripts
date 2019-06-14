@@ -235,7 +235,8 @@ def samPatternStats(pattern, bam='-', bco=-4, bcl=4, literal=True, mmCap=2, wild
 
 def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, 
                 anchorSeq='TTCCAGCATAGCTCTTAAAC', anchorRegex=False, smm=2,
-                bcOffset=-4, bcmm=1, abort=30, qualOffset=33, unmatched=False):
+                bcOffset=-4, bcmm=1, guideLen=20, abort=30, qualOffset=33, 
+                unmatched=False, trimQC=False):
     """
     Demultiplexing with variable length 5' construct of barcode and spacers.
 
@@ -250,6 +251,7 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None,
         bcOffset :      Start position offset of the demultiplexing barcode, relative to the spacer.
                         Positive for downstream of the spacer end, negative for upstream of the spacer start.
                         Negative signs must be excaped.
+        guideLen :      Guides will be clipped at this length.
         anchorSeq :     Spacer sequence to anchor.
         anchorRegex :   `anchorSeq` is a regex.
         barcodes :      Demultiplexing table, tab-delimited (lane, sample_name, barcode, position). 
@@ -258,9 +260,11 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None,
         bcmm :          Mismatches allowed in matching the demultiplexing barcodes.
         smm :           Mismatches allowed in matching the spacer sequence.
         qualOffset :    Base-call quality offset for conversion from pysam to fastq.
+        abort :         Upper limit for how far into the read to search for the anchor, when no explicit positions are given in the barcodes file.
         unmatched :     Create a FASTQ file for all the reads that did not match the anchor or barcode within the given tolerances. 
                         Otherwise they will simply be ignored.
-        abort :         Upper limit for how far into the read to search for the anchor, when no explicit positions are given in the barcodes file.
+        trimQC :        Create a partly-trimmed additional FASTQ (ending in .fqc) that includes the barcode and anchor untrimmed. Only what's upstream of them is trimmed.
+                        In case you want to generate stats reports for the barcodes and anchor.
 
     Returns:
         True    on completion
@@ -316,10 +320,19 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None,
         except OSError:   # path already exists. Hopefully you have permission to write where you want to, so that won't be the cause.
             pass
         file = lane + '_' + demuxS[barcode] + '.fq'
-        fqOut[demuxS[barcode]] = open(os.path.join(outputdir, file), "w")
+        fqOut[demuxS[barcode]] = open(os.path.join(outputdir, file), "w", buffering=10000000) # 10MB
     unknown = None
     if unmatched:
-        unknown = open(os.path.join(outputdir, outputdir + '_unmatched.fq'), "w")
+        unknown = open(os.path.join(outputdir, lane + '_unmatched.fq'), "w", buffering=10000000) # 10MB
+    fqcOut = dict()
+    unknownqc = None
+    if trimQC:
+        for barcode in demuxS.keys():
+            file = lane + '_' + demuxS[barcode] + '.fqc'
+            fqcOut[demuxS[barcode]] = open(os.path.join(outputdir, file), "w", buffering=10000000) # 10MB
+        if unmatched:
+            unknownqc = open(os.path.join(outputdir, lane + '_unmatched.fqc'), "w", buffering=10000000) # 10MB
+
     # Spacer pattern
     anchor = re.compile(anchorSeq) # Pattern matching
     anchorLen = len(anchorSeq)     # Will be overwritten later if anchorSeq is a regex
@@ -328,8 +341,6 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None,
     # Parse SAM
     samin = pysam.AlignmentFile(bam, "rb", check_sq=False)
     for r in samin:
-        #D00689:401:CDM9JANXX:3:1101:1593:1999	4	*	0	0	*	*	0	0	CGGCTNGTCAGTATTTTACCAATGACCAAATCAAAGAAATGACTCGCAAG	BBBBB#<BBFFFFFFFFFFFFFFF<FFFFFFFFFFFFFBFFFFFFFFFFF	B2:Z:NCNNNNCCT	Q2:Z:#<####BBB	BC:Z:GCATTNNNC	RG:Z:CDM9JANXX.3	QT:Z://///###/
-        # 0                                     1   2   3   4   5   6   7   8   9                                                   10                                                  11              [12]            [13]            [14]                [15]
         counter.update(['total'])
         if counter['total'] % 10000000 == 0:
             sys.stderr.write(str(lane + ' : ' + str(counter['total']) + " reads processed\n"))
@@ -368,12 +379,18 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None,
                 for bc in demuxB[anchorFoundAt]:
                     bcEnd = bcPos + len(bc)
                     if bcEnd <= len(seq) and lev.hamming(bc, seq[bcPos:bcEnd]) <= bcmm:
-                        bcFound = True
                         trimPos = max(bcEnd, anchorEnd) # Remember, bc can be either up- or down-stream of anchor
-                        # Print FASTQ entry
-                        fqOut[demuxS[bc]].write('@' + name + "\n" + seq[trimPos:] + "\n+\n" + qual[trimPos:] + "\n")
-                        # Keep count
-                        counter.update(['assigned', demuxS[bc]])
+                        lentrim = trimPos + guideLen
+                        if lentrim <= len(seq):    # The guide is not cropped by read length
+                            bcFound = True
+                            # Print FASTQ entry
+                            fqOut[demuxS[bc]].write('@' + name + "\n" + seq[trimPos:lentrim] + "\n+\n" + qual[trimPos:lentrim] + "\n")
+                            # Print partly trimmed FASTQ entry for FastQC
+                            if trimQC:
+                                qctrimPos = min(bcPos, anchorFoundAt)
+                                fqcOut[demuxS[bc]].write('@' + name + "\n" + seq[qctrimPos:lentrim] + "\n+\n" + qual[qctrimPos:lentrim] + "\n")
+                            # Keep count
+                            counter.update(['assigned', demuxS[bc]])
             if (not bcFound) and unmatched:
                 unknown.write('@' + name + "\n" + seq + "\n+\n" + qual + "\n")
                 counter.update(['BC unmatched'])
@@ -386,6 +403,11 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None,
         file.close()
     if unmatched:
         unknown.close()
+    if trimQC:
+        for file in fqcOut.values():
+            file.close()
+        if unmatched:
+            unknownqc.close()
     # Print tally
     if tally:
         lf = open(tally, "w")
