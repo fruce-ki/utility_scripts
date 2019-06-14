@@ -13,9 +13,8 @@
 ## Parameters ##
 function usage() {
     echo "Usage:"
-    echo "      $0 -i INDIR -l GUIDES_LIB -b DEMUX_TABLE -n COUNTS_OUTDIR -c CONTRASTS_TABLE -m MAGECK_OUTDIR [-1] [-2]
-                [-p PAD_BASE] [-s SPACER_SEQ] [-A SPACER_MISMATCHES] [-u UMI_LENGTH] [-d BC_LENGTH] [-M BC_MISMATCHES] [-z MINCOUNT] [-E ENTREZ_FIELD] [-r] [-V]
-                [-Z REF_SAMPLES -C CTRL_GUIDE_GRPS -G GUIDES_PER_GENE]"
+    echo "      $0 -i INDIR -l GUIDES_LIB -b DEMUX_TABLE -n COUNTS_OUTDIR -c CONTRASTS_TABLE -m MAGECK_OUTDIR [-1] [-2]"
+    echo "      There are many more options and I've lost track. Consult getops in the source code."
 		exit 1
 }
 # Defaults
@@ -33,8 +32,9 @@ variable=0
 revcomp=0
 do_pre=0
 do_comparison=0
+guideLen=20
 # Parse options.
-while getopts 'i:l:b:n:c:m:r:C:G:z:Z:p:s:u:d:O:M:A:E:eVr12' flag; do
+while getopts 'i:l:b:n:c:m:r:C:G:z:Z:p:s:u:d:O:g:M:A:E:eVr12' flag; do
   case "${flag}" in
     i) indir="${OPTARG}" ;;           # Input directory with unaligned BAMs
     l) library="${OPTARG}" ;;         # sgRNA library
@@ -48,12 +48,13 @@ while getopts 'i:l:b:n:c:m:r:C:G:z:Z:p:s:u:d:O:M:A:E:eVr12' flag; do
     u) umi="${OPTARG}" ;;             # UMI length (6)
     d) demux="${OPTARG}" ;;           # De-multiplexing barcode length (4)
     O) bcoffset="${OPTARG}" ;;           # De-multiplexing barcode postition relastive to anchor (-4)
+    g) guideLen="${OPTARG}" ;;        # Guide length (20). For clipping.
     M) bcmm="${OPTARG}" ;;            # Barcode mismatch allowance (1)
     A) smm="${OPTARG}" ;;            # Anchor mismatch allowance (2)
     E) entrezfield="${OPTARG}" ;;     # 0-based index position in the undesrcore-separated composite guide IDs that represents the gene Entrez ID (1). -1 is a flag value that sets Entrex same as group value.
     Z) refSamps="${OPTARG}" ;;        # Comma-separated sample-names to apply the counts threshold for control guide purposes
     C) ctrlguides="${OPTARG}" ;;      # Comma-separated list of control guide group names.
-    G) guidespergene="${OPTARG}" ;;   # Guides per gene
+    G) guidespergene="${OPTARG}" ;;   # Guides per gene.
     V) variable=1 ;;                  # Demultiplex manually, for staggered libraries (no).
     r) revcomp=1 ;;                   # Reverse complement the reads to match the barcodes? (no)
     1) do_pre=1 ;;                 # Execute demultiplexing, alignment and quantification.
@@ -117,7 +118,7 @@ if [ $do_pre -eq 1 ]; then
     # Demultiplex
     module load python-levenshtein/0.12.0-foss-2017a-python-2.7.13
     module load pysam/0.14.1-foss-2017a-python-2.7.13
-    fileutilities.py T ${indir}/*.bam --loop srun ,--mem=10000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q \&
+    fileutilities.py T ${indir}/*.bam --loop srun ,--mem=20000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q \&
     module unload python-levenshtein/0.12.0-foss-2017a-python-2.7.13
     module unload pysam/0.14.1-foss-2017a-python-2.7.13
     wait_for_jobs demultip
@@ -172,7 +173,7 @@ if [ $do_pre -eq 1 ]; then
     
     echo ''
     echo "MultiQC"
-    wait_for_jobs fastqc  # It should be long finished by now, but better ask.
+    #wait_for_jobs fastqc  # It should be long finished by now, but better ask.
     module load multiqc/1.3-foss-2017a-python-2.7.13
     srun multiqc -f -x *.run -o ${countsdir}/multiqc ${countsdir}/fastqc ${countsdir}/aligned/${libname} ${countsdir}/counts/${libname}
     module unload multiqc/1.3-foss-2017a-python-2.7.13
@@ -250,7 +251,9 @@ if [ $do_comparison -eq 1 ]; then
   echo ''
   echo "Merge all guide-level outputs and clean up redundant columns."
   guides="${mageckdir}/guides_all.tsv"
-  srun --mem=10000 fileutilities.py T ${library}_forguides.txt ${mageckdir}/*/${renamed}/guides_stats.txt -r -i --appnd outer > $guides
+  if [ -f "$guides" ]; then
+    rm $guides # clean up previous run, otherwise weird things happen
+  fisrun --mem=10000 fileutilities.py T ${library}_forguides.txt ${mageckdir}/*/${renamed}/guides_stats.txt -r -i --appnd outer > $guides
   dups=$(head -n1 $guides | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++} print "\n";')
   srun --mem=10000 fileutilities.py T $guides -r --mrgdups $dups > ${guides/.tsv/_dedup.tsv}
   guides="${guides/.tsv/_dedup.tsv}"
