@@ -15,6 +15,7 @@ from collections import Counter
 
 import Levenshtein as lev
 import pysam
+from Bio import SeqIO
 
 import fileutilities as fu
 import mylogs as ml
@@ -133,7 +134,7 @@ def gtf2premrna(gtfs, filter=True):
 
 
 def samPatternStats(pattern, bam='-', bco=-4, bcl=4, literal=True, mmCap=2, wild='N', minFreq=0.01, filtered=False):
-    """Find a pattern's positions and flanking sequences in an uncompressed header-less SAM.
+    """Find a pattern's positions and flanking sequences in a BAM.
 
     Meant to be used to verify the position of a known spacer sequence and identify
     the demultiplexing barcodes adjacent to it.
@@ -174,7 +175,7 @@ def samPatternStats(pattern, bam='-', bco=-4, bcl=4, literal=True, mmCap=2, wild
     # Search the pattern line by line.
     for line in samin:
         reads = reads + 1
-        seq = line.get_forward_sequence()
+        seq = line.get_query_sequence()
         seqlen = len(seq)
         Lengths.update( ["\t".join(['Length', str(seqlen), '.', '.'])] )
         whichMinDist = None
@@ -233,12 +234,120 @@ def samPatternStats(pattern, bam='-', bco=-4, bcl=4, literal=True, mmCap=2, wild
     return [reads, matched, Lengths.most_common(), Positions.most_common(), Barcodes.most_common(), Wilds.most_common()]
 
 
-def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, 
-                anchorSeq='TTCCAGCATAGCTCTTAAAC', anchorRegex=False, smm=2,
-                bcOffset=-4, bcmm=1, guideLen=20, abort=30, qualOffset=33, 
-                unmatched=False, trimQC=False):
+def fqPatternStats(pattern, fastq, bco=-4, bcl=4, literal=True, mmCap=2, wild='N', minFreq=0.01, filtered=False):
+    """Find a pattern's positions and flanking sequences in a BAM.
+
+    Meant to be used to verify the position of a known spacer sequence and identify
+    the demultiplexing barcodes adjacent to it.
+
+    Args:
+        pattern(str): A sequence literal or regex pattern.
+        fastq(str): A FASTQ file.
+        bco(int): How many positions before the tracer's start (-n) or after the
+                    tracer's end (+n) is the barcode (-4)?
+        bcl(int): How many nucleotides long is the barcode (4)?
+        literal(bool): Is the pattern a literal sequence (True)? If so, mismatch patterns will also be created.
+        mmCap(int): Set upper limit to number of mismatch positions that are allowed (2).
+        wild(char): What singular character(s) is/are used for unknown values (N).
+        minFreq(int): Discard results occuring in fewer than 100 reads.
+        filtered(bool): The return Counters are filtered to remove rare events.
+    Returns:
+        List of Counters:
+                    [0] Total number of reads (int)
+                    [1] Number of reads that matched the anchor (int)
+                    [2] collections.Counter object for read lengths
+                    [3] collections.Counter object with read count of tracer matches
+                    [4] collections.Counter object with read count of barcodes found
+                        The barcode sequence is 'out_of_range' when the barcode is hanging over either end of the read
+                        due to a very shifted tracer position.
+                    [5] collection.Counter object with wildcard count downstream of the adapter region.
     """
-    Demultiplexing with variable length 5' construct of barcode and spacers.
+    patlen = len(pattern)   # if literal
+    Lengths = Counter()
+    reads = 0
+    matched = 0
+    Positions = Counter()
+    Barcodes = Counter()
+    Wilds = Counter()
+    with open(fastq, 'rU') as fqin:
+        p = None
+        if not literal:
+            p = re.compile(pattern)
+        # Search the pattern line by line.
+        for record in SeqIO.parse(fqin, 'fastq'):
+            reads = reads + 1
+            seq = str(record.seq)
+            seqlen = len(seq)
+            Lengths.update( ["\t".join(['Length', str(seqlen), '.', '.'])] )
+            whichMinDist = None
+            minDist = None
+            hit = None
+            if literal:
+                # Crawl along the sequence. When there is an exact match, this should break out after a few iterations. If there is any mismatch, it will have to go to the end.
+                minDist = patlen      # Start with the largest possible hamming distance of all-mismatches.
+                for i in range(0, seqlen - patlen):
+                    dist = lev.hamming(pattern, seq[i:(i+patlen)])
+                    if dist < mmCap and dist < minDist:
+                        minDist = dist
+                        whichMinDist = i
+                        if dist == 0:
+                            break   # Can't get any better.
+            else:
+                m = p.search(seq)
+                if m :
+                    whichMinDist = m.start()       # No tie-breaker if anchor matches more than once. Just take the first. Provide more explicit patterns to reduce this occurence.
+                    hit = m.group(0)
+            if whichMinDist is not None:        # if there is a match
+                patend = whichMinDist + patlen
+                if patend - 1 <= seqlen:    # Make sure nothing hangs off the end
+                    matched = matched + 1
+                    if literal:
+                        hit = seq[whichMinDist:patend]
+                    Positions.update( ["\t".join(['Anchor', str(minDist), hit, str(whichMinDist + 1)])] )
+                        # ie. Anchor    2   TTCCAGCATNGCTCTNAAAC    11
+                    # Identify the barcode
+                    if bco is not None and bcl is not None:
+                        pos = patend - 1 + bco if bco > 0 else whichMinDist + bco
+                        bcend = pos + bcl
+                        if pos >= 0 and (bcend - 1) <= seqlen:  # Make sure nothing hangs off the end
+                            Barcodes.update( ["\t".join(['Barcode', '', seq[pos:bcend], str(pos + 1)])] )
+                                # ie. Barcode   .    ACGT 7
+                    # Count wildcards downstream.
+                    guidePos = max(bcend if bcend else 0, patend)      # whichever comes last, the barcode or the spacer.
+                    waggr = 0
+                    for w in wild:      # allow more than one wildcard characters
+                        waggr = waggr + seq.count(w, guidePos)
+                    Wilds.update( ["\t".join(['Wildcards', str(waggr), '', ''])] )
+    # Filter out rare events to keep output uncluttered.
+    if filtered:
+        for k in list(Lengths.keys()):      # List gets all the values of the iterator before I edit the dict. That way the iterator doesn't crash.
+            if Lengths[k] / reads * 100 < minFreq:
+                del Lengths[k]
+        for k in list(Positions.keys()):
+            if Positions[k] / reads * 100 < minFreq:
+                del Positions[k]
+        for k in list(Barcodes.keys()):
+            if Barcodes[k] / reads * 100 < minFreq:
+                del Barcodes[k]
+        for k in list(Wilds.keys()):
+            if Wilds[k] / reads * 100 < minFreq:
+                del Wilds[k]
+    return [reads, matched, Lengths.most_common(), Positions.most_common(), Barcodes.most_common(), Wilds.most_common()]
+
+
+def encodeQuals(quals, offset=33):
+    """Recode a numeric list into a Phred string"""
+    qual = ''
+    for q in quals:
+        if sys.version_info[0] < 3:
+            qual = qual + str(unichr(q + offset))
+        else:
+            qual = qual + str(chr(q + offset))
+    return(qual)
+
+
+def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, anchorSeq='TTCCAGCATAGCTCTTAAAC', anchorRegex=False, smm=2, bcOffset=-4, bcmm=1, guideLen=20, abort=30, qualOffset=33, unmatched=False, trimQC=False):
+    """Demultiplexing BAM file with variable length 5' construct of barcode and spacer.
 
     Uses an anchoring sequence as reference position to find demultiplexing barcodes.
     Arbitrary spacers may be present before and between barcode and anchor.
@@ -349,12 +458,7 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None,
         seq = r.query_sequence
         quals = r.query_qualities
         # Convert qualities to ASCII Phred
-        qual = ''
-        for q in quals:
-            if sys.version_info[0] < 3:
-                qual = qual + str(unichr(q + 33))
-            else:
-                qual = qual + str(chr(q + 33))
+        qual = encodeQuals(quals, qualOffset)
         # Find the position of the anchor, within given mismatch tolerance
         anchorFoundAt = None
         for pos in spacerP:     # Scan through predefined positions. T
@@ -420,6 +524,101 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None,
     return(True)
 
 
+def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=33, unmatched=False):
+    """Demultiplexing BAM file according to BC tag field.
+
+    No trimming is performed.
+
+    Args:
+        bam :           Input BAM file. Single-end reads.
+        outputdir :     Output directory where demultiplexed fastq files will be saved.
+        tally :         File to write a tally of the reads assigned to each sample. (Default STDOUT)
+        qualOffset :    Base-call quality offset for conversion from pysam to fastq.
+        unmatched :     Create a FASTQ file for all the reads that did not match the anchor or barcode within the given tolerances. 
+                        Otherwise they will simply be ignored.
+
+    Returns:
+        True    on completion
+    Raises:
+        ValueError
+        Exception
+    """
+    # Clean up the lane name
+    lane = os.path.basename(bam)
+    if lane[(len(lane)-4):len(lane)] == '.bam':
+        lane = lane[0:(len(lane)-4)]         # crop .bam suffix
+    # Demultiplexing dictionaries
+    demuxS = dict()  # demuxS[barcode] = sample
+    # Parse barcodes
+    with open(barcodes, "rt") as bcFile:
+        csvreader = csv.DictReader(bcFile, delimiter="\t")
+        for i, row in enumerate(csvreader):
+            if i == 0:
+                if not ("lane" in row.keys() or "sample_name" in row.keys() or "barcode" in row.keys()):
+                    raise Exception("Error: 'lane', 'sample_name', or 'barcode' field is missing from the barcodes table.")
+            if row['lane'] == lane or row['lane'] == lane + '.bam':    # Only interested in the details for the lane being demultiplexed by this instance of the script.
+                demuxS[ row['barcode'] ] = row['sample_name']
+    # Maybe the lane specifications did not match?
+    if len(demuxS) == 0:
+        raise Exception("It looks like no info was parsed from the barcodes table. The 'lane' column of the barcodes table include " + lane + ' or ' + lane + '.bam ?')
+    # Open output files
+    fqOut = dict()
+    for barcode in demuxS.keys():
+        try:
+            os.makedirs(outputdir)
+        except OSError:   # path already exists. Hopefully you have permission to write where you want to, so that won't be the cause.
+            pass
+        file = lane + '_' + demuxS[barcode] + '.fq'
+        fqOut[demuxS[barcode]] = open(os.path.join(outputdir, file), "w", buffering=10000000) # 10MB
+    unknown = None
+    if unmatched:
+        unknown = open(os.path.join(outputdir, lane + '_unmatched.fq'), "w", buffering=10000000) # 10MB
+
+    # Statistics
+    counter = Counter()
+    k = demuxS.keys()
+    # Parse SAM
+    samin = pysam.AlignmentFile(bam, "rb", check_sq=False)
+    for r in samin:
+        counter.update(['total'])
+        if counter['total'] % 10000000 == 0:
+            sys.stderr.write(str(lane + ' : ' + str(counter['total']) + " reads processed\n"))
+            sys.stderr.flush()
+        name = r.query_name
+        seq = r.query_sequence
+        quals = r.query_qualities
+        bc = r.get_tag('BC')
+        # Convert qualities to ASCII Phred
+        qual = encodeQuals(quals, qualOffset)
+        # Print FASTQ entry
+        for b in k:     # Allow for the annotated barcode in the table to be truncated relative to the actual barcode recorded in the BAM. No mismatches.
+            if bc in b:
+                fqOut[demuxS[bc]].write('@' + name + "\n" + seq + "\n+\n" + qual + "\n")
+                # Keep count
+                counter.update(['assigned', demuxS[bc]])
+                break
+            else:
+                if unmatched:
+                    unknown.write('@' + name + "\n" + seq + "\n+\n" + qual + "\n")
+                    counter.update(['Barcode unmatched'])
+    samin.close()
+    # Close output files
+    for file in fqOut.values():
+        file.close()
+    if unmatched:
+        unknown.close()
+    # Print tally
+    if tally:
+        lf = open(tally, "w")
+        for k,v in counter.most_common():
+            lf.write( "\t".join([lane, k, str(v)]) + "\n")
+        lf.close()
+    else:
+        for k,v in counter.most_common():
+            sys.stdout.write( "\t".join([lane, k, str(v)]) + "\n")
+    return(True)
+
+
 def main(args):
     # Organize arguments and usage help:
     parser = argparse.ArgumentParser(description="Utility tasks relevant to sequencing.\
@@ -471,11 +670,18 @@ def main(args):
                                 The output is streamed to STDOUT, typically to be piped back to `samtools view -b`. \
                                 The header file will be prepended to the output stream.")
     parser.add_argument('--samPatternStats', type=str, nargs=5,
-                                help="Number and location of matches of the pattern in the reads of a SAM stream. \
+                                help="Number and location of matches of the pattern in the reads of BAM files. \
                                 Arguments: [1] (str) anchor sequence, [2] (int) mismatches allowed in the anchor (use 'None' if anchor is regex),\
                                 [3] (char) wildcard character(s) (like 'N' for unknown nucleotides),\
                                 [4] (int) barcode offset (+n downstream of match end, \\-n upstream of match start, \
                                 escaping the minus sign is important), [5] (int) barode length.")
+    parser.add_argument('--fqPatternStats', type=str, nargs=5,
+                                help="Number and location of matches of the pattern in the reads of FASTQ files. \
+                                Arguments: [1] (str) anchor sequence, [2] (int) mismatches allowed in the anchor (use 'None' if anchor is regex),\
+                                [3] (char) wildcard character(s) (like 'N' for unknown nucleotides),\
+                                [4] (int) barcode offset (+n downstream of match end, \\-n upstream of match start, \
+                                escaping the minus sign is important), [5] (int) barode length.")
+    
     parser.add_argument('--demuxA', type=str, nargs=7,
                                 help="Demultiplex a BAM using an anchor sequence to locate the barcodes. \
                                 Arguments: [1] (str) barcodes file, [2] (str) anchor sequence (literal or regex),\
@@ -484,6 +690,9 @@ def main(args):
                                 escaping the minus sign is important), [5] (int) number of mismatches in the barcodes,\
                                 [6] (int) number of bases from read start beyond which to give up looking for the anchor,\
                                 [7] base quality encoding offset.")
+    parser.add_argument('--demuxBC', type=str, nargs=2,
+                                help="Demultiplex a BAM using the BC: tag field and a look-up table that matches these barcode values to sample names.\
+                                Arguments: [1] (str) barcodes file, [2] base quality encoding offset.")
     params = parser.parse_args(args)
 
 
@@ -631,13 +840,20 @@ def main(args):
 
     # Adapter STATS from SAM stream
     # read length distribution, pattern position distribution, pattern match
-    elif params.samPatternStats:
+    elif params.samPatternStats or params.fqPatternStats:
         # Do.
         for i,f in enumerate(flist):
-            rx = (params.samPatternStats[1] == "None")
-            result = samPatternStats(pattern=params.samPatternStats[0], bam=f, mmCap=(int(params.samPatternStats[1]) if not rx else 0),
-                                    bco=int(params.samPatternStats[3]), bcl=int(params.samPatternStats[4]),
-                                    literal=(not rx), wild=params.samPatternStats[2], filtered=False)
+            result = None
+            if params.samPatternStats:
+                rx = (params.samPatternStats[1] == "None")
+                result = samPatternStats(pattern=params.samPatternStats[0], bam=f, mmCap=(int(params.samPatternStats[1]) if not rx else 0),
+                                        bco=int(params.samPatternStats[3]), bcl=int(params.samPatternStats[4]),
+                                        literal=(not rx), wild=params.samPatternStats[2], filtered=False)
+            else:
+                rx = (params.fqPatternStats[1] == "None")
+                result = fqPatternStats(pattern=params.fqPatternStats[0], fastq=f, mmCap=(int(params.fqPatternStats[1]) if not rx else 0),
+                                        bco=int(params.fqPatternStats[3]), bcl=int(params.fqPatternStats[4]),
+                                        literal=(not rx), wild=params.fqPatternStats[2], filtered=False)
             if outfiles:
                 # Send to individual file instead of STDOUT.
                 outstream = open(outfiles[i], 'w')
@@ -661,18 +877,25 @@ def main(args):
             sys.stderr.write(ml.donestring("pattern stats in all BAMs"))
 
 
-    # DEMULTIPLEX BAM by ANCHOR
-    elif params.demuxA:
+    # DEMULTIPLEX BAM by ANCHOR sequence or BC tags
+    elif params.demuxA or params.demuxBC:
         if not outfiles or len(outfiles) != len(flist):
             exit("Insufficient output directories specified. Use -O to specify output directory pattern.")
-        rx = (params.demuxA[2] == 'None')
-        for i,f in enumerate(flist):
-            demuxWAnchor(f, barcodes=params.demuxA[0], outputdir=outfiles[i], tally=None, 
-                anchorSeq=params.demuxA[1], anchorRegex=rx, smm=(int(params.demuxA[2]) if not rx else 0),
-                bcOffset=int(params.demuxA[3]),  bcmm=int(params.demuxA[4]), 
-                abort=int(params.demuxA[5]), qualOffset=int(params.demuxA[6]), unmatched=False)
-            if params.STDERRcomments:
-                sys.stderr.write(ml.donestring("demultiplexing of " + f))
+        if params.demuxA:
+            rx = (params.demuxA[2] == 'None')
+            for i,f in enumerate(flist):
+                demuxWAnchor(f, barcodes=params.demuxA[0], outputdir=outfiles[i], tally=None, 
+                            anchorSeq=params.demuxA[1], anchorRegex=rx, smm=(int(params.demuxA[2]) if not rx else 0),
+                            bcOffset=int(params.demuxA[3]),  bcmm=int(params.demuxA[4]), 
+                            abort=int(params.demuxA[5]), qualOffset=int(params.demuxA[6]), unmatched=False, trimQC=False)
+                if params.STDERRcomments:
+                    sys.stderr.write(ml.donestring("anchored demultiplexing of " + f))
+        elif params.demuxBC:
+            for i,f in enumerate(flist):
+                demuxBC(f, barcodes=params.demuxBC[0], outputdir=outfiles[i], tally=None, 
+                        qualOffset=int(params.demuxBC[1]), unmatched=False)
+                if params.STDERRcomments:
+                    sys.stderr.write(ml.donestring("tagged demultiplexing of " + f))
         if params.STDERRcomments:
             sys.stderr.write(ml.donestring("demultiplexing of all BAMs"))
 
