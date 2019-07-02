@@ -1,8 +1,8 @@
 #!/usr/bin/env Rscript
 
 library(getopt)
+library(data.table)
 
-# opt <- list('controlGroups'='NONTARGETING', countsFile='/Volumes/groups/obenauf/Kimon_Froussios/felix/MHC1_screen/process/crispr-processed/counts/mm_gw_zuber_v1_original/counts_mageck.txt', guidesPerGene=6, mincount=50, reference='d0_unsorted_OFF_IFN,mPP')
 spec <- matrix(c(
   'controlGroups' , 'c', 1, "character", "Comma-separated list (no space) of group names for non-targeting sgRNAs.",
   'countsFile'    , 'f', 1, "character", "Tab-separated table of counts.",
@@ -17,6 +17,7 @@ spec <- matrix(c(
   'reference'     , 'z', 2, "character", "Comma separated column names across which to apply mincount for the controls. (if NULL, then all)"
 ), byrow=TRUE, ncol=5)
 opt <- getopt(spec)
+# opt <- list(controlGroups='CTRLHS,CTRLMM', countsFile='/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/HLA1_staggered/process/crispr-processed/counts/library/counts_mageck.txt', guidesPerGene=6, mincount=50, reference='NoIFNG_d0,imc_surface_plasmid')
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -32,10 +33,8 @@ if ( is.null(opt$nonrandom) )     { opt$nonrandom <- FALSE } else { opt$randomis
 if ( is.null(opt$mincount) )      { opt$mincount <- 1 }
 if (! is.null(opt$reference) )    { opt$reference <- unlist(strsplit(opt$reference, ',')) }
 
-# Group names
+# Group 
 groupNames <- unlist(strsplit(opt$controlGroups, ',', fixed=TRUE))
-
-library(data.table)
 
 # Counts
 dt <- fread(opt$countsFile)
