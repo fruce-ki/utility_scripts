@@ -2,7 +2,7 @@
 #
 #SBATCH --get-user-env
 #SBATCH -J mageck-wf
-#SBATCH --mem=10000
+#SBATCH --mem=50000
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=10
@@ -118,7 +118,7 @@ if [ $do_pre -eq 1 ]; then
     # Demultiplex
     module load python-levenshtein/0.12.0-foss-2017a-python-2.7.13
     module load pysam/0.14.1-foss-2017a-python-2.7.13
-    fileutilities.py T ${indir}/*.bam --loop srun ,--mem=20000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q \&
+    fileutilities.py T ${indir}/*.bam --loop srun ,--mem=50000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q \&
     module unload python-levenshtein/0.12.0-foss-2017a-python-2.7.13
     module unload pysam/0.14.1-foss-2017a-python-2.7.13
     wait_for_jobs demultip
@@ -166,10 +166,9 @@ if [ $do_pre -eq 1 ]; then
     echo "Combining samples into one table."
     srun --mem=5000 ~/crispr-process-nf/bin/combine_counts.R $library ${countsdir}/counts/${libname}/*.fq.txt > ${countsdir}/counts/${libname}/counts_mageck.txt
     # Fix header. Strip path, strip file extension, strip lane
-    head -n 1 ${countsdir}/counts/${libname}/counts_mageck.txt | perl -e 'while(<STDIN>){~s/$ARGV[0].*?$ARGV[1]\/.*?_\d{8}\w?_\d{8}_//g;~s/\.fq//g;print}' $(realpath ${countsdir}) ${libname} > tmp
-    tail -n +2 ${countsdir}/counts/${libname}/counts_mageck.txt >> tmp
     mv ${countsdir}/counts/${libname}/counts_mageck.txt ${countsdir}/counts/${libname}/_counts_mageck.txt
-    mv tmp ${countsdir}/counts/${libname}/counts_mageck.txt
+    head -n 1 ${countsdir}/counts/${libname}/_counts_mageck.txt | perl -e 'while(<STDIN>){~s/\S+\/(\w{9}_\d_)+//g;~s/\.fq//g;print}' > ${countsdir}/counts/${libname}/counts_mageck.txt
+    tail -n +2 ${countsdir}/counts/${libname}/_counts_mageck.txt >> ${countsdir}/counts/${libname}/counts_mageck.txt
     
     echo ''
     echo "MultiQC"
@@ -180,14 +179,18 @@ if [ $do_pre -eq 1 ]; then
     
     echo ''
     echo "Cleaning up intermediate files"
-    #rm ${countsdir}/fastq/*/*.fqc
+    #rm -r ${countsdir}/fastq
+    rm -r ${countsdir}/fastqc
   fi
   
   echo ''
   echo "Pre-processing finished!"
 fi
-counts="${countsdir}/counts/${libname}/counts_mageck.txt"
 
+counts="${countsdir}/counts/${libname}/counts_mageck.txt"
+if [[ ! -f $counts ]]; then
+  exit 1 "Counts file does not exist."
+fi
 
 if [ $do_comparison -eq 1 ]; then
   echo ''
@@ -253,6 +256,7 @@ if [ $do_comparison -eq 1 ]; then
   guides="${mageckdir}/guides_all.tsv"
   if [ -f "$guides" ]; then
     rm $guides # clean up previous run, otherwise weird things happen
+  fi
   fisrun --mem=10000 fileutilities.py T ${library}_forguides.txt ${mageckdir}/*/${renamed}/guides_stats.txt -r -i --appnd outer > $guides
   dups=$(head -n1 $guides | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++} print "\n";')
   srun --mem=10000 fileutilities.py T $guides -r --mrgdups $dups > ${guides/.tsv/_dedup.tsv}
@@ -281,5 +285,7 @@ if [ $do_comparison -eq 1 ]; then
   echo "Comparisons finished!"
 fi
 
+rm -r ./work
+rm -r ./.nextflow*
 echo ''
 echo "All done!"
