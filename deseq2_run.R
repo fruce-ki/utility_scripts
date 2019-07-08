@@ -1,8 +1,9 @@
 #!/usr/bin/env Rscript
 
 library(getopt)
+library(DESeq2)
 
-spec = matrix(c(
+spec <- matrix(c(
   'baseDir'      , 'b', 2, "character", "Base directory for everything (.)",
   'countsFile'   , 'f', 1, "character", "Tab-separated table of counts with `row_ID` and all the samples",
   'help'         , 'h', 0, "logical",   "Help",
@@ -11,7 +12,8 @@ spec = matrix(c(
   'samplesFile'  , 's', 1, "character", "Tab-separated table with `sample` and `condition` (2 columns)",
   'control'      , 'x', 1, "character", "Value of condition to use as reference for all comparisons"
 ), byrow=TRUE, ncol=5)
-opt = getopt(spec)
+opt <- getopt(spec)
+
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -26,7 +28,6 @@ if ( is.null(opt$RDSoutdirir ) ) { opt$RDSoutdir = './process' }
 cts <- round(as.matrix(read.csv(file.path(opt$baseDir, opt$countsFile), sep="\t", header=TRUE, row.names='row_ID')), digits=0)
 coldata <- read.csv(file.path(opt$baseDir, opt$samplesFile), sep="\t", header=TRUE, row.names='sample')
 
-library(DESeq2)
 
 # Setup
 dds <- DESeqDataSetFromMatrix(countData = cts,
@@ -53,6 +54,6 @@ saveRDS(dds, file=file.path(opt$baseDir, opt$RDSoutdir, paste0(autoname, '_deseq
 coefficients <- resultsNames(dds)
 for (name in coefficients[2:length(coefficients)]) {
   res <- lfcShrink(dds, coef=name, type='apeglm')
-  write.csv(res, file=file.path(opt$baseDir, opt$resultsDir, paste0(autoname, '_', name, '.tsv')),
-            sep="\t", row.names=TRUE, col.names=TRUE)
+  write.csv(res, file=file.path(opt$baseDir, opt$resultsDir, paste0(autoname, '_', name, '.csv')),
+            row.names=TRUE, col.names=TRUE)
 }
