@@ -11,10 +11,10 @@ spec = matrix(c(
   'RDSoutdir'    , 'r', 2, "character", "Directory in which to save the raw DESeq2 object (./process)",
   'samplesFile'  , 's', 1, "character", "Tab-separated table with `sample` column followed by the variable columns",
   'control'      , 'x', 1, "character", "Comma separated value for each variable to use as reference for all comparisons, in the order variables are listed in samplesfile",
-  'designFormula', 'd', 2, "character", "Design formula",
-  'reducedFormula', 'd', 2, "character", "Reduced formula"
+  'designFormula', 'd', 1, "character", "Design formula"
 ), byrow=TRUE, ncol=5)
 opt = getopt(spec)
+#opt <- list(baseDir='/Volumes/groups/obenauf/Kimon_Froussios/chris/Y17_quantseq', countsFile='process/counts/all_counts.tsv', resultsDir='results', RDSoutdir='./process/DE', samplesFile='aux/conditions.txt', control='untreated,naive', designFormula='~ treatment + history')
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -23,7 +23,7 @@ if ( !is.null(opt$help) ) {
 
 if ( is.null(opt$baseDir    ) ) { opt$baseDir    = '.'         }
 if ( is.null(opt$resultsDir ) ) { opt$resultsDir = './results' }
-if ( is.null(opt$RDSoutdirir ) ) { opt$RDSoutdir = './process' }
+if ( is.null(opt$RDSoutdir ) ) { opt$RDSoutdir = './process' }
 
 # Input
 cts <- round(as.matrix(read.csv(file.path(opt$baseDir, opt$countsFile), sep="\t", header=TRUE, row.names='row_ID')), digits=0)
@@ -42,7 +42,7 @@ for (n in vars){
   dds[[n]] <- relevel(dds[[n]], ref=refs[n])
 }
 
-autoname <- paste(vars, collapse='-')
+autoname <- gsub(' |~', '', opt$designFormula)
 
 # Prefilter
 keep <- rowSums(counts(dds)) >= ncol(dds)
@@ -61,6 +61,6 @@ saveRDS(dds, file=file.path(opt$baseDir, opt$RDSoutdir, paste0(autoname, '_deseq
 coefficients <- resultsNames(dds)
 for (name in coefficients[2:length(coefficients)]) {
   res <- lfcShrink(dds, coef=name, type='apeglm')
-  write.csv(res, file=file.path(opt$baseDir, opt$resultsDir, paste0(autoname, '_', name, '.tsv')),
-            sep="\t", row.names=TRUE, col.names=TRUE)
+  write.csv(res, file=file.path(opt$baseDir, opt$resultsDir, paste0(autoname, '_', name, '.csv')),
+            row.names=TRUE, col.names=TRUE)
 }
