@@ -179,6 +179,23 @@ print( p + scale_y_continuous(expand = expand_scale(mult = c(0, .15)), limits = 
 # print( p + scale_y_sqrt(expand = expand_scale(mult = c(0, .15)), limits = c(0, NA)) )
 ```
 
+```{r sample_correlations}
+ggplotly(
+  all_tidy %>% 
+    select(bc_id, Sample, Proportion) %>% 
+    spread(Sample, Proportion) %>%
+    select(-bc_id) %>%
+    cor(method='pearson') %>%
+    as.data.frame() %>%
+    rownames_to_column() %>%
+    gather(key='Sample', value='Pearson_Correlation', -rowname) %>%
+    ggplot(aes(x=Sample, y=rowname, fill=Pearson_Correlation)) +
+      geom_tile() + 
+      labs(y="Sample") +
+      gth + theme(legend.position = 'right')
+)
+```
+
 # Distribution of barcode abundances above threshold
 
 Mind that the Y-axis scale is **logarithmic**, meaning the distributions are much more top-skewed than they appear.
