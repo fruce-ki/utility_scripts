@@ -27,12 +27,12 @@ bcmm=1
 bcoffset=-4
 smm=2
 entrezfield=1   # 0-based index
-infer_entrez=0
 variable=0
 revcomp=0
 do_pre=0
 do_comparison=0
 guideLen=20
+infer_entrez=1
 # Parse options.
 while getopts 'i:l:b:n:c:m:r:C:G:z:Z:p:s:u:d:O:g:M:A:E:eVr12' flag; do
   case "${flag}" in
@@ -59,7 +59,7 @@ while getopts 'i:l:b:n:c:m:r:C:G:z:Z:p:s:u:d:O:g:M:A:E:eVr12' flag; do
     r) revcomp=1 ;;                   # Reverse complement the reads to match the barcodes? (no)
     1) do_pre=1 ;;                 # Execute demultiplexing, alignment and quantification.
     2) do_comparison=1 ;;          # Execute Mageck
-    e) infer_entrez=1 ;;          # Infer and add an entrez column.
+    e) infer_entrez=0 ;;           # Don't extract Enrtez from guide ID
     *) usage ;;
   esac
 done
@@ -257,7 +257,7 @@ if [ $do_comparison -eq 1 ]; then
   if [ -f "$guides" ]; then
     rm $guides # clean up previous run, otherwise weird things happen
   fi
-  fisrun --mem=10000 fileutilities.py T ${library}_forguides.txt ${mageckdir}/*/${renamed}/guides_stats.txt -r -i --appnd outer > $guides
+  srun --mem=10000 fileutilities.py T ${library}_forguides.txt ${mageckdir}/*/${renamed}/guides_stats.txt -r -i --appnd outer > $guides
   dups=$(head -n1 $guides | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++} print "\n";')
   srun --mem=10000 fileutilities.py T $guides -r --mrgdups $dups > ${guides/.tsv/_dedup.tsv}
   guides="${guides/.tsv/_dedup.tsv}"
@@ -285,7 +285,9 @@ if [ $do_comparison -eq 1 ]; then
   echo "Comparisons finished!"
 fi
 
-rm -r ./work
+rm -r ./work/
 rm -r ./.nextflow*
+rm timeline*
+
 echo ''
 echo "All done!"
