@@ -20,11 +20,12 @@ library(tidyverse)
 
 ```{r}
 for (tablein in files) {
-  print( tablein )
+  message( tablein )
 
   dt <- fread(file.path(basedir, tablein))
   
   # Effect sizes
+  message('Effect sizes')
   print(
     ggplot(dt, aes(x=log2FoldChange)) +
       geom_histogram(bins = 100) +
