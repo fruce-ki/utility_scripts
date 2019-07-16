@@ -7,14 +7,15 @@ if [[ ! -d ${outputdir} ]]; then
 	 mkdir -p ${outputdir}
 fi
 
-treatment=$(perl -e '$ARGV[0]=~/\/(\w+)_vs_(\w+)$/;print $1;' $comparisondir)
-reference=$(perl -e '$ARGV[0]=~/\/(\w+)_vs_(\w+)$/;print $2;' $comparisondir)
+treatment=$(perl -e '$ARGV[0]=~/\/([a-zA-Z0-9_\-.]+)_vs_(\S+)$/;print $1;' $comparisondir)
+reference=$(perl -e '$ARGV[0]=~/\/([a-zA-Z0-9_\-.]+)_vs_(\S+)$/;print $2;' $comparisondir)
 
 echo "Treat: ${treatment}   Ref: ${reference}"
 
 cat ${comparisondir}/guides_stats.txt \
 	| perl -e '$header = <STDIN>;
 		   chomp $header ;
+			 
 		   @fields = split /\t/, $header;
 		   foreach $name (@fields) {
 		   	if ($name ne "id" && $name ne "group") {
