@@ -211,7 +211,7 @@ def make_names(items, parameters):
     return outfiles
 
 
-def do_foreach(flist, comm, comments=False, progress=True, out=(None,None,None), log=False):
+def do_foreach(flist, comm, progress=True, out=(None,None,None), log=False):
     """Execute an arbitrary command for each of the listed files.
 
     Enables executing a shell command over a range of items, by inserting the
@@ -237,7 +237,6 @@ def do_foreach(flist, comm, comments=False, progress=True, out=(None,None,None),
                     Placeholders can be nested, to allow nested calls of fileutilities:
                     i.e. {{abs}}. A layer of nesting is peeled off each time the function is called,
                     until the placeholders are allowed to be evaluated.
-        comments(bool): Print commented call details to STDOUT. (Default False)
         progress(bool): Show start and completion of iterations on STDERR.
                     (Default True)
         out(str,str,str): The first element is the output directory, the second
@@ -273,29 +272,18 @@ def do_foreach(flist, comm, comments=False, progress=True, out=(None,None,None),
         if outfiles:
             outstream = open(outfiles[i], 'w')
         # Verbose stuff.
-        try:
-            see = " ".join(command)
-            if log:
-                ml.log_message(message=see, logfile="./subcommands.log")
-            if comments and out == (None,None):
-                outstream.write(ml.infostring("CWD: "+ os.getcwd() +"\tDO: "+ see))
-            if progress:
-                sys.stderr.write(ml.infostring("DO: "+ see))
-        except IOError:
-            pass
+        see = " ".join(command)
+        if log:
+            ml.log_message(message=see, logfile="./commands.log")
+        if progress:
+            sys.stderr.write(ml.infostring("DO: "+ see))
         # Do the thing.
         subprocess.call(" ".join(command), stdout=outstream, shell=True)
-        # Optionally identify iteration.
-        try:
-            if comments and out == (None,None):
-                outstream.write(ml.infostring("Finished: "+ str(myalias) +"\n"))
-            if progress:
-                sys.stderr.write(ml.infostring("Finished: "+ str(myalias) +"\n"))
-        except IOError:
-            pass
-        finally:
-            if outfiles:
-                outstream.close()
+        # More verbose stuff.
+        if progress:
+            sys.stderr.write(ml.infostring("Finished: "+ str(myalias) +"\n"))
+        if outfiles:
+            outstream.close()
 
 
 def swap_strFiles(flist, insep=[","], outsep="\t"):
@@ -1245,11 +1233,9 @@ def main(args):
                                 any directory path and its outermost file extension.")
     # Parameters.
     parser.add_argument('-L','--log', action='store_true',
-                                help=" Log this command to ./commands.log.")
-    parser.add_argument('-c','--comments', action='store_true',
-                                help=" Include commented info to STDOUT or files. (Default don't include)")
+                                help=" Log subcommands to ./commands.log.")
     parser.add_argument('-C','--STDERRcomments', action="store_false",
-                                help=" Do NOt show info in STDERR. (Default show)")
+                                help=" Do NOT show info in STDERR. (Default show)")
     parser.add_argument('-s','--sep', type=str, default=["\t"], nargs='+',
                                 help=" A list of input field separators. The first value \
                                 will be used for all output. (Default \\t, bash syntax for tab: $'\\t').")
@@ -1295,9 +1281,9 @@ def main(args):
                                 help=" Replace all occurrences of the --sep values with the value supplied here.\
                                 ** Bash syntax for tab: $'\\t'. Compatible with 'D' as INPUTTYPE.")
     parser.add_argument('--cntcols', action='store_true',
-                                help="Count the number of fields in the first row of each target file.")
+                                help=" Count the number of fields in the first row of each target file.")
     parser.add_argument('--cols', nargs='+',
-                                help="Extract the specified columns (named or 0-indexed) from each target. \
+                                help=" Extract the specified columns (named or 0-indexed) from each target. \
                                 Column ranges in x:y format closed at both ends. \
                                 Negative indices must be escaped first: \-1. Compatible with 'D' as INPUTTYPE.")
     parser.add_argument('--rndcols', type=int,
@@ -1385,40 +1371,27 @@ def main(args):
 
     # CALL DETAILS ############################################################
 
-    if params.log:
-        ml.log_command()
-#    if params.STDERRcomments:
-#        sys.stderr.write(ml.paramstring())
+    if params.STDERRcomments:
+        sys.stderr.write(ml.paramstring())
 
     # TASKS ###################################################################
 
     # Filter DIRECTORY contents. ----------------------------------------------
     if params.dir is not None:
         result = FilesList().populate_from_directories(flist, params.dir)
-        try:
-            if params.comments:
-                sys.stdout.write(ml.paramstring())
-            sys.stdout.write(result.to_file())
-            if params.STDERRcomments:
-                sys.stderr.write(ml.donestring("listing"))
-        except IOError:
-            pass
+        sys.stdout.write(result.to_file())
+        if params.STDERRcomments:
+            sys.stderr.write(ml.donestring("listing"))
 
-
-    # LOOP arbitrary command. -------------------------------------------------
+    # LOOP a command. -------------------------------------------------
     elif params.loop:
         command = []
         for c in params.loop:
             command.append(c.lstrip("+"))
-        try:
-            do_foreach(flist, command, out=(outdir, outpref, outsuff),
-                       progress=(params.STDERRcomments), comments=params.comments,
-                       log=params.log)
-            if params.STDERRcomments:
-                sys.stderr.write(ml.donestring("looping"))
-        except IOError:
-            pass
-
+        do_foreach(flist, command, out=(outdir, outpref, outsuff),
+                   progress=(params.STDERRcomments), log=params.log)
+        if params.STDERRcomments:
+            sys.stderr.write(ml.donestring("looping"))
 
     # Symbolic LINKS. ---------------------------------------------------------
     elif params.link:
@@ -1448,22 +1421,12 @@ def main(args):
             if outfiles:
                 # Send to individual file instead of STDOUT.
                 outstream = open(outfiles[i], 'w')
-            try:
-                if params.comments:
-                    # Embed call info at beginning of output. More useful there when outputting to files.
-                    outstream.write(ml.paramstring("SOURCE: " + myfile))
-                outstream.write(result[i].rstrip("\n") +"\n")
-            except IOError:
-                pass
-            finally:
-                if outfiles:
-                    # Don't want to accidentally close STDOUT.
-                    outstream.close()
+            outstream.write(result[i].rstrip("\n") +"\n")
+            if outfiles:
+                # Don't want to accidentally close STDOUT.
+                outstream.close()
         if params.STDERRcomments:
-            try:
-                sys.stderr.write(ml.donestring("swapping delimiters"))
-            except IOError:
-                pass
+            sys.stderr.write(ml.donestring("swapping delimiters"))
 
 
     # Get COLUMNS or RANDOM columns. (most code shared) -----------------------
@@ -1495,39 +1458,23 @@ def main(args):
         if flist == []:
             flist.append("<STDIN>")
         if merge:
-            try:
-                if params.comments:
-                    # Embed call info at beginning of output.
-                    outstream.write(ml.paramstring("SOURCE: " + myfile))
-                if params.metadata:
-                    # Dump all the metadata from all the merged input sources.
-                    for i, (myfile, myalias) in flist.enum():
-                        outstream.write(metadata[myfile])
-                outstream.write( result[0].to_csv(header=params.relabel, index=params.index, sep=params.sep[0]))
-            except IOError:
-                pass
+            if params.metadata:
+                # Dump all the metadata from all the merged input sources.
+                for i, (myfile, myalias) in flist.enum():
+                    outstream.write(metadata[myfile])
+            outstream.write( result[0].to_csv(header=params.relabel, index=params.index, sep=params.sep[0]))
         else:
             for i, (myfile, myalias) in flist.enum():
                 outstream = open(outfiles[i], 'w')
-                try:
-                    if params.comments:
-                        # Embed call info at beginning of output.
-                        outstream.write(ml.paramstring("SOURCE: " + myfile))
-                    if params.metadata:
-                        outstream.write(metadata[myfile])
-                    outstream.write( result[i].to_csv(header=params.relabel, index=params.index, sep=params.sep[0]))
-                except IOError:
-                    pass
-                finally:
-                    outstream.close()
+                if params.metadata:
+                    outstream.write(metadata[myfile])
+                outstream.write( result[i].to_csv(header=params.relabel, index=params.index, sep=params.sep[0]))
+                outstream.close()
         if params.STDERRcomments:
-            try:
-                if params.cols:
-                    sys.stderr.write(ml.donestring("getting columns, index "+ str(idx is not None)))
-                else:
-                    sys.stderr.write(ml.donestring("getting random columns, index "+ str(idx is not None)))
-            except IOError:
-                pass
+            if params.cols:
+                sys.stderr.write(ml.donestring("getting columns, index "+ str(idx is not None)))
+            else:
+                sys.stderr.write(ml.donestring("getting random columns, index "+ str(idx is not None)))
 
 
     # APPEND columns or MERGE table. ---------------------------------------------------------
@@ -1540,21 +1487,16 @@ def main(args):
         else:
             df = merge_tables(flist, colSep=params.sep, header=params.labels, index=0, type=params.merge[0],
                               saveHeader=params.merge[1] == "yes", dedup=params.merge[2] == "yes")
-        try:
-            if params.comments:
-                ml.parastring()
-            if params.metadata:
-                # Dump all the metadata from all the merged input sources.
-                for i, (myfile, myalias) in flist.enum():
-                    outstream.write(metadata[myfile])
-            sys.stdout.write(df.to_csv(sep=params.sep[0], header=params.relabel, index=params.index))
-            if params.STDERRcomments:
-                if params.appnd:
-                    sys.stderr.write(ml.donestring(params.appnd +" append of columns, index "+ str(idx is not None)))
-                else:
-                    sys.stderr.write(ml.donestring(params.merge[0] +" merge of tables"))
-        except IOError:
-            pass
+        if params.metadata:
+            # Dump all the metadata from all the merged input sources.
+            for i, (myfile, myalias) in flist.enum():
+                outstream.write(metadata[myfile])
+        sys.stdout.write(df.to_csv(sep=params.sep[0], header=params.relabel, index=params.index))
+        if params.STDERRcomments:
+            if params.appnd:
+                sys.stderr.write(ml.donestring(params.appnd +" append of columns, index "+ str(idx is not None)))
+            else:
+                sys.stderr.write(ml.donestring(params.merge[0] +" merge of tables"))
 
 
     # MERGE duplicate columns. ---------------------------------------------------------
@@ -1569,70 +1511,43 @@ def main(args):
         if flist == []:
             flist.append("<STDIN>")
         if merge:
-            try:
-                if params.comments:
-                    # Embed call info at beginning of output.
-                    outstream.write(ml.paramstring("SOURCE: " + myfile))
-                if params.metadata:
-                    # Dump all the metadata from all the merged input sources.
-                    for i, (myfile, myalias) in flist.enum():
-                        outstream.write(metadata[myfile])
-                outstream.write( result[0].to_csv(header=params.relabel, index=params.index, sep=params.sep[0]))
-            except IOError:
-                pass
+            if params.metadata:
+                # Dump all the metadata from all the merged input sources.
+                for i, (myfile, myalias) in flist.enum():
+                    outstream.write(metadata[myfile])
+            outstream.write( result[0].to_csv(header=params.relabel, index=params.index, sep=params.sep[0]))
         else:
             for i, (myfile, myalias) in flist.enum():
                 outstream = open(outfiles[i], 'w')
-                try:
-                    if params.comments:
-                        # Embed call info at beginning of output.
-                        outstream.write(ml.paramstring("SOURCE: " + myfile))
-                    if params.metadata:
-                        outstream.write(metadata[myfile])
-                    outstream.write( result[i].to_csv(header=params.relabel, index=params.index, sep=params.sep[0]))
-                except IOError:
-                    pass
-                finally:
-                    outstream.close()
+                if params.metadata:
+                    outstream.write(metadata[myfile])
+                outstream.write( result[i].to_csv(header=params.relabel, index=params.index, sep=params.sep[0]))
+                outstream.close()
         if params.STDERRcomments:
-            try:
-                sys.stderr.write(ml.donestring("deduplicating columns"))
-            except IOError:
-                pass
+            sys.stderr.write(ml.donestring("deduplicating columns"))
 
 
     # COUNT columns. ----------------------------------------------------------
     elif params.cntcols:
         result = count_columns(flist, params.sep)
-        try:
-            if params.comments:
-                sys.stdout.write(ml.paramstring())
-            for f, (myfile, myalias) in flist.enum():
-                print("\t".join([str(result[f]), myalias, myfile]))
-            if params.STDERRcomments:
-                sys.stderr.write(ml.donestring("counting columns"))
-        except IOError:
-            pass
+        for f, (myfile, myalias) in flist.enum():
+            print("\t".join([str(result[f]), myalias, myfile]))
+        if params.STDERRcomments:
+            sys.stderr.write(ml.donestring("counting columns"))
 
 
     # SET of values in row/column. --------------------------------------------
     elif params.valset:
         nest = get_valuesSet(flist, axis=params.valset[0], index=params.valset[1], filter=params.valset[2], colSep=params.sep)
-        try:
-            if params.comments:
-                sys.stdout.write(ml.paramstring())
-            for f, (myfile, myalias) in flist.enum():
-                print("".join([myfile, "\t", str(nest[f])]))
-            if params.STDERRcomments:
-                sys.stderr.write(ml.donestring("obtaining set of values."))
-        except IOError:
-            pass
+        for f, (myfile, myalias) in flist.enum():
+            print("".join([myfile, "\t", str(nest[f])]))
+        if params.STDERRcomments:
+            sys.stderr.write(ml.donestring("obtaining set of values."))
 
 
-
-#     # All done.
-#     if params.STDERRcomments:
-#         sys.stderr.write(ml.donestring())
+    # All done.
+#    if params.STDERRcomments:
+#        sys.stderr.write(ml.donestring())
 
 
 
