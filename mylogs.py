@@ -16,7 +16,7 @@ XXXstring() to print info to the screen or within your output files. Use
 log_XXX() to record to log-files.
 """
 
-import sys, datetime, os, subprocess
+import sys, datetime, os
 
 
 # Do everything in ONE write operation, to prevent race conditions when accessing the logfile.
@@ -72,9 +72,7 @@ def paramstring(message=""):
         (str)
     """
     message.rstrip().replace("\n", " ")
-    return "###INFO### " + tstamp() + "\t" + " ".join(
-        sys.argv) + "\n###INFO### \t\t\t\t### CWD: " + os.getcwd() + "  ### PYTHON: " + sys.executable + (
-               "\n###INFO### " if message else "") + message + "\n"
+    return tstamp() + "\t## CWD  ## " + os.getcwd() + "\n\t\t\t\t## CMND ## " + sys.executable + " " + " ".join(sys.argv) + ("\n\t\t\t\t## MSSG ## " if message else "") + message + "\n"
 
 
 def donestring(message=""):
@@ -88,7 +86,7 @@ def donestring(message=""):
         (str)
     """
     message.rstrip().replace("\n", " ")
-    return "###INFO### " + tstamp() + "\t" + os.path.basename(sys.argv[0]) + " - " + "Done " + message + ".\n"
+    return tstamp() + "\t## DONE ## " + message + ".\n"
 
 
 def infostring(message=""):
@@ -102,7 +100,7 @@ def infostring(message=""):
         (str)
     """
     message.rstrip().replace("\n", " ")
-    return "###INFO### " + tstamp() + "\t" + os.path.basename(sys.argv[0]) + " - " + message + "\n"
+    return tstamp() + "\t## INFO ## " + message + "\n"
 
 
 def warnstring(message=""):
@@ -114,7 +112,7 @@ def warnstring(message=""):
         (str)
     """
     message.rstrip().replace("\n", " ")
-    return "#WARNING!# " + tstamp() + "\t" + os.path.basename(sys.argv[0]) + " - " + message + "\n"
+    return tstamp() + "\t##!WARN!## " + os.path.basename(sys.argv[0]) + " - " + message + "\n"
 
 
 def errstring(message=""):
@@ -126,7 +124,7 @@ def errstring(message=""):
         (str)
     """
     message.rstrip().replace("\n", " ")
-    return "##!ERROR!# " + tstamp() + "\t" + os.path.basename(sys.argv[0]) + " - " + message + "\n"
+    return tstamp() + "\t##!ERROR!# " + os.path.basename(sys.argv[0]) + " - " + message + "\n"
 
 
 def log_command(message="", logfile="./commands.log"):
@@ -157,25 +155,5 @@ def log_message(message="", logfile="./messages.log"):
     """
     with open(logfile, 'a') as comlog:
         comlog.write(tstamp() + "\t" + message.rstrip().replace("\n", "\n          ") + "\n")
-
-
-######################
-##### EXECUTABLE #####
-######################
-
-
-if __name__ == "__main__":
-
-    if sys.argv[1] == "-e":
-        # Log command and run it.
-        c = " ".join(sys.argv[2:])
-        log_command()
-        log_message(message=c, logfile="./subcommands.log")
-        subprocess.call(c, shell=True, stdout=sys.stdout)
-    elif sys.argv[1] == "-m":
-        # Log message.
-        log_message(message=" ".join(escapise(sys.argv[2:])))
-
-    sys.exit(0)
 
 # EOF
