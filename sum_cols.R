@@ -23,7 +23,9 @@ df[, newsexycolumnname666 := v]
 
 # Drop the old columns.
 if (replace) {
-  df[, cols] <- NULL
+  for (i in cols){
+    df[[i]] <- NULL
+  }
 }
 # Now name the new column properly.
 names(df)[length(names(df))] <- newname
