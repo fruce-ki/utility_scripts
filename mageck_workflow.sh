@@ -126,7 +126,7 @@ if [ $do_pre -eq 1 ]; then
     echo ''
     echo "FastQC (in the background)." # and don't wait for it. I don't need its output for a while.
     module load fastqc/0.11.5-java-1.8.0_121
-    fileutilities.py T ${countsdir}/fastq/*/*.fqc --loop srun ,--mem=5000 ,--cpus-per-task 6 fastqc ,-q ,-t 6 ,-f fastq ,-o ${countsdir}/fastqc {abs} \&
+    fileutilities.py T ${countsdir}/fastq/*/*.fqc --loop srun ,--mem-per-cpu=5000 ,--cpus-per-task 4 fastqc ,-q ,-t 4 ,-f fastq ,-o ${countsdir}/fastqc {abs} \&
     module unload fastqc/0.11.5-java-1.8.0_121
     
     echo ''
@@ -157,9 +157,9 @@ if [ $do_pre -eq 1 ]; then
     
     echo ''
     echo "Quantifying with featureCounts."
-    module load subread/1.5.0-p1-foss-2017a
-    fileutilities.py T ${countsdir}/aligned/${libname}/*.sam --loop srun ,--mem=10000 ,--cpus-per-task=4 featureCounts ,-T 4 ,-a ${library/.txt/.saf} ,-F SAF ,-o ${countsdir}/counts/${libname}/{bas}.txt {abs} \&
-    module unload subread/1.5.0-p1-foss-2017a
+    module load subread/1.6.4-foss-2017a
+    fileutilities.py T ${countsdir}/aligned/${libname}/*.sam --loop srun ,--mem-per-cpu=5000 ,--cpus-per-task=4 featureCounts ,-T 4 ,-a ${library/.txt/.saf} ,-F SAF ,-o ${countsdir}/counts/${libname}/{bas}.txt {abs} \&
+    module unload subread/1.6.4-foss-2017a
     wait_for_jobs featureC
     
     echo ''
@@ -167,7 +167,7 @@ if [ $do_pre -eq 1 ]; then
     srun --mem=5000 ~/crispr-process-nf/bin/combine_counts.R $library ${countsdir}/counts/${libname}/*.fq.txt > ${countsdir}/counts/${libname}/counts_mageck.txt
     # Fix header. Strip path, strip file extension, strip lane
     mv ${countsdir}/counts/${libname}/counts_mageck.txt ${countsdir}/counts/${libname}/_counts_mageck.txt
-    head -n 1 ${countsdir}/counts/${libname}/_counts_mageck.txt | perl -e 'while(<STDIN>){~s/\S+\/(\w{9}_\d_)+//g;~s/\.fq//g;print}' > ${countsdir}/counts/${libname}/counts_mageck.txt
+    head -n 1 ${countsdir}/counts/${libname}/_counts_mageck.txt | perl -e 'while(<STDIN>){~s/\S+\/(\w{9}_\d_)+(\d{8}\w?_\d{8}_)?//g;~s/\.fq//g;print}' > ${countsdir}/counts/${libname}/counts_mageck.txt
     tail -n +2 ${countsdir}/counts/${libname}/_counts_mageck.txt >> ${countsdir}/counts/${libname}/counts_mageck.txt
     
     echo ''
@@ -179,8 +179,9 @@ if [ $do_pre -eq 1 ]; then
     
     echo ''
     echo "Cleaning up intermediate files"
-    #rm -r ${countsdir}/fastq
+    rm ${countsdir}/fastq/*/*.fqc
     rm -r ${countsdir}/fastqc
+    rm ${countsdir}/counts/${libname}/*fq.txt ${countsdir}/counts/${libname}/*fq.txt.summary
   fi
   
   echo ''
@@ -196,7 +197,7 @@ if [ $do_comparison -eq 1 ]; then
   echo ''
   echo "Group control guides into genes."
   if ! [ -z "$ctrlguides" ]; then
-    srun Rscript ~/utility_scripts/nonTargetGuides2controlGenes.R -c $ctrlguides -f $counts -o ${counts/.txt/_ctrls-grouped.txt} -n $guidespergene -g group -t id -m $countthresh -z $refSamps
+    #srun Rscript ~/utility_scripts/nonTargetGuides2controlGenes.R -c $ctrlguides -f $counts -o ${counts/.txt/_ctrls-grouped.txt} -n $guidespergene -g group -t id -m $countthresh -z $refSamps
     counts="${counts/.txt/_ctrls-grouped.txt}"
   else
     ctrlguides="hakunamatata_dummy" # dummy value that will not match patterns later on
@@ -204,7 +205,7 @@ if [ $do_comparison -eq 1 ]; then
 
   echo ''
   echo "MAGECK."
-  nextflow run zuberlab/crispr-mageck-nf --contrasts $contrasts --counts $counts --outputDir $mageckdir --min_count $countthresh -profile ii2 --legacy
+  #nextflow run zuberlab/crispr-mageck-nf --contrasts $contrasts --counts $counts --outputDir $mageckdir --min_count $countthresh -profile ii2 --legacy
 
   echo ''
   echo "Rename columns."
