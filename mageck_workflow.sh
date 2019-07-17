@@ -197,7 +197,7 @@ if [ $do_comparison -eq 1 ]; then
   echo ''
   echo "Group control guides into genes."
   if ! [ -z "$ctrlguides" ]; then
-    #srun Rscript ~/utility_scripts/nonTargetGuides2controlGenes.R -c $ctrlguides -f $counts -o ${counts/.txt/_ctrls-grouped.txt} -n $guidespergene -g group -t id -m $countthresh -z $refSamps
+    srun Rscript ~/utility_scripts/nonTargetGuides2controlGenes.R -c $ctrlguides -f $counts -o ${counts/.txt/_ctrls-grouped.txt} -n $guidespergene -g group -t id -m $countthresh -z $refSamps
     counts="${counts/.txt/_ctrls-grouped.txt}"
   else
     ctrlguides="hakunamatata_dummy" # dummy value that will not match patterns later on
@@ -205,7 +205,7 @@ if [ $do_comparison -eq 1 ]; then
 
   echo ''
   echo "MAGECK."
-  #nextflow run zuberlab/crispr-mageck-nf --contrasts $contrasts --counts $counts --outputDir $mageckdir --min_count $countthresh -profile ii2 --legacy
+  nextflow run zuberlab/crispr-mageck-nf --contrasts $contrasts --counts $counts --outputDir $mageckdir --min_count $countthresh -profile ii2 --legacy
 
   echo ''
   echo "Rename columns."
