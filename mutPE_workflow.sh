@@ -16,8 +16,9 @@ process='process'
 results='results'
 aux='aux'
 offsets='-:0:0'
+fastasuffix='fa'
 # Parse options.
-while getopts 'd:D:b:p:r:a:i:o:l:sf' flag; do
+while getopts 'd:D:b:p:r:a:i:o:l:F:sf' flag; do
   case "${flag}" in
     d) base="${OPTARG}" ;;        # Base dir
 		D) data="${OPTARG}" ;;     		# Data dir in which the batch is located, relative to base
@@ -27,8 +28,9 @@ while getopts 'd:D:b:p:r:a:i:o:l:sf' flag; do
 		a) aux="${OPTARG}" ;;     		# Dir where the bowtie index is located, relative to base
     i) bowtie2idx="${OPTARG}" ;;  # Bowtie2 index prefix
     o) offsets="${OPTARG}" ;;     # Reference deletions: "REF:START:LENGTH" ie. "HDR2:280:6,HDR2:280:6"
-    s) issra="${OPTARG}" ;;       # Input is .sra format
-		f) renamefq="${OPTARG}" ;;    # Files are uncompressed .fq instead of compressed .fastq.gz
+    s) issra=1 ;;                 # Input is .sra format
+		f) renamefq=1 ;;              # Files are uncompressed .fq instead of compressed .fastq.gz
+    F) fastasuffix="${OPTARG}";;  # Reference fasta suffix. (assumes the prefix is the same as the bowtie2 index prefix)
 		*) usage ;;
   esac
 done
@@ -62,7 +64,7 @@ fi
 echo "Extracting ${base}/${data}/${run}/*.bam to ${base}/${data}/${run}/*_1/2.fastq.gz"
 fileutilities.py T ${base}/${data}/${run} --dir .bam | fileutilities.py P --loop srun samtools fastq ,-c 1 ,-1 {dir}/{ali}_1.fastq.gz ,-2 {dir}/{ali}_2.fastq.gz {abs}
 
-echo "Merging pairs in ${base}/${data}/${run} to ${base}/${process}/${run}/*_x25..fastq.gz"
+echo "Merging pairs in ${base}/${data}/${run} to ${base}/${process}/${run}/*_x25.fastq.gz"
 fileutilities.py T ${base}/${data}/${run} --dir _1.fastq.gz | perl -e 'while(<>){~s/_1\.fastq$//;print}' | fileutilities.py P --loop srun flash ,-t 1 ,-M 150 ,-x 0.25 ,-d ${base}/${process}/${run} ,-o {ali}_x25 ,-z ${base}/${data}/${run}/{ali}_1.fastq.gz ${base}/${data}/${run}/{ali}_2.fastq.gz
 
 echo "Aligning ${base}/${data}/${run}/*.fastq.gz to ${base}/${aux}/${bowtie2idx} and outputting to ${base}/${process}/${run}/*_x25.extendedFrags.bam"
@@ -76,7 +78,7 @@ fileutilities.py T ${base}/${process}/${run} --dir 'sorted.bam$' | fileutilities
 
 
 echo "Piling up ${base}/${process}/${run}/\d+-\d+.bam onto ${base}/${aux}/${bowtie2idx}.fa"
-fileutilities.py T ${base}/${process}/${run} --dir '\d+-\d+.bam$' | fileutilities.py P --loop srun samtools mpileup ,-A ,-B ,-f ${base}/${aux}/${bowtie2idx}.fa ,-d 1000000000 {abs} \> {dir}/{bas}.pileup
+fileutilities.py T ${base}/${process}/${run} --dir '\d+-\d+.bam$' | fileutilities.py P --loop srun samtools mpileup ,-A ,-B ,-f ${base}/${aux}/${bowtie2idx}.${fastasuffix} ,-d 1000000000 {abs} \> {dir}/{bas}.pileup
 
 echo "Counting."
 fileutilities.py T ${base}/${process}/${run} --dir '\d+-\d+.pileup$' | fileutilities.py P --loop python3 ./analysis/MutPE_quantification.py ,-p {abs} \> {dir}/{bas}.stats
