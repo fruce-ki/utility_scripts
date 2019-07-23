@@ -9,6 +9,7 @@
 
 #args <- c('~/', 'test', 'NULL', 'no', 'HDR1:280:6,HDR2:280:6', '/Volumes/groups/pavri/Kimon/ursi/mutPEseq/round5/process/in-vivo/HDR2/86754_B18_C2_G_e1_x25.extendedFrags_sorted_3-10.stats')
 #args <- c('~/', 'test', 'NULL', 'no', '-:0:0', '/Volumes/groups/pavri/Kimon/ursi/mutPEseq/round5/process/in-vivo/HDRc/86752_B18_Cc_G_e1_x25.extendedFrags_sorted_1-2.stats')
+#args <- c('~/', 'test', 'NULL', 'no', '-:0:0', '/Volumes/groups/pavri/Kimon/ursi/mutPEseq/yeap2015/process/SRS1052796/SRR2229664_x25.extendedFrags_sorted_3-10.stats')
 args <- commandArgs(trailingOnly = TRUE)
 outdir <- args[1]
 prefix <- args[2]             # for the collective PDF and HTML output files
@@ -45,13 +46,17 @@ pdf(file.path(outdir, paste0(prefix, '.pdf')))
 for (sf in statsfiles){
   # Input
   posdata <- read_tsv(sf)
+  if (dim(posdata)[1]==0) {
+    warning(paste("No content found in ", sf))
+    next
+  }
   if (all(names(posdata) == c('amplicon', 'pos', 'type', 'freq', 'total')))
     names(posdata) <- c('seq', 'pos', 'type', 'count', 'depth')
   stopifnot(all(names(posdata) == c('seq', 'pos', 'type', 'count', 'depth')))
 
   # Correct for reference deletions
   for (ref in 1:dim(offsets)[1]) {
-    #ref <- 2
+    #ref <- 1
     sel <- (grepl(offsets[[ref,1]], posdata$seq) & posdata$pos >= as.integer(offsets[[ref,2]]))
     posdata$pos[sel] <- posdata$pos[sel] + as.integer(offsets[[ref,3]])
   }
