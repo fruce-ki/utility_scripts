@@ -1,7 +1,5 @@
 
 .DS_Store
 .Rhistory
-__pycache__/fileutilities.cpython-36.pyc
-__pycache__/mylogs.cpython-36.pyc
 *.pyc
-__pycache__/mylogs.cpython-36.pyc
+__pycache__/*
