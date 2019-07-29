@@ -70,10 +70,6 @@ with open(pileupFile) as f:
         if not len(pile) <= int(cov):
             sys.stderr.write("Something unexpected may be going on at pos:\t" + pos + "\tlen:" + str(len(pile)) + "\tcov:" + str(cov) + "\n")
         
-        # Don't care about strands
-        pile = pile.upper().replace(',', '.')
-        # Tally up the matches/mismatches [ACGTN.]
-        mutDict[chr][pos].update(pile)
         # Tally up the insertions [+]
         if len(pile2) > 0:
             inDict[chr][pos] = Counter()
@@ -84,6 +80,11 @@ with open(pileupFile) as f:
                 mutDict[chr][str(int(pos) + 1)] = Counter()
                 mutDict[chr][str(int(pos) + 1)].update(pile3)
 
+        # Don't care about strands. (presuming the substitutions is given relative to the reference base, not relative to the matching strand)
+        pile = pile.upper().replace(',', '.')
+        # Tally up the matches/mismatches [ACGTN.] Mismatches in the ref>mut format. For matches, just the ref base. 
+        mutDict[chr][pos].update( [ref + '>' + x if x != '.' else ref for x in list(pile)] )
+        
 # Output header
 print("seq\tpos\ttype\tcount\tdepth")            
 
