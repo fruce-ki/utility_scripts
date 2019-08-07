@@ -14,7 +14,7 @@ spec = matrix(c(
   'designFormula', 'd', 1, "character", "Design formula"
 ), byrow=TRUE, ncol=5)
 opt = getopt(spec)
-#opt <- list(baseDir='/Volumes/groups/obenauf/Kimon_Froussios/chris/Y17_quantseq', countsFile='process/counts/all_counts.tsv', resultsDir='results', RDSoutdir='./process/DE', samplesFile='aux/conditions.txt', control='untreated,naive', designFormula='~ treatment + history')
+#opt <- list(baseDir='/Volumes/groups/obenauf/Kimon_Froussios/chris/Y17_quantseq', countsFile='process/counts/all_counts.tsv', resultsDir='results', RDSoutdir='./process/DE', samplesFile='./description/treatment+history.txt', control='untreated,naive', designFormula='~ treatment + history')
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -24,13 +24,35 @@ if ( !is.null(opt$help) ) {
 if ( is.null(opt$baseDir    ) ) { opt$baseDir    = '.'         }
 if ( is.null(opt$resultsDir ) ) { opt$resultsDir = './results' }
 if ( is.null(opt$RDSoutdir ) ) { opt$RDSoutdir = './process' }
+dir.create(file.path(opt$baseDir, opt$resultsDir))
+dir.create(file.path(opt$baseDir, opt$RDSoutdir))
 
 # Input
-cts <- round(as.matrix(read.csv(file.path(opt$baseDir, opt$countsFile), sep="\t", header=TRUE, row.names='row_ID')), digits=0)
+cts <- round(as.matrix(read.csv(file.path(opt$baseDir, opt$countsFile), sep="\t", header=TRUE, row.names=1)), digits=0)
 coldata <- read.csv(file.path(opt$baseDir, opt$samplesFile), sep="\t", header=TRUE, row.names='sample')
 
+# Remove covariates with a single category (unnecessary since the design is provided explicitly).
+# for (n in names(coldata)){
+#   if ( length(unique(coldata[,n])) < 2 ) {
+#     message(paste0("Dropped `", n, "` from the covariates table due to uniform value."))
+#     coldata[[n]] <- NULL
+#   }
+# }
+
+# Remove unused samples, and ensure the rest are in the correct order (simplifies subset comparisons from larger datasets).
+cdn <- rownames(coldata)
+ctsn <- colnames(cts)
+if (!all(cdn %in% ctsn) ) {
+  if( all(paste0('X',cdn) %in% ctsn) ) {
+    cdn <- paste0('X',cdn)
+  } else {
+    stop("Error! Samples not in data!")
+  }
+}
+cts <- cts[, match(cdn, ctsn)]
+
 # Setup
-vars = names(coldata)
+vars = names(coldata)[ vapply(names(coldata), function(x) { grepl(x, opt$designFormula) }, logical(1)) ] # only variables used in the design
 refs <- strsplit(opt$control, ',')[[1]]
 names(refs) <- vars
 
@@ -60,7 +82,8 @@ saveRDS(dds, file=file.path(opt$baseDir, opt$RDSoutdir, paste0(autoname, '_deseq
 # Shrunk LFC supposedly better for plotting and ranking
 coefficients <- resultsNames(dds)
 for (name in coefficients[2:length(coefficients)]) {
-  res <- lfcShrink(dds, coef=name, type='apeglm')
+  res <- lfcShrink(dds, coef=name, type='apeglm')       # apeglm is the type recommended by DESeq2
+                                                        # Significance and counts are kept the same, but lfc is shrunk.
   write.csv(res, file=file.path(opt$baseDir, opt$resultsDir, paste0(autoname, '_', name, '.csv')),
             row.names=TRUE, col.names=TRUE)
 }
