@@ -1,72 +1,502 @@
 ---
-title: "DESeq2 quick report:"
-output: html_document
+title: "DE report"
+author: "Kimon Froussios"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: yes
 ---
 
-%\VignetteEngine{knitr::knitr}
+\VignetteEngine{knitr::knitr}
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
-```
 
-```{r}
-pcutoff <- 0.01
-basedir = './results'
-files <-c('out.tsv')
-
+```{r message=FALSE, warning=FALSE}
 library(data.table)
+library(matrixStats)
+library(DESeq2)
+library(topGO)
+library(pcaExplorer)
+
 library(tidyverse)
+library(gridExtra)
+library(ggrepel)
+library(plotly)
+library(ggdendro)
+library(htmltools)
 ```
 
-```{r}
-for (tablein in files) {
-  message( tablein )
+```{r echo=TRUE, collapse=FALSE}
+# PARAMETERS
 
-  dt <- fread(file.path(basedir, tablein))
-  
-  # Effect sizes
-  message('Effect sizes')
-  print(
-    ggplot(dt, aes(x=log2FoldChange)) +
-      geom_histogram(bins = 100) +
-      scale_y_sqrt() +
-      ggtitle(tablein)
-  )
-  
-  # Volcano
-  print( 
-    ggplot(dt, aes(x=log2FoldChange, y=-log10(padj))) +
-      geom_point(shape=16, alpha=0.3, size=rel(0.5)) +
-      ggtitle(tablein)
-  )
-  
-  # Top 100 p
-  message('Top 100 padj')
-  print(
-    dt[complete.cases(dt), ] %>%
-      arrange(padj, abs(log2FoldChange), lfcSE) %>%
-      select(-pvalue) %>%
-      head(n=100)
-  )
-  
-  # Top 100 fc-
-  message(paste('Top 100 down-regulated, padj <', pcutoff))
-  print(
-    dt[complete.cases(dt), ] %>%
-      filter(padj < 0.01) %>%
-      arrange(log2FoldChange, padj, lfcSE) %>%
-      select(-pvalue) %>%
-      head(n=100)
-  )
-  
-  # Top 100 fc+
-  print(paste('Top 100 up-regulated, padj <', pcutoff))
-  print(
-    dt[complete.cases(dt), ] %>%
-      filter(padj < 0.01) %>%
-      arrange(desc(log2FoldChange), padj, lfcSE) %>%
-      select(-pvalue) %>%
-      head(n=100)
-  )
+
+# DE selection cutoff
+pcutoff <- 0.001
+lfcthreshold <- 2
+# Clustering distance method
+clustmeth = 'complete'
+# clustmeth = 'ward.D2'
+
+ndetop <- 100 # top DE genes
+ntop = 500    # top variable genes for PCA construction
+
+basedir = '/path/to/project/dir'
+dds <- readRDS(file.path(basedir, 'subpath/to/deseq2.RDS'))
+
+# Set up gene_id => gene_name lookup.   (gene_id as both column and rowname)
+anno_df <- NULL
+# anno_df <- readRDS('~/mm_mart.RDS')
+# anno_df <- get_annotation(dds = dds,
+#                           biomart_dataset = "mmusculus_gene_ensembl",
+#                           idtype = "ensembl_gene_id")
+
+# Define sample order and aliases
+samples <- c(used1="want1", used2="want2", used3="want3")
+```
+
+
+
+
+```{r message=FALSE}
+# EXTRACT DATA
+
+
+# Variance-shrunk counts
+ddvst <- vst(dds, blind=FALSE)    # VST is recommended over rlog, as it makes no prior assumptions
+                                  # This transforms the counts to even out the variance across expression levels, 
+                                  # not suitable for DE, but suitable for other analyses.
+# Covariate categories
+colDataAnn <- colData(ddvst)
+# Get the variable names 
+ig <- names(colDataAnn)
+ig <- ig[ig != 'sizeFactor']
+
+# Limit samples set to those actually included in the comparisons here.
+samples <- samples[ names(samples) %in% rownames(colDataAnn) ]          # Keep the order defined above.
+stopifnot(all(!is.na(samples)))
+
+# Rename samples
+rownames(colDataAnn) <- samples[rownames(colDataAnn)]
+# DF-ize
+cDA <- colDataAnn %>% 
+  as.data.frame() %>%
+  rownames_to_column(var='Sample')
+
+# Rename samples in tranformed data
+colnames(ddvst) <- samples[colnames(ddvst)]
+# Rename genes for plotting purposes
+if (!is.null(anno_df)) {
+  rownames(ddvst) <- anno_df$gene_name[match(rownames(ddvst), anno_df$gene_id)]
 }
+
+# DE coefficients
+coefficients <- resultsNames(dds)
+coefficients <- coefficients[coefficients != 'Intercept']
+# DE
+ddde <- lapply(coefficients, function(name) {
+  # Shrunk LFC supposedly better for plotting and ranking
+  res <- lfcShrink(dds, coef=name, type='apeglm')           # apeglm is the type recommended by DESeq2
+                                                            # counts and DE significances are kept, but lfc is adjusted for the higher variance in low counts.
+  de <- res %>% 
+          as.data.frame() %>% 
+          rownames_to_column(var='feature') %>%
+          mutate(mlp = -log10(padj)) %>%
+          mutate(pass = mlp > -log10(pcutoff) & abs(log2FoldChange) >= lfcthreshold) %>%
+          mutate(polar_dist = sqrt(mlp^2 + log2FoldChange^2)) %>%        # Distance from origin. lop10p is typically at least one order of magnitude 
+                                                                              # bigger than lfc, so adjust for that.
+          arrange(desc(polar_dist), desc(abs(log2FoldChange)), mlp)    # Prioritize points in the periphery
+  if (!is.null(anno_df)) {         
+    de <- de %>%
+      mutate(feature = anno_df$gene_name[match(.$feature, anno_df$gene_id)])  # Rename genes
+  }
+  return(de)
+})
+names(ddde) <- coefficients
+
+# Count data
+ddc <- counts(dds)
+# Rename samples
+colnames(ddc) <- samples[colnames(ddc)]
+# Rename genes
+if (!is.null(anno_df)) {
+  rownames(ddc) <- anno_df$gene_name[match(rownames(ddc), anno_df$gene_id)]
+}
+```
+
+
+# Pairwise sample correlations
+
+### Based on the counts:
+
+```{r}
+ggplot( cor(counts(dds)) %>% 
+          as.data.frame() %>% 
+          rownames_to_column(var="Sample1") %>% 
+          gather(key="Sample2", value="Correlation", -Sample1) %>% 
+          mutate(Sample1=samples[.$Sample1], Sample2=samples[.$Sample2]), 
+        aes(x=Sample1, y=Sample2, fill=Correlation)) +
+  geom_tile() +
+  theme(axis.text.x = element_text(angle=270, hjust = 0, vjust=0.5))
+```
+
+### Based on the variance-shrinkage tranformed counts:
+
+```{r}
+ggplot( cor(assay(ddvst)) %>% 
+          as.data.frame() %>% 
+          rownames_to_column(var="Sample1") %>% 
+          gather(key="Sample2", value="Correlation", -Sample1), 
+        aes(x=Sample1, y=Sample2, fill=Correlation)) +
+  geom_tile() +
+  theme(axis.text.x = element_text(angle=270, hjust = 0, vjust=0.5))
+```
+
+
+# Pairwise DE of each variable's conditions
+
+```{r message=FALSE, warning=FALSE}
+# Prepare
+
+# l1 <- list()
+# l2 <- list()
+l3 <- htmltools::tagList()
+i <- 1
+
+for(name in coefficients) {         # de <- ddde[1]
+  de <- ddde[[name]]
+  # Histogram
+  p1 <- ggplot(de, aes(x=log2FoldChange)) +
+          geom_histogram(bins = 100, fill='grey75') +
+          scale_y_sqrt() +
+          # ggtitle(name) +
+          theme(panel.background = element_rect(fill='white'), 
+                # panel.grid.minor.y=element_line(colour='grey90'),
+                panel.grid.major.y=element_line(colour='grey90'),
+                axis.title.x=element_blank())
+  
+  # Static volcano
+  p2 <- ggplot(de, aes(x=log2FoldChange, y=mlp, label=feature)) +
+          geom_hline(yintercept=-log10(pcutoff), linetype = 'dotted', colour="lightblue") +
+          geom_vline(xintercept=lfcthreshold, linetype = 'dotted', colour="lightblue") +
+          geom_vline(xintercept=-lfcthreshold, linetype = 'dotted', colour="lightblue") +
+          geom_point(shape=16, alpha=1, size=0.5) +
+          labs(title=name, y='-log10 Padj', x='log2 FC') +
+          theme(panel.background = element_rect(fill='white'),
+                legend.position = "none")
+  
+  grid.arrange(p2, p1, nrow = 2, ncol = 1, widths = NULL, heights = c(4,1))
+  
+  # Top DE genes
+  detop <- de %>% filter(pass)
+  
+  print(head(detop$feature, n=ndetop))
+  
+  # Filtered interactive volcano
+  p3 <- ggplot(detop, aes(x=log2FoldChange, y=mlp, label=feature)) +
+          geom_hline(yintercept=-log10(pcutoff), linetype = 'dotted', colour="lightblue") +
+          geom_vline(xintercept=lfcthreshold, linetype = 'dotted', colour="lightblue") +
+          geom_vline(xintercept=-lfcthreshold, linetype = 'dotted', colour="lightblue") +
+          geom_point(shape=16, size=1) +
+          scale_y_continuous(limits=c(0,NA)) +
+          labs(title=name, y='-log10 Padj', x='log2 FC') +
+          theme(panel.background = element_rect(fill='white'))
+  
+  # Extract vst counts.
+  mat <- assay(ddvst)[detop$feature, ]
+  # Clustered row order
+  rhc <- hclust(dist(scale(mat, center=TRUE, scale=FALSE), method='euclidean'), method=clustmeth)
+  rord <- rownames(mat)[rhc$order]
+  chc <- hclust(dist(scale(t(mat), center=TRUE, scale=FALSE), method='euclidean'), method=clustmeth)
+  cord <- colnames(mat)[chc$order]
+  
+  # Tidy
+  ct <- mat[detop$feature,] %>%
+          as.data.frame() %>%
+          rownames_to_column(var='Geneid') %>%
+          mutate(rowmeans = rowMeans2(as.matrix(mat))) %>%
+          gather(key='Sample', value='Transformed_Count', -Geneid, -rowmeans) %>%
+          mutate(Transformed_Count = Transformed_Count - rowmeans) %>%    # Center transformed count values around their cross-replicate mean
+                                                                          # Of interest are similarities/differences among samples
+          mutate(Sample = ordered(.$Sample, levels=cord)) %>%       # assign sample order
+          mutate(Geneid = ordered(.$Geneid, levels=rord))           # assign gene order
+  
+  # Heatmap
+  p4 <- ggplot(ct, aes(x=Sample, y=Geneid, fill=Transformed_Count)) +
+          geom_tile() +
+          scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
+          # ggtitle(name) +
+          theme(panel.background = element_rect(fill='white'),
+                axis.text.y = element_blank(),
+                axis.title.y = element_blank(),
+                axis.ticks.y = element_blank(),
+                axis.text.x = element_text(angle=270, hjust = 0, vjust=0.5),
+                axis.title.x = element_blank(),
+                plot.margin = margin(0.5, 0.5, 0.5, 2, "cm"),
+                legend.position = 'right')
+  
+  l3[[i]] <- as_widget(subplot(ggplotly(p3), ggplotly(p4)))
+  i <- i + 1
+}
+```
+
+### Interactive volcano outliers
+
+Reducing the number of points to maintain smooth worksheet interaction.
+
+```{r fig.height=15, fig.width=12}
+l3
+```
+
+
+# PCA
+
+## Components
+
+```{r message=FALSE}
+ddpc <- prcomp(t(assay(ddvst)))
+
+# Principal Components 
+cat('Explained variance')
+grid.arrange(pcascree(ddpc, type="cev", title='Explained variance (cumulative)') + labs(y='Cumul. Proportion'),
+             pcascree(ddpc, type="pev", title='Explained variance (individual)') + labs(y='Proportion'),
+             nrow=2, ncol=1)
+```
+
+## Samples
+
+### 3D : PC1 + PC2 + PC3
+
+```{r fig.height=10, fig.width=10}
+# Global PCA
+as_widget( 
+  pcaplot3d(ddvst, intgroup=ig, ntop=ntop, pcX=1, pcY=2, pcZ=3, point_size = 1, text_labels=TRUE, title=paste('Primary components in', paste(ig, collapse = "+")))
+)
+```
+
+### 2D : PC1 + PC2
+
+```{r fig.height=7, fig.width=12}
+# All variables.
+print(
+  pcaplot(ddvst, intgroup=ig, ntop=ntop, pcX=1, pcY=2, ellipse=FALSE, title=paste('Primary components in relation to', paste(ig, collapse = "+")))
+)
+
+# Highlight one variable at a time.
+l3 <- lapply(ig, function(varname) { 
+                    return( 
+                      pcaplot(ddvst, intgroup=varname, ntop=ntop, pcX=1, pcY=2, ellipse=FALSE, text_labels=FALSE, 
+                              title=paste('Primary components in relation to', varname))
+                    )} )
+do.call(grid.arrange, c(l3, ncol=2))
+```
+
+### 2D : PC1 + PC3
+
+```{r fig.height=7, fig.width=12}
+# All variables.
+print(
+  pcaplot(ddvst, intgroup=ig, ntop=ntop, pcX=1, pcY=3, ellipse=FALSE, title=paste('Primary components in relation to', paste(ig, collapse = "+")))
+)
+
+# Highlight one variable at a time.
+l3 <- lapply(ig, function(varname) { 
+                    return( 
+                      pcaplot(ddvst, intgroup=varname, ntop=ntop, pcX=1, pcY=3, ellipse=FALSE, text_labels=FALSE, 
+                              title=paste('Primary components in relation to', varname))
+                    )} )
+do.call(grid.arrange, c(l3, ncol=2))
+```
+
+### 2D : PC2 + PC3
+
+```{r fig.height=7, fig.width=12}
+# All variables.
+print(
+  pcaplot(ddvst, intgroup=ig, ntop=ntop, pcX=2, pcY=3, ellipse=FALSE, title=paste('Primary components in relation to', paste(ig, collapse = "+")))
+)
+
+# Highlight one variable at a time.
+l3 <- lapply(ig, function(varname) { 
+                    return( 
+                      pcaplot(ddvst, intgroup=varname, ntop=ntop, pcX=2, pcY=3, ellipse=FALSE, text_labels=FALSE, 
+                              title=paste('Primary components in relation to', varname))
+                    )} )
+do.call(grid.arrange, c(l3, ncol=2))
+```
+
+
+<!-- ### Further components -->
+
+```{r fig.height=5, fig.width=12}
+# for (P in 1:3) {
+#   for (p in 4:5) {
+#     l3 <- lapply(ig, function(varname) { 
+#                       return(
+#                         pcaplot(ddvst, intgroup=varname, ntop=ntop, pcX=P, pcY=p, ellipse=FALSE, text_labels = FALSE) )
+#                     } )
+#     do.call(grid.arrange, c(l3, ncol=2))
+#   }
+# }
+```
+
+## Most influential genes
+
+```{r}
+message("Genes with the (absolute) highest loadings on PC1:")
+topn <- floor(ntop / 2 / 10 + 0.5)
+
+hi1 <- hi_loadings(ddpc, whichpc=1, topN=topn, exprTable=ddc)
+rM <- rowMeans2(hi1)
+hi1 <- hi1 %>% as.data.frame() %>% 
+  rownames_to_column(var='Geneid') %>%
+  mutate(rowmeans = rM) %>%
+  arrange(desc(rowmeans)) %>% 
+  dplyr::select(Geneid) %>% 
+  .$Geneid
+print( hi1 )
+
+message("Genes with the highest (absolute) loadings on PC2:")
+hi2 <- hi_loadings(ddpc, whichpc=2, topN=topn, exprTable=ddc)
+rM <- rowMeans2(hi2)
+hi2 <- hi2 %>% as.data.frame() %>% 
+  rownames_to_column(var='Geneid') %>%
+  mutate(rowmeans = rM) %>%
+  arrange(desc(rowmeans)) %>% 
+  dplyr::select(Geneid) %>% 
+  .$Geneid
+  print( hi2 )
+  
+message("Genes with the highest (absolute) loadings on PC3:")
+hi3 <- hi_loadings(ddpc, whichpc=3, topN=topn, exprTable=ddc)
+rM <- rowMeans2(hi3)
+hi3 <- hi3 %>% as.data.frame() %>% 
+  rownames_to_column(var='Geneid') %>%
+  mutate(rowmeans = rM) %>%
+  arrange(desc(rowmeans)) %>% 
+  dplyr::select(Geneid) %>% 
+  .$Geneid
+  print( hi3 )
+```
+
+Union of the three sets:
+
+```{r}
+hi <- union(union(hi1, hi2), hi3)
+print( length(hi) )
+```
+
+# Top variable genes
+
+As used to define the Principle Components.
+
+## Expression
+
+Transformed by variance shrinkage and centred around the respective cross-sample means.
+
+```{r fig.height=10, fig.width=10}
+message(paste('Top', ntop))
+
+# Top variable genes
+topVarGenes <- order(rowVars(assay(ddvst)), decreasing=TRUE)[1:ntop]
+# Transformed counts
+mat <- assay(ddvst)[topVarGenes, ]
+
+# Clustered row order
+rhc <- hclust(dist(scale(mat, center=TRUE, scale=FALSE), method='euclidean'), method=clustmeth)
+rord <- rownames(mat)[rhc$order]
+# Clustered column order
+chc <- hclust(dist(t(mat), method='euclidean'), method=clustmeth)
+cord <- colnames(mat)[chc$order]
+
+# Tidy
+dt <- mat %>%
+      as.data.frame() %>%
+      rownames_to_column(var='Geneid') %>%
+      mutate(rowmeans = rowMeans2(as.matrix(mat))) %>%
+      gather(key='Sample', value='Transformed_Count', -Geneid, -rowmeans) %>%
+      mutate(Transformed_Count = Transformed_Count - rowmeans) %>%    # Center transformed count values around their cross-replicate mean
+                                                                      # Of interest are similarities/differences among samples
+      mutate(Sample = ordered(.$Sample, levels=cord)) %>%      # assign sample order
+      mutate(Geneid = ordered(.$Geneid, levels=rord))              # assign gene order
+
+print(
+  ggplot(dt, aes(x=Sample, y=Geneid, fill=Transformed_Count)) +
+    geom_tile() +
+    scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
+    ggtitle( paste('Top', ntop, 'high-variance genes used for PCA') ) +
+    theme(panel.background = element_rect(fill='white'),
+          axis.text.y = element_blank(),
+          axis.title.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          axis.text.x = element_text(angle=270, hjust = 0, vjust=0.5),
+          axis.title.x = element_blank())
+)
+```
+
+```{r fig.height=10, fig.width=10}
+plot_dendro(as.dendrogram(rhc), rotate=TRUE)
+```
+
+### Expression of the highest loading genes in the first 3 PCs
+
+```{r fig.height=10, fig.width=10}
+order_heat <- function(x, y) {
+  sm <- y[rownames(y) %in% x,]
+  rhc <- hclust(dist(scale(sm, center=TRUE, scale=FALSE), method='euclidean'), method=clustmeth)
+  rord <- rownames(sm)[rhc$order]
+  chc <- hclust(dist(t(sm), method='euclidean'), method=clustmeth)
+  cord <- colnames(sm)[chc$order]
+  dt <- sm %>%
+        as.data.frame() %>%
+        rownames_to_column(var='Geneid') %>%
+        mutate(rowmeans = rowMeans2(as.matrix(sm))) %>%
+        gather(key='Sample', value='Transformed_Count', -Geneid, -rowmeans) %>%
+        mutate(Transformed_Count = Transformed_Count - rowmeans) %>%    # Center transformed count values around their cross-replicate mean
+                                                                        # Of interest are similarities/differences among samples
+        mutate(Sample = ordered(.$Sample, levels=cord)) %>%      # assign sample order
+        mutate(Geneid = ordered(.$Geneid, levels=rord))              # assign gene order
+  return(dt)
+}
+
+print(
+  ggplot(order_heat(hi1, mat), aes(x=Sample, y=Geneid, fill=Transformed_Count)) +
+    geom_tile() +
+    scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
+    ggtitle( paste('Top', length(hi1), 'high-loading genes in PC1') ) +
+    theme(panel.background = element_rect(fill='white'),
+          # axis.text.y = element_blank(),
+          # axis.title.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          axis.text.x = element_text(angle=270, hjust = 0, vjust=0.5),
+          axis.title.x = element_blank(),
+          plot.margin = margin(0.5, 0.5, 0.5, 2, "cm"))
+)
+
+print(
+  ggplot(order_heat(hi2, mat), aes(x=Sample, y=Geneid, fill=Transformed_Count)) +
+    geom_tile() +
+    scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
+    ggtitle( paste('Top', length(hi2), 'high-loading genes in PC2') ) +
+    theme(panel.background = element_rect(fill='white'),
+          # axis.text.y = element_blank(),
+          # axis.title.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          axis.text.x = element_text(angle=270, hjust = 0, vjust=0.5),
+          axis.title.x = element_blank(),
+          plot.margin = margin(0.5, 0.5, 0.5, 2, "cm"))
+)
+
+print(
+  ggplot(order_heat(hi3, mat), aes(x=Sample, y=Geneid, fill=Transformed_Count)) +
+    geom_tile() +
+    scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
+    ggtitle( paste('Top', length(hi3), 'high-loading genes in PC3') ) +
+    theme(panel.background = element_rect(fill='white'),
+          # axis.text.y = element_blank(),
+          # axis.title.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          axis.text.x = element_text(angle=270, hjust = 0, vjust=0.5),
+          axis.title.x = element_blank(),
+          plot.margin = margin(0.5, 0.5, 0.5, 2, "cm"))
+)
 ```
