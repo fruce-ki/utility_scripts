@@ -395,11 +395,10 @@ hi3 <- hi3 %>% as.data.frame() %>%
   print( hi3 )
 ```
 
-Union of the three sets:
 
 ```{r}
 hi <- union(union(hi1, hi2), hi3)
-print( length(hi) )
+print( c('union'=length(hi), 'intersection'=length(intersect(intersect(hi1,hi2), hi3))) )
 ```
 
 # Top variable genes
@@ -450,8 +449,8 @@ print(
 )
 ```
 
-```{r fig.height=10, fig.width=10}
-plot_dendro(as.dendrogram(rhc), rotate=TRUE)
+```{r fig.height=10, fig.width=6}
+# plot_dendro(as.dendrogram(rhc), xmin=-2, width= 900)
 ```
 
 ### Expression of the highest loading genes in the first 3 PCs
@@ -459,7 +458,7 @@ plot_dendro(as.dendrogram(rhc), rotate=TRUE)
 ```{r fig.height=10, fig.width=10}
 order_heat <- function(x, y) {
   sm <- y[rownames(y) %in% x,]
-  rhc <- hclust(dist(scale(sm, centre=TRUE, scale=TRUE), method='euclidean'), method=clustmeth)
+  rhc <- hclust(dist(scale(sm, center=TRUE, scale=TRUE), method='euclidean'), method=clustmeth)
   rord <- rownames(sm)[rhc$order]
   chc <- hclust(dist(t(sm), method='euclidean'), method=clustmeth)
   cord <- colnames(sm)[chc$order]
