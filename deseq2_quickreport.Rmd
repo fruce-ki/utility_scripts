@@ -61,6 +61,23 @@ samples <- c(used1="want1", used2="want2", used3="want3")
 # EXTRACT DATA
 
 
+# Can't be bothered to make the format more flexible.
+if(!is.null(anno_df)){
+  stopifnot(all(c('gene_id', 'gene_name') %in% names(anno_df)))
+}
+
+# Paranoid
+stopifnot(all( !is.na(rownames(dds)) ))
+
+# Shit happens. Preserve gene_id when a gene_name is not available.
+unmatched <- which(!rownames(dds) %in% anno_df$gene_id)
+if(length(unmatched) != 0){
+  anno_df[unmatched, "gene_id"] <- rownames(dds)[unmatched]
+  anno_df[unmatched, "gene_name"] <- rownames(dds)[unmatched]
+}
+stopifnot(all(anno_df$gene_id == rownames(dds)))
+stopifnot(all(!is.na(anno_df$gene_name)))
+
 # Variance-shrunk counts
 ddvst <- vst(dds, blind=FALSE)    # VST is recommended over rlog, as it makes no prior assumptions
                                   # This transforms the counts to even out the variance across expression levels, 
@@ -203,6 +220,7 @@ for(name in coefficients) {         # de <- ddde[1]
   
   # Extract vst counts.
   mat <- assay(ddvst)[detop$feature, ]
+  
   # Clustered row order
   rhc <- hclust(dist(scale(mat, center=TRUE, scale=FALSE), method='euclidean'), method=clustmeth)
   rord <- rownames(mat)[rhc$order]
@@ -256,7 +274,6 @@ l3
 ddpc <- prcomp(t(assay(ddvst)))
 
 # Principal Components 
-cat('Explained variance')
 grid.arrange(pcascree(ddpc, type="cev", title='Explained variance (cumulative)') + labs(y='Cumul. Proportion'),
              pcascree(ddpc, type="pev", title='Explained variance (individual)') + labs(y='Proportion'),
              nrow=2, ncol=1)
@@ -401,10 +418,10 @@ topVarGenes <- order(rowVars(assay(ddvst)), decreasing=TRUE)[1:ntop]
 # Transformed counts
 mat <- assay(ddvst)[topVarGenes, ]
 
-# Clustered row order
-rhc <- hclust(dist(scale(mat, center=TRUE, scale=FALSE), method='euclidean'), method=clustmeth)
+# Clustered row order. In principle each gene behaves differently, but may be redundant for vst-tranformed counts.
+rhc <- hclust(dist(scale(mat, center=TRUE, scale=TRUE), method='euclidean'), method=clustmeth)
 rord <- rownames(mat)[rhc$order]
-# Clustered column order
+# Clustered column order. Each sample conisted of the same genes, so they are directly comparable.
 chc <- hclust(dist(t(mat), method='euclidean'), method=clustmeth)
 cord <- colnames(mat)[chc$order]
 
@@ -442,7 +459,7 @@ plot_dendro(as.dendrogram(rhc), rotate=TRUE)
 ```{r fig.height=10, fig.width=10}
 order_heat <- function(x, y) {
   sm <- y[rownames(y) %in% x,]
-  rhc <- hclust(dist(scale(sm, center=TRUE, scale=FALSE), method='euclidean'), method=clustmeth)
+  rhc <- hclust(dist(scale(sm, centre=TRUE, scale=TRUE), method='euclidean'), method=clustmeth)
   rord <- rownames(sm)[rhc$order]
   chc <- hclust(dist(t(sm), method='euclidean'), method=clustmeth)
   cord <- colnames(sm)[chc$order]
