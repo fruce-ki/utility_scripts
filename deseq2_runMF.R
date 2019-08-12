@@ -7,7 +7,7 @@ spec = matrix(c(
   'baseDir'      , 'b', 2, "character", "Base directory for everything (.)",
   'countsFile'   , 'f', 1, "character", "Tab-separated table of counts with `row_ID` and all the samples",
   'help'         , 'h', 0, "logical",   "Help",
-  'resultsDir'   , 'o', 2, "character", "Directory in which to save the contrast results (./results)",
+  'resultsDir'   , 'o', 2, "character", "Directory in which to save the contrast results. If omitted, only the RDS will be output.",
   'RDSoutdir'    , 'r', 2, "character", "Directory in which to save the raw DESeq2 object (./process)",
   'samplesFile'  , 's', 1, "character", "Tab-separated table with `sample` column followed by the variable columns",
   'control'      , 'x', 1, "character", "Comma separated value for each variable to use as reference for all comparisons, in the order variables are listed in samplesfile",
@@ -21,11 +21,17 @@ if ( !is.null(opt$help) ) {
   q(status=1)
 }
 
-if ( is.null(opt$baseDir    ) ) { opt$baseDir    = '.'         }
-if ( is.null(opt$resultsDir ) ) { opt$resultsDir = './results' }
-if ( is.null(opt$RDSoutdir ) ) { opt$RDSoutdir = './process' }
-dir.create(file.path(opt$baseDir, opt$resultsDir))
+if ( is.null(opt$baseDir    ) ) { 
+  opt$baseDir    = '.'         
+}
+if ( is.null(opt$RDSoutdir ) ) { 
+  opt$RDSoutdir = './process' 
+}
+
 dir.create(file.path(opt$baseDir, opt$RDSoutdir))
+if ( !is.null(opt$resultsDir ) ) { 
+  dir.create(file.path(opt$baseDir, opt$resultsDir))
+}
 
 # Input
 cts <- round(as.matrix(read.csv(file.path(opt$baseDir, opt$countsFile), sep="\t", header=TRUE, row.names=1)), digits=0)
@@ -80,10 +86,12 @@ saveRDS(dds, file=file.path(opt$baseDir, opt$RDSoutdir, paste0(autoname, '_deseq
 # res_m1 <- results(dds, contrast=c('condition', 'N1', 'M1'))
 
 # Shrunk LFC supposedly better for plotting and ranking
-coefficients <- resultsNames(dds)
-for (name in coefficients[2:length(coefficients)]) {
-  res <- lfcShrink(dds, coef=name, type='apeglm')       # apeglm is the type recommended by DESeq2
-                                                        # Significance and counts are kept the same, but lfc is shrunk.
-  write.csv(res, file=file.path(opt$baseDir, opt$resultsDir, paste0(autoname, '_', name, '.csv')),
-            row.names=TRUE, col.names=TRUE)
+if( !is.null(opt$resultsDir) ) {
+  coefficients <- resultsNames(dds)
+  for (name in coefficients[2:length(coefficients)]) {
+    res <- lfcShrink(dds, coef=name, type='apeglm')       # apeglm is the type recommended by DESeq2
+                                                          # Significance and counts are kept the same, but lfc is shrunk.
+    write.table(res, file=file.path(opt$baseDir, opt$resultsDir, paste0(autoname, '_', name, '.tsv')),
+              sep="\t", quote=FALSE, row.names=TRUE, col.names=TRUE)
+  }
 }
