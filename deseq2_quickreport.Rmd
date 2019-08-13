@@ -26,6 +26,7 @@ library(ggdendro)
 library(htmltools)
 ```
 
+
 ```{r echo=TRUE, collapse=FALSE}
 # PARAMETERS
 
@@ -33,15 +34,21 @@ library(htmltools)
 # DE selection cutoff
 pcutoff <- 0.001
 lfcthreshold <- 2
-# Clustering distance method
-clustmeth = 'complete'
-# clustmeth = 'ward.D2'
 
 ndetop <- 100 # top DE genes
 ntop = 500    # top variable genes for PCA construction
 
+# Clustering distance method
+clustmeth = 'complete'
+
 basedir = '/path/to/project/dir'
-dds <- readRDS(file.path(basedir, 'subpath/to/deseq2.RDS'))
+dedir = 'path/to/DE/dir'
+defile = 'deseq2.RDS'
+resdir = NULL
+
+dds <- readRDS(file.path(basedir, dedir, defile))
+# Covariate categories
+colDataAnn <- colData(dds)
 
 # Set up gene_id => gene_name lookup.   (gene_id as both column and rowname)
 anno_df <- NULL
@@ -50,16 +57,18 @@ anno_df <- NULL
 #                           biomart_dataset = "mmusculus_gene_ensembl",
 #                           idtype = "ensembl_gene_id")
 
-# Define sample order and aliases
-samples <- c(used1="want1", used2="want2", used3="want3")
+samples <- NULL
+# Define sample aliases and order (but order will be overriden by clustering)
+#samples <- c(used1="alias1", used2="alias2", used3="alias3")
+# OR alias names available in covariates field.
+if ('Name' %in% names(colDataAnn)) {
+  samples <- as.character(colDataAnn[['Name']])
+}
 ```
-
-
 
 
 ```{r message=FALSE}
 # EXTRACT DATA
-
 
 # Can't be bothered to make the format more flexible.
 if(!is.null(anno_df)){
@@ -68,45 +77,57 @@ if(!is.null(anno_df)){
 
 # Paranoid
 stopifnot(all( !is.na(rownames(dds)) ))
-
 # Shit happens. Preserve gene_id when a gene_name is not available.
-unmatched <- which(!rownames(dds) %in% anno_df$gene_id)
-if(length(unmatched) != 0){
-  anno_df[unmatched, "gene_id"] <- rownames(dds)[unmatched]
-  anno_df[unmatched, "gene_name"] <- rownames(dds)[unmatched]
+if(!is.null(anno_df)) {
+  unmatched <- which(!rownames(dds) %in% anno_df$gene_id)
+  if(length(unmatched) != 0){
+    anno_df[unmatched, "gene_id"] <- rownames(dds)[unmatched]
+    anno_df[unmatched, "gene_name"] <- rownames(dds)[unmatched]
+  }
+  stopifnot(all(anno_df$gene_id == rownames(dds)))
+  stopifnot(all(!is.na(anno_df$gene_name)))
 }
-stopifnot(all(anno_df$gene_id == rownames(dds)))
-stopifnot(all(!is.na(anno_df$gene_name)))
+
+
+# Sanitise colDataAnn
+
+# Sample names
+if(!is.null(samples)){
+  colDataAnn[["Name"]] <- samples      # Redundant if that's where I got the names to begin with, but covers all usage scenarios
+} else {
+  colDataAnn[["Name"]] <- rownames(colDataAnn)  # Ensure there are always values for Name, aliased or not.
+}
+colDataAnn[["Sample"]] <- rownames(colDataAnn)
+  
+# Covariate names 
+ig <- names(colDataAnn)
+ig <- ig[! ig %in% c('Sample', 'Name', 'sizeFactor')]
+
 
 # Variance-shrunk counts
-ddvst <- vst(dds, blind=FALSE)    # VST is recommended over rlog, as it makes no prior assumptions
-                                  # This transforms the counts to even out the variance across expression levels, 
-                                  # not suitable for DE, but suitable for other analyses.
-# Covariate categories
-colDataAnn <- colData(ddvst)
-# Get the variable names 
-ig <- names(colDataAnn)
-ig <- ig[ig != 'sizeFactor']
 
-# Limit samples set to those actually included in the comparisons here.
-samples <- samples[ names(samples) %in% rownames(colDataAnn) ]          # Keep the order defined above.
-stopifnot(all(!is.na(samples)))
+ddvst <- vst(dds, blind=FALSE)
+colnames(ddvst) <- colDataAnn[colnames(ddvst), "Name"]
 
-# Rename samples
-rownames(colDataAnn) <- samples[rownames(colDataAnn)]
-# DF-ize
-cDA <- colDataAnn %>% 
-  as.data.frame() %>%
-  rownames_to_column(var='Sample')
-
-# Rename samples in tranformed data
-colnames(ddvst) <- samples[colnames(ddvst)]
 # Rename genes for plotting purposes
 if (!is.null(anno_df)) {
   rownames(ddvst) <- anno_df$gene_name[match(rownames(ddvst), anno_df$gene_id)]
 }
 
-# DE coefficients
+
+# Counts
+
+ddc <- counts(dds)
+# Rename samples
+colnames(ddc) <- colDataAnn[colnames(ddc), "Name"]
+# Rename genes
+if (!is.null(anno_df)) {
+  rownames(ddc) <- anno_df$gene_name[match(rownames(ddc), anno_df$gene_id)]
+}
+
+
+# Differential Expression
+
 coefficients <- resultsNames(dds)
 coefficients <- coefficients[coefficients != 'Intercept']
 # DE
@@ -116,28 +137,30 @@ ddde <- lapply(coefficients, function(name) {
                                                             # counts and DE significances are kept, but lfc is adjusted for the higher variance in low counts.
   de <- res %>% 
           as.data.frame() %>% 
-          rownames_to_column(var='feature') %>%
+          rownames_to_column(var='featureID') %>%
           mutate(mlp = -log10(padj)) %>%
           mutate(pass = mlp > -log10(pcutoff) & abs(log2FoldChange) >= lfcthreshold) %>%
           mutate(polar_dist = sqrt(mlp^2 + log2FoldChange^2)) %>%        # Distance from origin. lop10p is typically at least one order of magnitude 
                                                                               # bigger than lfc, so adjust for that.
           arrange(desc(polar_dist), desc(abs(log2FoldChange)), mlp)    # Prioritize points in the periphery
+  # Rename genes
   if (!is.null(anno_df)) {         
     de <- de %>%
-      mutate(feature = anno_df$gene_name[match(.$feature, anno_df$gene_id)])  # Rename genes
+      mutate(feature = anno_df$gene_name[match(.$featureID, anno_df$gene_id)])
+  }
+  
+  if (!is.null(resdir)) {
+    write.table(de, file=file.path(basedir, resdir, paste0(sub('.RDS', '', defile, fixed=TRUE), sub('^[^_]+', '', name), '.tsv')),
+            sep="\t", quote = FALSE, row.names=FALSE, col.names=TRUE)
   }
   return(de)
 })
 names(ddde) <- coefficients
 
-# Count data
-ddc <- counts(dds)
-# Rename samples
-colnames(ddc) <- samples[colnames(ddc)]
-# Rename genes
-if (!is.null(anno_df)) {
-  rownames(ddc) <- anno_df$gene_name[match(rownames(ddc), anno_df$gene_id)]
-}
+
+# Primary components
+
+ddpc <- prcomp(t(assay(ddvst)))
 ```
 
 
@@ -146,11 +169,10 @@ if (!is.null(anno_df)) {
 ### Based on the counts:
 
 ```{r}
-ggplot( cor(counts(dds)) %>% 
+ggplot( cor(ddc) %>% 
           as.data.frame() %>% 
           rownames_to_column(var="Sample1") %>% 
-          gather(key="Sample2", value="Correlation", -Sample1) %>% 
-          mutate(Sample1=samples[.$Sample1], Sample2=samples[.$Sample2]), 
+          gather(key="Sample2", value="Correlation", -Sample1), 
         aes(x=Sample1, y=Sample2, fill=Correlation)) +
   geom_tile() +
   theme(axis.text.x = element_text(angle=270, hjust = 0, vjust=0.5))
@@ -206,7 +228,7 @@ for(name in coefficients) {         # de <- ddde[1]
   # Top DE genes
   detop <- de %>% filter(pass)
   
-  print(head(detop$feature, n=ndetop))
+  print(head(detop$feature, n=ndetop), quote=)
   
   # Filtered interactive volcano
   p3 <- ggplot(detop, aes(x=log2FoldChange, y=mlp, label=feature)) +
@@ -271,15 +293,13 @@ l3
 ## Components
 
 ```{r message=FALSE}
-ddpc <- prcomp(t(assay(ddvst)))
-
 # Principal Components 
 grid.arrange(pcascree(ddpc, type="cev", title='Explained variance (cumulative)') + labs(y='Cumul. Proportion'),
              pcascree(ddpc, type="pev", title='Explained variance (individual)') + labs(y='Proportion'),
              nrow=2, ncol=1)
 ```
 
-## Samples
+## Variable segregation
 
 ### 3D : PC1 + PC2 + PC3
 
@@ -295,14 +315,14 @@ as_widget(
 ```{r fig.height=7, fig.width=12}
 # All variables.
 print(
-  pcaplot(ddvst, intgroup=ig, ntop=ntop, pcX=1, pcY=2, ellipse=FALSE, title=paste('Primary components in relation to', paste(ig, collapse = "+")))
+  pcaplot(ddvst, intgroup=ig, ntop=ntop, pcX=1, pcY=2, ellipse=FALSE, title=paste('Primary components in', paste(ig, collapse = ",")))
 )
 
 # Highlight one variable at a time.
 l3 <- lapply(ig, function(varname) { 
                     return( 
                       pcaplot(ddvst, intgroup=varname, ntop=ntop, pcX=1, pcY=2, ellipse=FALSE, text_labels=FALSE, 
-                              title=paste('Primary components in relation to', varname))
+                              title=paste('Primary components by', varname))
                     )} )
 do.call(grid.arrange, c(l3, ncol=2))
 ```
@@ -312,14 +332,14 @@ do.call(grid.arrange, c(l3, ncol=2))
 ```{r fig.height=7, fig.width=12}
 # All variables.
 print(
-  pcaplot(ddvst, intgroup=ig, ntop=ntop, pcX=1, pcY=3, ellipse=FALSE, title=paste('Primary components in relation to', paste(ig, collapse = "+")))
+  pcaplot(ddvst, intgroup=ig, ntop=ntop, pcX=1, pcY=3, ellipse=FALSE, title=paste('Primary components in', paste(ig, collapse = ",")))
 )
 
 # Highlight one variable at a time.
 l3 <- lapply(ig, function(varname) { 
                     return( 
                       pcaplot(ddvst, intgroup=varname, ntop=ntop, pcX=1, pcY=3, ellipse=FALSE, text_labels=FALSE, 
-                              title=paste('Primary components in relation to', varname))
+                              title=paste('Primary components by', varname))
                     )} )
 do.call(grid.arrange, c(l3, ncol=2))
 ```
@@ -329,14 +349,14 @@ do.call(grid.arrange, c(l3, ncol=2))
 ```{r fig.height=7, fig.width=12}
 # All variables.
 print(
-  pcaplot(ddvst, intgroup=ig, ntop=ntop, pcX=2, pcY=3, ellipse=FALSE, title=paste('Primary components in relation to', paste(ig, collapse = "+")))
+  pcaplot(ddvst, intgroup=ig, ntop=ntop, pcX=3, pcY=2, ellipse=FALSE, title=paste('Primary components in', paste(ig, collapse = ",")))
 )
 
 # Highlight one variable at a time.
 l3 <- lapply(ig, function(varname) { 
                     return( 
-                      pcaplot(ddvst, intgroup=varname, ntop=ntop, pcX=2, pcY=3, ellipse=FALSE, text_labels=FALSE, 
-                              title=paste('Primary components in relation to', varname))
+                      pcaplot(ddvst, intgroup=varname, ntop=ntop, pcX=3, pcY=2, ellipse=FALSE, text_labels=FALSE, 
+                              title=paste('Primary components by', varname))
                     )} )
 do.call(grid.arrange, c(l3, ncol=2))
 ```
@@ -356,7 +376,8 @@ do.call(grid.arrange, c(l3, ncol=2))
 # }
 ```
 
-## Most influential genes
+
+## Most influential genes for the first 3 PCs
 
 ```{r}
 message("Genes with the (absolute) highest loadings on PC1:")
@@ -370,7 +391,7 @@ hi1 <- hi1 %>% as.data.frame() %>%
   arrange(desc(rowmeans)) %>% 
   dplyr::select(Geneid) %>% 
   .$Geneid
-print( hi1 )
+  noquote( hi1 )
 
 message("Genes with the highest (absolute) loadings on PC2:")
 hi2 <- hi_loadings(ddpc, whichpc=2, topN=topn, exprTable=ddc)
@@ -381,7 +402,7 @@ hi2 <- hi2 %>% as.data.frame() %>%
   arrange(desc(rowmeans)) %>% 
   dplyr::select(Geneid) %>% 
   .$Geneid
-  print( hi2 )
+  noquote( hi2 )
   
 message("Genes with the highest (absolute) loadings on PC3:")
 hi3 <- hi_loadings(ddpc, whichpc=3, topN=topn, exprTable=ddc)
@@ -392,14 +413,14 @@ hi3 <- hi3 %>% as.data.frame() %>%
   arrange(desc(rowmeans)) %>% 
   dplyr::select(Geneid) %>% 
   .$Geneid
-  print( hi3 )
+  noquote( hi3 )
 ```
-
 
 ```{r}
 hi <- union(union(hi1, hi2), hi3)
 print( c('union'=length(hi), 'intersection'=length(intersect(intersect(hi1,hi2), hi3))) )
 ```
+
 
 # Top variable genes
 
@@ -409,7 +430,7 @@ As used to define the Principle Components.
 
 Transformed by variance shrinkage and centred around the respective cross-sample means.
 
-```{r fig.height=10, fig.width=10}
+```{r fig.height=12, fig.width=10}
 message(paste('Top', ntop))
 
 # Top variable genes
@@ -417,8 +438,8 @@ topVarGenes <- order(rowVars(assay(ddvst)), decreasing=TRUE)[1:ntop]
 # Transformed counts
 mat <- assay(ddvst)[topVarGenes, ]
 
-# Clustered row order. In principle each gene behaves differently, but may be redundant for vst-tranformed counts.
-rhc <- hclust(dist(scale(mat, center=TRUE, scale=TRUE), method='euclidean'), method=clustmeth)
+# Clustered row order. Not centering on the mean results in more sensible visual groups. 
+rhc <- hclust(dist(scale(mat, center=FALSE, scale=TRUE), method='euclidean'), method=clustmeth)
 rord <- rownames(mat)[rhc$order]
 # Clustered column order. Each sample conisted of the same genes, so they are directly comparable.
 chc <- hclust(dist(t(mat), method='euclidean'), method=clustmeth)
@@ -435,7 +456,7 @@ dt <- mat %>%
       mutate(Sample = ordered(.$Sample, levels=cord)) %>%      # assign sample order
       mutate(Geneid = ordered(.$Geneid, levels=rord))              # assign gene order
 
-print(
+ggplotly(
   ggplot(dt, aes(x=Sample, y=Geneid, fill=Transformed_Count)) +
     geom_tile() +
     scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
@@ -450,15 +471,15 @@ print(
 ```
 
 ```{r fig.height=10, fig.width=6}
-# plot_dendro(as.dendrogram(rhc), xmin=-2, width= 900)
+plot_dendro(as.dendrogram(rhc), xmin=-1, width= 800)
 ```
 
 ### Expression of the highest loading genes in the first 3 PCs
 
-```{r fig.height=10, fig.width=10}
+```{r fig.height=12, fig.width=10}
 order_heat <- function(x, y) {
   sm <- y[rownames(y) %in% x,]
-  rhc <- hclust(dist(scale(sm, center=TRUE, scale=TRUE), method='euclidean'), method=clustmeth)
+  rhc <- hclust(dist(scale(sm, center=FALSE, scale=TRUE), method='euclidean'), method=clustmeth)
   rord <- rownames(sm)[rhc$order]
   chc <- hclust(dist(t(sm), method='euclidean'), method=clustmeth)
   cord <- colnames(sm)[chc$order]
@@ -478,7 +499,7 @@ print(
   ggplot(order_heat(hi1, mat), aes(x=Sample, y=Geneid, fill=Transformed_Count)) +
     geom_tile() +
     scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
-    ggtitle( paste('Top', length(hi1), 'high-loading genes in PC1') ) +
+    ggtitle( paste('Top', length(hi1), 'high-loading genes for PC1') ) +
     theme(panel.background = element_rect(fill='white'),
           # axis.text.y = element_blank(),
           # axis.title.y = element_blank(),
@@ -492,7 +513,7 @@ print(
   ggplot(order_heat(hi2, mat), aes(x=Sample, y=Geneid, fill=Transformed_Count)) +
     geom_tile() +
     scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
-    ggtitle( paste('Top', length(hi2), 'high-loading genes in PC2') ) +
+    ggtitle( paste('Top', length(hi2), 'high-loading genes for PC2') ) +
     theme(panel.background = element_rect(fill='white'),
           # axis.text.y = element_blank(),
           # axis.title.y = element_blank(),
@@ -506,7 +527,7 @@ print(
   ggplot(order_heat(hi3, mat), aes(x=Sample, y=Geneid, fill=Transformed_Count)) +
     geom_tile() +
     scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
-    ggtitle( paste('Top', length(hi3), 'high-loading genes in PC3') ) +
+    ggtitle( paste('Top', length(hi3), 'high-loading genes for PC3') ) +
     theme(panel.background = element_rect(fill='white'),
           # axis.text.y = element_blank(),
           # axis.title.y = element_blank(),
@@ -516,3 +537,9 @@ print(
           plot.margin = margin(0.5, 0.5, 0.5, 2, "cm"))
 )
 ```
+
+
+
+
+
+
