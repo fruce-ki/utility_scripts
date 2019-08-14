@@ -14,18 +14,26 @@ output:
 ```{r message=FALSE, warning=FALSE}
 library(data.table)
 library(matrixStats)
-library(DESeq2)
-library(topGO)
+library(cluster)
 library(pcaExplorer)
+library(DESeq2)
 
 library(tidyverse)
 library(gridExtra)
 library(ggrepel)
 library(plotly)
-library(ggdendro)
 library(htmltools)
+# library(topGO)
 ```
 
+```{r}
+## INPUT
+
+basedir <- '/path/to/project/dir'
+dedir <- 'path/to/DE/dir'
+defile <- 'deseq2.RDS'
+resdir <- NULL
+```
 
 ```{r echo=TRUE, collapse=FALSE}
 # PARAMETERS
@@ -36,15 +44,14 @@ pcutoff <- 0.001
 lfcthreshold <- 2
 
 ndetop <- 100 # top DE genes
-ntop = 500    # top variable genes for PCA construction
+ntop <- 500    # top variable genes for PCA construction
 
-# Clustering distance method
-clustmeth = 'complete'
-
-basedir = '/path/to/project/dir'
-dedir = 'path/to/DE/dir'
-defile = 'deseq2.RDS'
-resdir = NULL
+# Max number of clusters to consider for k-means
+cmax <- 20
+# Hierarchical cxlustering distance method
+clustmeth <- 'complete'
+scl <- FALSE           # VST tranformed counts are already scaled.
+ctr <- TRUE            # VST transformed counts are not centred on the cross-replicate mean.
 
 dds <- readRDS(file.path(basedir, dedir, defile))
 # Covariate categories
@@ -63,6 +70,13 @@ samples <- NULL
 # OR alias names available in covariates field.
 if ('Name' %in% names(colDataAnn)) {
   samples <- as.character(colDataAnn[['Name']])
+}
+
+# Determine number of clusters by silhouette.
+silhouette_score <- function(k, mat){
+  km <- kmeans(mat, centers = k, nstart=100)
+  ss <- silhouette(km$cluster, dist(mat))
+  mean(ss[, 3])
 }
 ```
 
@@ -114,7 +128,6 @@ if (!is.null(anno_df)) {
   rownames(ddvst) <- anno_df$gene_name[match(rownames(ddvst), anno_df$gene_id)]
 }
 
-
 # Counts
 
 ddc <- counts(dds)
@@ -145,8 +158,9 @@ ddde <- lapply(coefficients, function(name) {
           arrange(desc(polar_dist), desc(abs(log2FoldChange)), mlp)    # Prioritize points in the periphery
   # Rename genes
   if (!is.null(anno_df)) {         
-    de <- de %>%
-      mutate(feature = anno_df$gene_name[match(.$featureID, anno_df$gene_id)])
+    de[["feature"]] <- anno_df$gene_name[match(.$featureID, anno_df$gene_id)]
+  } else {
+    de[["feature"]] <- de[['featureID']]
   }
   
   if (!is.null(resdir)) {
@@ -196,8 +210,6 @@ ggplot( cor(assay(ddvst)) %>%
 ```{r message=FALSE, warning=FALSE}
 # Prepare
 
-# l1 <- list()
-# l2 <- list()
 l3 <- htmltools::tagList()
 i <- 1
 
@@ -228,7 +240,7 @@ for(name in coefficients) {         # de <- ddde[1]
   # Top DE genes
   detop <- de %>% filter(pass)
   
-  print(head(detop$feature, n=ndetop), quote=)
+  print(head(detop$feature, n=ndetop), quote=FALSE)
   
   # Filtered interactive volcano
   p3 <- ggplot(detop, aes(x=log2FoldChange, y=mlp, label=feature)) +
@@ -243,25 +255,21 @@ for(name in coefficients) {         # de <- ddde[1]
   # Extract vst counts.
   mat <- assay(ddvst)[detop$feature, ]
   
-  # Clustered row order
-  rhc <- hclust(dist(scale(mat, center=TRUE, scale=FALSE), method='euclidean'), method=clustmeth)
-  rord <- rownames(mat)[rhc$order]
-  chc <- hclust(dist(scale(t(mat), center=TRUE, scale=FALSE), method='euclidean'), method=clustmeth)
+  # Cluster
+  sil <- data.frame(k = 2:min(cmax, nrow(mat) -1),
+                    avg_sil = vapply(2:min(cmax, nrow(mat)-1), function(k) { silhouette_score(k, mat) }, double(1)) )
+  copt <-sil$k[sil$avg_sil == max(sil$avg_sil)]
+  chc <- hclust(dist(t(mat)), method=clustmeth)    # Same genes for each sample, should not need scaling.
   cord <- colnames(mat)[chc$order]
-  
-  # Tidy
-  ct <- mat[detop$feature,] %>%
-          as.data.frame() %>%
-          rownames_to_column(var='Geneid') %>%
-          mutate(rowmeans = rowMeans2(as.matrix(mat))) %>%
-          gather(key='Sample', value='Transformed_Count', -Geneid, -rowmeans) %>%
-          mutate(Transformed_Count = Transformed_Count - rowmeans) %>%    # Center transformed count values around their cross-replicate mean
-                                                                          # Of interest are similarities/differences among samples
-          mutate(Sample = ordered(.$Sample, levels=cord)) %>%       # assign sample order
-          mutate(Geneid = ordered(.$Geneid, levels=rord))           # assign gene order
+  fit <- kmeans(mat, copt, nstart=100)
+  mydata <- data.frame(mat, cluster=as.factor(fit$cluster), check.names = FALSE) %>% 
+    mutate(Geneid = rownames(mat)) %>%
+    gather(key="Sample", value="Expression", -Geneid, -cluster) %>%
+    mutate(Sample = factor(.$Sample, levels=cord))     # assign sample order 
   
   # Heatmap
-  p4 <- ggplot(ct, aes(x=Sample, y=Geneid, fill=Transformed_Count)) +
+  p4 <- ggplot(mydata, aes(x=Sample, y=Geneid, fill=Expression)) +
+          facet_grid(cluster ~ ., scales= "free", drop = TRUE) +
           geom_tile() +
           scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
           # ggtitle(name) +
@@ -428,50 +436,97 @@ As used to define the Principle Components.
 
 ## Expression
 
-Transformed by variance shrinkage and centred around the respective cross-sample means.
+Optimal number of clusters.
 
-```{r fig.height=12, fig.width=10}
-message(paste('Top', ntop))
+```{r}
+# Cluster the genes.
 
 # Top variable genes
 topVarGenes <- order(rowVars(assay(ddvst)), decreasing=TRUE)[1:ntop]
 # Transformed counts
 mat <- assay(ddvst)[topVarGenes, ]
+# Centre on cross-sample means, to boost contrast.
+rowmeans <- rowMeans2(mat)
+mat <- apply(mat, 2, function(x) { x - rowmeans })
 
-# Clustered row order. Not centering on the mean results in more sensible visual groups. 
-rhc <- hclust(dist(scale(mat, center=FALSE, scale=TRUE), method='euclidean'), method=clustmeth)
-rord <- rownames(mat)[rhc$order]
-# Clustered column order. Each sample conisted of the same genes, so they are directly comparable.
-chc <- hclust(dist(t(mat), method='euclidean'), method=clustmeth)
-cord <- colnames(mat)[chc$order]
+# Find optimal number of clusters by silhouette.
+sil <- data.frame(k = 2:min(cmax, nrow(mat)-1),
+                  avg_sil = vapply(2:min(cmax, nrow(mat)-1), function(k) { silhouette_score(k, mat) }, double(1)) )
+copt <-sil$k[sil$avg_sil == max(sil$avg_sil)]
 
-# Tidy
-dt <- mat %>%
-      as.data.frame() %>%
-      rownames_to_column(var='Geneid') %>%
-      mutate(rowmeans = rowMeans2(as.matrix(mat))) %>%
-      gather(key='Sample', value='Transformed_Count', -Geneid, -rowmeans) %>%
-      mutate(Transformed_Count = Transformed_Count - rowmeans) %>%    # Center transformed count values around their cross-replicate mean
-                                                                      # Of interest are similarities/differences among samples
-      mutate(Sample = ordered(.$Sample, levels=cord)) %>%      # assign sample order
-      mutate(Geneid = ordered(.$Geneid, levels=rord))              # assign gene order
+p1 <- ggplot(sil, aes(x=k, y=avg_sil)) +
+  geom_point() +
+  geom_line() +
+  geom_vline(xintercept=copt, linetype='dotted') +
+  scale_x_continuous(breaks=seq(0,cmax,4), limits=c(0, cmax+1), expand=c(0,0)) +
+  labs(title="Infering optimal number of clusters", x='Number of Groups', y='Average Silhouette Scores') + 
+  theme_bw()
 
-ggplotly(
-  ggplot(dt, aes(x=Sample, y=Geneid, fill=Transformed_Count)) +
-    geom_tile() +
-    scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
-    ggtitle( paste('Top', ntop, 'high-variance genes used for PCA') ) +
-    theme(panel.background = element_rect(fill='white'),
-          axis.text.y = element_blank(),
-          axis.title.y = element_blank(),
-          axis.ticks.y = element_blank(),
-          axis.text.x = element_text(angle=270, hjust = 0, vjust=0.5),
-          axis.title.x = element_blank())
-)
+# Confirm number of clusters by elbow.
+kink <- as.data.frame(lapply(1:100, function(i){
+            c( (nrow(mat) - 1) * sum(apply(mat, 2, var)), 
+               vapply(2:cmax, function(k) { 
+                 sum( kmeans(mat, centers=k)$withinss )
+                }, double(1)) )
+        })) %>%
+  mutate(nc = 1:cmax) %>%
+  gather(key="iter", value=wss, -nc)
+
+p2 <-ggplot(kink, aes(x=nc, y=wss, colour=iter)) +
+  # geom_point() +
+  geom_line(alpha=0.1) +
+  geom_vline(xintercept=copt, linetype='dotted') +
+  scale_x_continuous(breaks=seq(0,cmax,4), limits=c(0, cmax+1), expand=c(0,0)) +
+  labs(x="Number of Groups", y="Within-group Sums of Squares") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+grid.arrange( arrangeGrob(p1, p2, nrow=2) )
+
+# K-Means Cluster Analysis
+fit <- kmeans(mat, copt, nstart=100)
+# get cluster means
+aggregate(mat, by=list(fit$cluster), FUN=mean)
 ```
 
-```{r fig.height=10, fig.width=6}
-plot_dendro(as.dendrogram(rhc), xmin=-1, width= 800)
+Centred, variance-stablised expression matrix.
+
+```{r fig.height=12, fig.width=10}
+
+# Cluster the samples.
+chc <- hclust(dist(t(mat)), method=clustmeth)    # Same genes for each sample, should not need scaling.
+cord <- colnames(mat)[chc$order]
+
+# Append cluster assignment
+mydata <- data.frame(mat, cluster=as.factor(fit$cluster), check.names = FALSE) %>% 
+  mutate(Geneid = rownames(mat)) %>%
+  gather(key="Sample", value="Expression", -Geneid, -cluster) %>%
+  mutate(Sample = factor(.$Sample, levels=cord))     # assign sample order 
+      
+ggplot(mydata, aes(x=Sample, y=Geneid, fill=Expression)) +
+  facet_grid(cluster ~ ., scales= "free", drop = TRUE) +
+  geom_tile() +
+  scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
+  ggtitle( paste('Top', ntop, 'high-variance genes used for PCA') ) +
+  theme(panel.background = element_rect(fill='white'),
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.x = element_text(angle=270, hjust = 0, vjust=0.5),
+        axis.title.x = element_blank())
+```
+
+Genes
+
+```{r}
+# Genes per cluster
+mydata %>% group_by(cluster) %>%
+  summarise(Num_of_Genes = length(unique(Geneid)))
+
+for (x in unique(mydata$cluster)){
+  print( as.character(x) )
+  print( mydata %>% filter(cluster==x) %>% dplyr::select(Geneid) %>% .$Geneid %>% unique(), quote=FALSE )
+}
 ```
 
 ### Expression of the highest loading genes in the first 3 PCs
@@ -479,24 +534,29 @@ plot_dendro(as.dendrogram(rhc), xmin=-1, width= 800)
 ```{r fig.height=12, fig.width=10}
 order_heat <- function(x, y) {
   sm <- y[rownames(y) %in% x,]
-  rhc <- hclust(dist(scale(sm, center=FALSE, scale=TRUE), method='euclidean'), method=clustmeth)
-  rord <- rownames(sm)[rhc$order]
-  chc <- hclust(dist(t(sm), method='euclidean'), method=clustmeth)
+  
+  # Find optimal number of clusters by silhouette.
+  sil <- data.frame(k = 2:min(cmax, nrow(sm) -1),
+                    avg_sil = vapply(2:min(cmax, nrow(sm)-1), function(k) { silhouette_score(k, sm) }, double(1)) )
+  copt <-sil$k[sil$avg_sil == max(sil$avg_sil)]
+  # Cluster the samples.
+  chc <- hclust(dist(t(sm)), method=clustmeth)    # Same genes for each sample, should not need scaling.
   cord <- colnames(sm)[chc$order]
-  dt <- sm %>%
-        as.data.frame() %>%
-        rownames_to_column(var='Geneid') %>%
-        mutate(rowmeans = rowMeans2(as.matrix(sm))) %>%
-        gather(key='Sample', value='Transformed_Count', -Geneid, -rowmeans) %>%
-        mutate(Transformed_Count = Transformed_Count - rowmeans) %>%    # Center transformed count values around their cross-replicate mean
-                                                                        # Of interest are similarities/differences among samples
-        mutate(Sample = ordered(.$Sample, levels=cord)) %>%      # assign sample order
-        mutate(Geneid = ordered(.$Geneid, levels=rord))              # assign gene order
-  return(dt)
+
+  fit <- kmeans(sm, copt, nstart=100)
+  
+  # Append cluster assignment
+  mydata <- data.frame(sm, cluster=as.factor(fit$cluster), check.names = FALSE) %>% 
+    mutate(Geneid = rownames(sm)) %>%
+    gather(key="Sample", value="Expression", -Geneid, -cluster) %>%
+    mutate(Sample = factor(.$Sample, levels=cord))     # assign sample order 
+  
+  return(mydata)
 }
 
 print(
-  ggplot(order_heat(hi1, mat), aes(x=Sample, y=Geneid, fill=Transformed_Count)) +
+  ggplot(order_heat(hi1, mat), aes(x=Sample, y=Geneid, fill=Expression)) +
+    facet_grid(cluster ~ ., scales= "free", drop = TRUE) +
     geom_tile() +
     scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
     ggtitle( paste('Top', length(hi1), 'high-loading genes for PC1') ) +
@@ -510,7 +570,8 @@ print(
 )
 
 print(
-  ggplot(order_heat(hi2, mat), aes(x=Sample, y=Geneid, fill=Transformed_Count)) +
+  ggplot(order_heat(hi2, mat), aes(x=Sample, y=Geneid, fill=Expression)) +
+    facet_grid(cluster ~ ., scales= "free", drop = TRUE) +
     geom_tile() +
     scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
     ggtitle( paste('Top', length(hi2), 'high-loading genes for PC2') ) +
@@ -524,7 +585,8 @@ print(
 )
 
 print(
-  ggplot(order_heat(hi3, mat), aes(x=Sample, y=Geneid, fill=Transformed_Count)) +
+  ggplot(order_heat(hi3, mat), aes(x=Sample, y=Geneid, fill=Expression)) +
+    facet_grid(cluster ~ ., scales= "free", drop = TRUE) +
     geom_tile() +
     scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
     ggtitle( paste('Top', length(hi3), 'high-loading genes for PC3') ) +
@@ -537,7 +599,6 @@ print(
           plot.margin = margin(0.5, 0.5, 0.5, 2, "cm"))
 )
 ```
-
 
 
 
