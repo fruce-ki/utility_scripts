@@ -528,7 +528,7 @@ mydata %>% group_by(cluster) %>%
   summarise(Num_of_Genes = length(unique(Geneid)))
 
 for (x in unique(mydata$cluster)){
-  print( as.character(x) )
+  print( paste('Genes in cluster', as.character(x)) )
   print( mydata %>% filter(cluster==x) %>% dplyr::select(Geneid) %>% .$Geneid %>% unique(), quote=FALSE )
 }
 ```
@@ -588,7 +588,7 @@ p3 <- ggplot(order_heat(hi3, mat), aes(x=Sample, y=Geneid, fill=Expression)) +
     facet_grid(cluster ~ ., scales= "free", drop = TRUE) +
     geom_tile() +
     scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
-    ggtitle( 'PC3', subtitle = paste('Top', length(hi1)) ) +
+    ggtitle( 'PC3', subtitle = paste('Top', length(hi3)) ) +
     theme(panel.background = element_rect(fill='white'),
           # axis.text.y = element_blank(),
           # axis.title.y = element_blank(),
