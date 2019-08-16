@@ -562,7 +562,7 @@ p1 <- ggplot(order_heat(hi1, mat), aes(x=Sample, y=Geneid, fill=Expression)) +
     facet_grid(cluster ~ ., scales= "free", drop = TRUE) +
     geom_tile() +
     scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
-    ggtitle( 'PC1', subtitle = paste('Top', length(hi1)) ) +
+    ggtitle( 'PC1' ) +
     theme(panel.background = element_rect(fill='white'),
           # axis.text.y = element_blank(),
           # axis.title.y = element_blank(),
@@ -575,7 +575,7 @@ p2 <- ggplot(order_heat(hi2, mat), aes(x=Sample, y=Geneid, fill=Expression)) +
     facet_grid(cluster ~ ., scales= "free", drop = TRUE) +
     geom_tile() +
     scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
-    ggtitle( 'PC2', subtitle = paste('Top', length(hi2)) ) +
+    ggtitle( 'PC2' ) +
     theme(panel.background = element_rect(fill='white'),
           # axis.text.y = element_blank(),
           # axis.title.y = element_blank(),
@@ -588,7 +588,7 @@ p3 <- ggplot(order_heat(hi3, mat), aes(x=Sample, y=Geneid, fill=Expression)) +
     facet_grid(cluster ~ ., scales= "free", drop = TRUE) +
     geom_tile() +
     scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
-    ggtitle( 'PC3', subtitle = paste('Top', length(hi3)) ) +
+    ggtitle( 'PC3' ) +
     theme(panel.background = element_rect(fill='white'),
           # axis.text.y = element_blank(),
           # axis.title.y = element_blank(),
