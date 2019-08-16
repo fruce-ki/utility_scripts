@@ -26,6 +26,8 @@ library(htmltools)
 # library(topGO)
 ```
 
+Input
+
 ```{r}
 ## INPUT
 
@@ -34,6 +36,8 @@ dedir <- 'path/to/DE/dir'
 defile <- 'deseq2.RDS'
 resdir <- NULL
 ```
+
+Parameters
 
 ```{r echo=TRUE, collapse=FALSE}
 # PARAMETERS
@@ -47,7 +51,7 @@ ndetop <- 100 # top DE genes
 ntop <- 500    # top variable genes for PCA construction
 
 # Max number of clusters to consider for k-means
-cmax <- 20
+cmax <- 15
 # Hierarchical cxlustering distance method
 clustmeth <- 'complete'
 scl <- FALSE           # VST tranformed counts are already scaled.
@@ -60,9 +64,9 @@ colDataAnn <- colData(dds)
 # Set up gene_id => gene_name lookup.   (gene_id as both column and rowname)
 anno_df <- NULL
 # anno_df <- readRDS('~/mm_mart.RDS')
-# anno_df <- get_annotation(dds = dds,
-#                           biomart_dataset = "mmusculus_gene_ensembl",
-#                           idtype = "ensembl_gene_id")
+anno_df <- get_annotation(dds = dds,
+                          biomart_dataset = "mmusculus_gene_ensembl",
+                          idtype = "ensembl_gene_id")
 
 samples <- NULL
 # Define sample aliases and order (but order will be overriden by clustering)
@@ -72,7 +76,7 @@ if ('Name' %in% names(colDataAnn)) {
   samples <- as.character(colDataAnn[['Name']])
 }
 
-# Determine number of clusters by silhouette.
+# Determine number of k-means clusters by silhouette.
 silhouette_score <- function(k, mat){
   km <- kmeans(mat, centers = k, nstart=100)
   ss <- silhouette(km$cluster, dist(mat))
@@ -80,6 +84,7 @@ silhouette_score <- function(k, mat){
 }
 ```
 
+Extract data
 
 ```{r message=FALSE}
 # EXTRACT DATA
@@ -137,6 +142,11 @@ colnames(ddc) <- colDataAnn[colnames(ddc), "Name"]
 if (!is.null(anno_df)) {
   rownames(ddc) <- anno_df$gene_name[match(rownames(ddc), anno_df$gene_id)]
 }
+# Transformed counts
+mat <- assay(ddvst)
+# Centre on cross-sample means, to boost contrast.
+rowmeans <- rowMeans2(mat)
+mat <- apply(mat, 2, function(x) { x - rowmeans })
 
 
 # Differential Expression
@@ -158,7 +168,7 @@ ddde <- lapply(coefficients, function(name) {
           arrange(desc(polar_dist), desc(abs(log2FoldChange)), mlp)    # Prioritize points in the periphery
   # Rename genes
   if (!is.null(anno_df)) {         
-    de[["feature"]] <- anno_df$gene_name[match(.$featureID, anno_df$gene_id)]
+    de[["feature"]] <- anno_df$gene_name[match(de$featureID, anno_df$gene_id)]
   } else {
     de[["feature"]] <- de[['featureID']]
   }
@@ -242,34 +252,32 @@ for(name in coefficients) {         # de <- ddde[1]
   
   print(head(detop$feature, n=ndetop), quote=FALSE)
   
+  # Extract vst counts.
+  sm <- mat[detop$feature, ]
+  
+  # Cluster columns (hclust) and rows (by DE sign)
+  chc <- hclust(dist(t(sm)), method=clustmeth)    # Same genes for each sample, should not need scaling.
+  cord <- colnames(sm)[chc$order]
+  mydata <- data.frame(sm, 
+                       DE=vapply(detop$log2FoldChange, function(fc) {ifelse(fc>0, 'LFC (+)', 'LFC (-)')}, character(1)),
+                       check.names = FALSE) %>% 
+    rownames_to_column(var="Geneid") %>%
+    gather(key="Sample", value="Expression", -Geneid, -DE) %>%
+    mutate(Sample = factor(.$Sample, levels=cord))     # assign sample order 
+  
   # Filtered interactive volcano
   p3 <- ggplot(detop, aes(x=log2FoldChange, y=mlp, label=feature)) +
           geom_hline(yintercept=-log10(pcutoff), linetype = 'dotted', colour="lightblue") +
           geom_vline(xintercept=lfcthreshold, linetype = 'dotted', colour="lightblue") +
           geom_vline(xintercept=-lfcthreshold, linetype = 'dotted', colour="lightblue") +
           geom_point(shape=16, size=1) +
-          scale_y_continuous(limits=c(0,NA)) +
+          scale_y_continuous(limits=c(0, NA)) +
           labs(title=name, y='-log10 Padj', x='log2 FC') +
           theme(panel.background = element_rect(fill='white'))
   
-  # Extract vst counts.
-  mat <- assay(ddvst)[detop$feature, ]
-  
-  # Cluster
-  sil <- data.frame(k = 2:min(cmax, nrow(mat) -1),
-                    avg_sil = vapply(2:min(cmax, nrow(mat)-1), function(k) { silhouette_score(k, mat) }, double(1)) )
-  copt <-sil$k[sil$avg_sil == max(sil$avg_sil)]
-  chc <- hclust(dist(t(mat)), method=clustmeth)    # Same genes for each sample, should not need scaling.
-  cord <- colnames(mat)[chc$order]
-  fit <- kmeans(mat, copt, nstart=100)
-  mydata <- data.frame(mat, cluster=as.factor(fit$cluster), check.names = FALSE) %>% 
-    mutate(Geneid = rownames(mat)) %>%
-    gather(key="Sample", value="Expression", -Geneid, -cluster) %>%
-    mutate(Sample = factor(.$Sample, levels=cord))     # assign sample order 
-  
   # Heatmap
   p4 <- ggplot(mydata, aes(x=Sample, y=Geneid, fill=Expression)) +
-          facet_grid(cluster ~ ., scales= "free", drop = TRUE) +
+          facet_grid(DE ~ ., scales= "free", drop = TRUE) +
           geom_tile() +
           scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
           # ggtitle(name) +
@@ -442,12 +450,8 @@ Optimal number of clusters.
 # Cluster the genes.
 
 # Top variable genes
-topVarGenes <- order(rowVars(assay(ddvst)), decreasing=TRUE)[1:ntop]
-# Transformed counts
-mat <- assay(ddvst)[topVarGenes, ]
-# Centre on cross-sample means, to boost contrast.
-rowmeans <- rowMeans2(mat)
-mat <- apply(mat, 2, function(x) { x - rowmeans })
+topVarGenes <- order(rowVars(mat), decreasing=TRUE)[1:ntop]
+mat <- mat[topVarGenes,]
 
 # Find optimal number of clusters by silhouette.
 sil <- data.frame(k = 2:min(cmax, nrow(mat)-1),
@@ -531,7 +535,7 @@ for (x in unique(mydata$cluster)){
 
 ### Expression of the highest loading genes in the first 3 PCs
 
-```{r fig.height=12, fig.width=10}
+```{r fig.height=12, fig.width=12}
 order_heat <- function(x, y) {
   sm <- y[rownames(y) %in% x,]
   
@@ -554,50 +558,46 @@ order_heat <- function(x, y) {
   return(mydata)
 }
 
-print(
-  ggplot(order_heat(hi1, mat), aes(x=Sample, y=Geneid, fill=Expression)) +
+p1 <- ggplot(order_heat(hi1, mat), aes(x=Sample, y=Geneid, fill=Expression)) +
     facet_grid(cluster ~ ., scales= "free", drop = TRUE) +
     geom_tile() +
     scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
-    ggtitle( paste('Top', length(hi1), 'high-loading genes for PC1') ) +
+    ggtitle( 'PC1', subtitle = paste('Top', length(hi1)) ) +
     theme(panel.background = element_rect(fill='white'),
           # axis.text.y = element_blank(),
           # axis.title.y = element_blank(),
           axis.ticks.y = element_blank(),
           axis.text.x = element_text(angle=270, hjust = 0, vjust=0.5),
           axis.title.x = element_blank(),
-          plot.margin = margin(0.5, 0.5, 0.5, 2, "cm"))
-)
+          legend.position = 'top')
 
-print(
-  ggplot(order_heat(hi2, mat), aes(x=Sample, y=Geneid, fill=Expression)) +
+p2 <- ggplot(order_heat(hi2, mat), aes(x=Sample, y=Geneid, fill=Expression)) +
     facet_grid(cluster ~ ., scales= "free", drop = TRUE) +
     geom_tile() +
     scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
-    ggtitle( paste('Top', length(hi2), 'high-loading genes for PC2') ) +
+    ggtitle( 'PC2', subtitle = paste('Top', length(hi2)) ) +
     theme(panel.background = element_rect(fill='white'),
           # axis.text.y = element_blank(),
           # axis.title.y = element_blank(),
           axis.ticks.y = element_blank(),
           axis.text.x = element_text(angle=270, hjust = 0, vjust=0.5),
-          axis.title.x = element_blank(),
-          plot.margin = margin(0.5, 0.5, 0.5, 2, "cm"))
-)
+          axis.title = element_blank(),
+          legend.position = 'top')
 
-print(
-  ggplot(order_heat(hi3, mat), aes(x=Sample, y=Geneid, fill=Expression)) +
+p3 <- ggplot(order_heat(hi3, mat), aes(x=Sample, y=Geneid, fill=Expression)) +
     facet_grid(cluster ~ ., scales= "free", drop = TRUE) +
     geom_tile() +
     scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
-    ggtitle( paste('Top', length(hi3), 'high-loading genes for PC3') ) +
+    ggtitle( 'PC3', subtitle = paste('Top', length(hi1)) ) +
     theme(panel.background = element_rect(fill='white'),
           # axis.text.y = element_blank(),
           # axis.title.y = element_blank(),
           axis.ticks.y = element_blank(),
           axis.text.x = element_text(angle=270, hjust = 0, vjust=0.5),
-          axis.title.x = element_blank(),
-          plot.margin = margin(0.5, 0.5, 0.5, 2, "cm"))
-)
+          axis.title = element_blank(),
+         legend.position = 'top')
+
+grid.arrange(arrangeGrob(p1, p2, p3, ncol=3))
 ```
 
 
