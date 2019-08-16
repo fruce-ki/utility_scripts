@@ -444,7 +444,7 @@ As used to define the Principle Components.
 
 ## Expression
 
-Optimal number of clusters.
+Infer a suggestion for the number of clusters.
 
 ```{r}
 # Cluster the genes.
@@ -457,6 +457,8 @@ mat <- mat[topVarGenes,]
 sil <- data.frame(k = 2:min(cmax, nrow(mat)-1),
                   avg_sil = vapply(2:min(cmax, nrow(mat)-1), function(k) { silhouette_score(k, mat) }, double(1)) )
 copt <-sil$k[sil$avg_sil == max(sil$avg_sil)]
+
+cat( paste("Suggesteded number of clusters:", copt) )
 
 p1 <- ggplot(sil, aes(x=k, y=avg_sil)) +
   geom_point() +
@@ -486,6 +488,11 @@ p2 <-ggplot(kink, aes(x=nc, y=wss, colour=iter)) +
   theme(legend.position = "none")
 
 grid.arrange( arrangeGrob(p1, p2, nrow=2) )
+```
+
+```{r}
+#copt = 4
+cat( paste("Using", copt, "clusters") )
 
 # K-Means Cluster Analysis
 fit <- kmeans(mat, copt, nstart=100)
