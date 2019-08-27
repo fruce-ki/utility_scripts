@@ -14,9 +14,9 @@ pileupFile = sys.argv[1]
 mutDict = dict()    # substitutions tallies and deletions
 inDict = dict()  # insertion tallies
 coverage = dict()
-noise = re.compile(r"\^\S|\$|\*")      # Read starts with mapping quality character, read ends, and deletion extensions.
-insertions = re.compile(r"[+](\d+)")   # insertion length declarations
-deletions = re.compile(r"-(\d+)")      # deletion length declarations
+noise = re.compile(r"\^\S|\$")      # Read starts with mapping quality character, or read ends.
+indel = re.compile(r"[\-+](\d+)")   # indel length declarations
+
 
 with open(pileupFile) as f:
     for line in f:
@@ -45,40 +45,32 @@ with open(pileupFile) as f:
         #              code treating position as a continuous numeric or a categorical variable, but will certainly break genome browsers etc tools that expect integer postions.
         # Deletions : Remember that read positions go vertically, not horizontally. A deletion length will be declared at one line, followed by the missing bases, 
         #             but the actual deleted bases will be in the following LINES as * characters.
-        #             I could assign the deletion to the first deleted base, but I think I'l
         
         # Delete read-end symbols, mapping qualities and deletion extensions.
         pile = noise.sub('', pile)
         
-        # Find insertions and reduce them to the leading + character, discarding length and inserted sequence.
-        for m in insertions.finditer(pile):
-            pile = re.sub(m.group(1) + '.{' + m.group(1) + '}', '', pile, 1)
-        # Isolate the insertions
-        pile2 = re.sub(r"[^+]", '', pile)
-        # Remove insertions
-        pile = re.sub(r"[+]", '', pile)
+        # Count the insertions.
+        ins = pile.count('+')
+        # Count the deletions.
+        dels = pile.count('*')
         
-        # Find deletion declarations and reduce them to the leading - character, discarding length and sequence.
-        for m in deletions.finditer(pile):
-            pile = re.sub(m.group(1) + '.{' + m.group(1) + '}', '', pile, 1)
-        # Isolate the deletion declarations.
-        pile3 = re.sub(r"[^\-]", '', pile)
-        # Remove deletion declarations.
-        pile = re.sub(r"[\-]", '', pile)
+        # Remove insertion and deletion declarations
+        for m in indel.finditer(pile):
+            pile = re.sub('[\-+]' + m.group(1) + '\S' * int(m.group(1)), '', pile, 1)        
+        # Remove deletions
+        pile = re.sub('\*', '', pile)
         
         # Sanity check after editing the bases string.
         if not len(pile) <= int(cov):
-            sys.stderr.write("Something unexpected may be going on at pos:\t" + pos + "\tlen:" + str(len(pile)) + "\tcov:" + str(cov) + "\n")
+            sys.stderr.write("Something unexpected may be going on in " + pileupFile + " at pos:\t" + pos + "\tlen:" + str(len(pile)) + "\tcov:" + str(cov) + "\n")
         
         # Tally up the insertions [+]
-        if len(pile2) > 0:
+        if ins > 0:
             inDict[chr][pos] = Counter()
-            inDict[chr][pos].update(pile2)
+            inDict[chr][pos].update({'+' : ins})
         # Tally up the deletions [-]
-        if len(pile3) > 0:
-            if not int(pos) + 1 in mutDict[chr]:
-                mutDict[chr][str(int(pos) + 1)] = Counter()
-                mutDict[chr][str(int(pos) + 1)].update(pile3)
+        if dels > 0:
+            mutDict[chr][pos].update({'-' : dels})
 
         # Don't care about strands. (presuming the substitutions is given relative to the reference base, not relative to the matching strand)
         pile = pile.upper().replace(',', '.')

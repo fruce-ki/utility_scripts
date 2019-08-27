@@ -105,6 +105,8 @@ set -e
 libname=$(basename $library)
 libname=${libname/.txt/}
 
+#################### DEMULTIPLEX & COUNT
+
 if [ $do_pre -eq 1 ]; then
   if [ $variable -eq 0 ]; then
     echo ''
@@ -115,7 +117,6 @@ if [ $do_pre -eq 1 ]; then
     
     echo ''
     echo "Demultiplexing BAM using anchor sequence."
-    # Demultiplex
     module load python-levenshtein/0.12.0-foss-2017a-python-2.7.13
     module load pysam/0.14.1-foss-2017a-python-2.7.13
     fileutilities.py T ${indir}/*.bam --loop srun ,--mem=50000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q \&
@@ -137,7 +138,7 @@ if [ $do_pre -eq 1 ]; then
     echo "Guides library to FASTA."
     cw=$(realpath $(pwd))
     cd $(dirname $library)
-    srun ~/crispr-process-nf/bin/process_library.R $library C
+    srun ~/crispr-process-nf/bin/process_library.R $(basename $library) C
     cd $cw
     
     echo ''
@@ -172,7 +173,7 @@ if [ $do_pre -eq 1 ]; then
     
     echo ''
     echo "MultiQC"
-    #wait_for_jobs fastqc  # It should be long finished by now, but better ask.
+    wait_for_jobs fastqc  # It should be long finished by now, but better ask.
     module load multiqc/1.3-foss-2017a-python-2.7.13
     srun multiqc -f -x *.run -o ${countsdir}/multiqc ${countsdir}/fastqc ${countsdir}/aligned/${libname} ${countsdir}/counts/${libname}
     module unload multiqc/1.3-foss-2017a-python-2.7.13
@@ -187,6 +188,8 @@ if [ $do_pre -eq 1 ]; then
   echo ''
   echo "Pre-processing finished!"
 fi
+
+#################### MAGECK
 
 counts="${countsdir}/counts/${libname}/counts_mageck.txt"
 if [[ ! -f $counts ]]; then
@@ -286,9 +289,11 @@ if [ $do_comparison -eq 1 ]; then
   echo "Comparisons finished!"
 fi
 
-rm -r ./work/
-rm -r ./.nextflow*
-rm timeline*
+if [ -d "./work" ]; then
+	rm -r ./work/
+	rm -r ./.nextflow*
+	rm timeline*
+fi
 
 echo ''
 echo "All done!"

@@ -35,6 +35,7 @@ basedir <- '/path/to/project/dir'
 dedir <- 'path/to/DE/dir'
 defile <- 'deseq2.RDS'
 resdir <- NULL
+# resdir <- dedir
 ```
 
 Parameters
@@ -69,8 +70,9 @@ anno_df <- get_annotation(dds = dds,
                           idtype = "ensembl_gene_id")
 
 samples <- NULL
-# Define sample aliases and order (but order will be overriden by clustering)
-#samples <- c(used1="alias1", used2="alias2", used3="alias3")
+# Define sample aliases and order (disable clustering to preserve order)
+# samples <- c(used1="alias1", used2="alias2", used3="alias3")
+dontcluster = FALSE
 # OR alias names available in covariates field.
 if ('Name' %in% names(colDataAnn)) {
   samples <- as.character(colDataAnn[['Name']])
@@ -453,19 +455,18 @@ Infer a suggestion for the number of clusters.
 topVarGenes <- order(rowVars(mat), decreasing=TRUE)[1:ntop]
 mat <- mat[topVarGenes,]
 
-# Find optimal number of clusters by silhouette.
+# Find optimal number of row clusters by silhouette.
 sil <- data.frame(k = 2:min(cmax, nrow(mat)-1),
                   avg_sil = vapply(2:min(cmax, nrow(mat)-1), function(k) { silhouette_score(k, mat) }, double(1)) )
 copt <-sil$k[sil$avg_sil == max(sil$avg_sil)]
-
-cat( paste("Suggesteded number of clusters:", copt) )
+cat( paste("Suggesteded number of row clusters:", copt) )
 
 p1 <- ggplot(sil, aes(x=k, y=avg_sil)) +
   geom_point() +
   geom_line() +
   geom_vline(xintercept=copt, linetype='dotted') +
   scale_x_continuous(breaks=seq(0,cmax,4), limits=c(0, cmax+1), expand=c(0,0)) +
-  labs(title="Infering optimal number of clusters", x='Number of Groups', y='Average Silhouette Scores') + 
+  labs(title="Infering number of row clusters", x='Number of Groups', y='Average Silhouette Scores') + 
   theme_bw()
 
 # Confirm number of clusters by elbow.
@@ -491,40 +492,117 @@ grid.arrange( arrangeGrob(p1, p2, nrow=2) )
 ```
 
 ```{r}
-#copt = 4
-cat( paste("Using", copt, "clusters") )
+if (!dontcluster){
+  # Find optimal number of column clusters by silhouette.
+  sil <- data.frame(k = 2:min(cmax, nrow(t(mat))-1),
+                    avg_sil = vapply(2:min(cmax, nrow(t(mat))-1), function(k) { silhouette_score(k, t(mat)) }, double(1)) )
+  copt2 <-sil$k[sil$avg_sil == max(sil$avg_sil)]
+  cat( paste("Suggesteded number of column clusters:", copt2) )
+  
+  p1 <- ggplot(sil, aes(x=k, y=avg_sil)) +
+    geom_point() +
+    geom_line() +
+    geom_vline(xintercept=copt2, linetype='dotted') +
+    scale_x_continuous(breaks=seq(0,cmax,4), limits=c(0, cmax+1), expand=c(0,0)) +
+    labs(title="Infering number of column clusters", x='Number of Groups', y='Average Silhouette Scores') + 
+    theme_bw()
+  
+  # Confirm number of clusters by elbow.
+  kink <- as.data.frame(lapply(1:100, function(i){
+              c( (nrow(mat) - 1) * sum(apply(mat, 2, var)), 
+                 vapply(2:cmax, function(k) { 
+                   sum( kmeans(mat, centers=k)$withinss )
+                  }, double(1)) )
+          })) %>%
+    mutate(nc = 1:cmax) %>%
+    gather(key="iter", value=wss, -nc)
+  
+  p2 <-ggplot(kink, aes(x=nc, y=wss, colour=iter)) +
+    # geom_point() +
+    geom_line(alpha=0.1) +
+    geom_vline(xintercept=copt2, linetype='dotted') +
+    scale_x_continuous(breaks=seq(0,cmax,4), limits=c(0, cmax+1), expand=c(0,0)) +
+    labs(x="Number of Groups", y="Within-group Sums of Squares") +
+    theme_bw() +
+    theme(legend.position = "none")
+  
+  grid.arrange( arrangeGrob(p1, p2, nrow=2) )
+}
+```
 
-# K-Means Cluster Analysis
+```{r}
+# Override suggested number of clusters.
+copt = 10   # 10 cellines/conditions at most I should expect 10 clusters of rows
+# copt2 = 5   
+
+# K-Means Clustering of rows
+cat( paste("Using", copt, "row clusters.") )
 fit <- kmeans(mat, copt, nstart=100)
-# get cluster means
+# cluster means
 aggregate(mat, by=list(fit$cluster), FUN=mean)
+
+if (!dontcluster){
+  # K-Means Clustering of columns
+  fit2 <- kmeans(t(mat), copt2, nstart=100)
+  
+  cat( paste("Using", copt2, "column clusters.") )
+}
 ```
 
 Centred, variance-stablised expression matrix.
 
 ```{r fig.height=12, fig.width=10}
-
+cord <- NULL
 # Cluster the samples.
-chc <- hclust(dist(t(mat)), method=clustmeth)    # Same genes for each sample, should not need scaling.
-cord <- colnames(mat)[chc$order]
+if (dontcluster){
+  cord <- samples
+} else {
+  cord <- colnames(mat)[order(fit2$cluster)]
+}
 
 # Append cluster assignment
 mydata <- data.frame(mat, cluster=as.factor(fit$cluster), check.names = FALSE) %>% 
   mutate(Geneid = rownames(mat)) %>%
   gather(key="Sample", value="Expression", -Geneid, -cluster) %>%
-  mutate(Sample = factor(.$Sample, levels=cord))     # assign sample order 
-      
-ggplot(mydata, aes(x=Sample, y=Geneid, fill=Expression)) +
-  facet_grid(cluster ~ ., scales= "free", drop = TRUE) +
-  geom_tile() +
-  scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
-  ggtitle( paste('Top', ntop, 'high-variance genes used for PCA') ) +
-  theme(panel.background = element_rect(fill='white'),
-        axis.text.y = element_blank(),
-        axis.title.y = element_blank(),
-        axis.ticks.y = element_blank(),
-        axis.text.x = element_text(angle=270, hjust = 0, vjust=0.5),
-        axis.title.x = element_blank())
+  mutate(Sample = factor(.$Sample, levels=cord))    # assign sample order 
+
+print(
+  ggplot(mydata, aes(x=Sample, y=Geneid, fill=Expression)) +
+    facet_grid(cluster ~ ., scales= "free", drop = TRUE) +
+    geom_tile() +
+    scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
+    ggtitle( paste('Top', ntop, 'high-variance genes used for PCA') ) +
+    theme(panel.background = element_rect(fill='white'),
+          axis.text.y = element_blank(),
+          axis.title.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          axis.text.x = element_text(angle=270, hjust = 0, vjust=0.5),
+          axis.title.x = element_blank())
+)
+```
+
+```{r fig.height=12, fig.width=10}
+# mydata[grepl('_DT_', mydata$Sample), "Treatment"] <- "treated"
+# mydata[!grepl('_DT_', mydata$Sample), "Treatment"] <- "untreated"
+# mydata[grepl('_R_', mydata$Sample), "Resistance"] <- "resistant"
+# mydata[!grepl('_R_', mydata$Sample), "Resistance"] <- "naive"
+# mydata[grepl('Depl', mydata$Sample), "Cell"] <- "Depleted1"
+# mydata[grepl('312A', mydata$Sample), "Cell"] <- "312A"
+# mydata[grepl('314C', mydata$Sample), "Cell"] <- "314C"
+# 
+# print(
+#   ggplot(mydata, aes(x=Sample, y=Geneid, fill=Expression)) +
+#     facet_grid(cluster ~ paste(Treatment, Resistance), scales= "free", drop = TRUE) +
+#     geom_tile() +
+#     scale_fill_gradientn(colours=c("darkblue", "steelblue", "white", "darkorange", "darkred")) +
+#     ggtitle( paste('Top', ntop, 'high-variance genes, split by condition') ) +
+#     theme(panel.background = element_rect(fill='white'),
+#           axis.text.y = element_blank(),
+#           axis.title.y = element_blank(),
+#           axis.ticks.y = element_blank(),
+#           axis.text.x = element_text(angle=270, hjust = 0, vjust=0.5),
+#           axis.title.x = element_blank())
+# )
 ```
 
 Genes
@@ -605,6 +683,9 @@ p3 <- ggplot(order_heat(hi3, mat), aes(x=Sample, y=Geneid, fill=Expression)) +
          legend.position = 'top')
 
 grid.arrange(arrangeGrob(p1, p2, p3, ncol=3))
+# print(p1)
+# print(p2)
+# print(p3)
 ```
 
 

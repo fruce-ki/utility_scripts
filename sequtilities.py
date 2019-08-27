@@ -175,7 +175,7 @@ def samPatternStats(pattern, bam='-', bco=-4, bcl=4, literal=True, mmCap=2, wild
     # Search the pattern line by line.
     for line in samin:
         reads = reads + 1
-        seq = line.get_query_sequence()
+        seq = line.query_sequence
         seqlen = len(seq)
         Lengths.update( ["\t".join(['Length', str(seqlen), '.', '.'])] )
         whichMinDist = None
