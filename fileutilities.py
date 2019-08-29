@@ -569,6 +569,20 @@ def get_columns_manual(file=None, cols=[0], colSep=["\t"], header=False, index=N
         f = open(file)
     if alias is None:
         alias = FilesList.autoalias(file)
+    # Expand column ranges
+    expandedcols = []
+    for c in cols:
+        v = str(c).split(":")
+        if len(v) == 1:
+            try:
+                expandedcols.append(int(v[0]))
+            except ValueError:
+                expandedcols.append(labels.index(v[0]))
+        else:
+            try:
+                expandedcols.extend(list(range(int(v[0]), int(v[1]) + 1)))
+            except TypeError:
+                expandedcols.extend(list(range(labels.index(v[0]), labels.index(v[1]) + 1)))
     # Import data.
     keyhead = None
     values = []
@@ -589,19 +603,6 @@ def get_columns_manual(file=None, cols=[0], colSep=["\t"], header=False, index=N
                 keyhead = str(fields[index])
             # Get columns.
             selection = []
-            expandedcols = []
-            for c in cols:
-                v = str(c).split(":")
-                if len(v) == 1:
-                    try:
-                        expandedcols.append(int(v[0]))
-                    except ValueError:
-                        expandedcols.append(labels.index(v[0]))
-                else:
-                    try:
-                        expandedcols.extend(list(range(int(v[0]), int(v[1]) + 1)))
-                    except TypeError:
-                        expandedcols.extend(list(range(labels.index(v[0]), labels.index(v[1]) + 1)))
             for i in expandedcols:
                 try:
                     selection.append(fields[i])
