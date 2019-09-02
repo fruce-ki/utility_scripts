@@ -12,10 +12,10 @@ library(ggplot2)
 library(ggrepel)
 library(plotly)
 
-#args <- c('~/', 'test', 'NULL', 'no', 'HDR1:280:6,HDR2:280:6', '/Volumes/groups/pavri/Kimon/ursi/mutPEseq/round5/process/in-vivo/HDR2/86754_B18_C2_G_e1_x25.extendedFrags_sorted_3-10.stats')
-#args <- c('~/', 'test', 'NULL', 'no', '-:0:0', '/Volumes/groups/pavri/Kimon/ursi/mutPEseq/round5/process/in-vivo/HDRc/86753_B18_Cc_G_e2.aln_3-10.stats')
-#args <- c('~/', 'test', 'NULL', 'no', '-:0:0', '/Volumes/groups/pavri/Kimon/ursi/mutPEseq/yeap2015/process/pro/SRS1052796/SRR2229665_x25.extendedFrags_sorted_1-2.stats', '/Volumes/groups/pavri/Kimon/ursi/mutPEseq/yeap2015/process/pro/SRS1052796/SRR2229665_x25.extendedFrags_sorted_3-10.stats', '/Volumes/groups/pavri/Kimon/ursi/mutPEseq/yeap2015/process/pro/SRS1052796/SRR2229665_x25.extendedFrags_sorted11-30.stats')
 args <- commandArgs(trailingOnly = TRUE)
+#args <- c('~/', 'test', 'NULL', 'no', 'HDR1:280:6,HDR2:280:6', '/Volumes/groups/pavri/Kimon/ursi/mutPEseq/round5/process/in-vivo/HDR2/86754_B18_C2_G_e1_x25.extendedFrags_sorted_3-10.stats')
+#args <- c('~/', 'test', 'NULL', 'no', '-:0:0', '/Volumes/groups/pavri/Kimon/ursi/mutPEseq//round5/process/in-vivo/HDR2/86762-86754_C2_GCB1-Ge1_1-2.substracted.stats')
+#args <- c('~/', 'test', 'NULL', 'no', '-:0:0', '/Volumes/groups/pavri/Kimon/ursi/mutPEseq/yeap2015/process/pro/SRS1052796/SRR2229665_x25.extendedFrags_sorted_1-2.stats', '/Volumes/groups/pavri/Kimon/ursi/mutPEseq/yeap2015/process/pro/SRS1052796/SRR2229665_x25.extendedFrags_sorted_3-10.stats', '/Volumes/groups/pavri/Kimon/ursi/mutPEseq/yeap2015/process/pro/SRS1052796/SRR2229665_x25.extendedFrags_sorted11-30.stats')
 outdir <- args[1]
 prefix <- args[2]             # for the collective PDF and HTML output files
 ymax <- args[3]               # "NULL" for automatic
@@ -86,8 +86,15 @@ for (sf in statsfiles){
   posdata[grepl('+', type, fixed=TRUE), type := 'ins']
   posdata[grepl('-', type, fixed=TRUE), type := 'del']
   
-  # Fix order of categories.
-  posdata[, type := ordered(type, levels=c("ref", "C>A", "G>A", "T>A", "A>C", "G>C", "T>C", "A>G", "C>G", "T>G", "A>T", "C>T", "G>T", "ins", "del"))]
+  # Fix number, order and colour of categories.
+  levvec <- c("ref", "C>A", "G>A", "T>A", "A>C", "G>C", "T>C", "A>G", "C>G", "T>G", "A>T", "C>T", "G>T", "ins", "del", "any", "point_mut")
+  colvec <- c('ref'="transparent", 'ins'="grey50", 'del'="black", 
+              'any' = "aquamarine3", 'point_mut' = "cyan3",
+              'C>A'="gold",      'G>A'="orange",  'T>A'="darkorange", 
+              'A>C'="steelblue", 'G>C'="blue",    'T>C'="darkblue", 
+              'A>G'='violet',    'C>G'="magenta", 'T>G'="purple", 
+              'A>T'="red",       'C>T'="red3",    'G>T'='red4')
+  posdata[, type := ordered(type, levels=levvec)]
   
   # Calculate frequencies and aggregate frequencies by position
   posdata[, freq := count / depth]
@@ -103,8 +110,9 @@ for (sf in statsfiles){
     ggplot(aes(x = type, y = frequency, fill=type)) +
       facet_grid( . ~ seq) +
       geom_bar(stat = 'identity', width = 0.9) +
+      scale_fill_manual(values=colvec) + 
       ylab('Number of positions') +
-      ggtitle("Number of positions per mutation type.", subtitle=basename(sf)) +
+      ggtitle("Number of positions per mutation type", subtitle=basename(sf)) +
       guides(fill="none") +
       theme(panel.background = element_rect(fill="white"), 
             panel.grid.major.y = element_line(colour="grey95"), 
@@ -119,9 +127,9 @@ for (sf in statsfiles){
     ggplot(aes(x = type, y = frequency, fill=type)) +
       facet_wrap( . ~ seq) +
       geom_bar(stat = 'identity', width=0.9) +
-      #scale_y_log10() +
+      scale_fill_manual(values=colvec) + 
       ylab('Number of reads') +
-      ggtitle("Number of reads showing each mutation type.", subtitle=basename(sf)) +
+      ggtitle("Number of reads showing each mutation type", subtitle=basename(sf)) +
       guides(fill="none") +
       theme(panel.background = element_rect(fill="white"), 
             panel.grid.major.y = element_line(colour="grey95"), 
@@ -135,8 +143,8 @@ for (sf in statsfiles){
   maxfreq <- max(posdata %>% filter(type != 'ref') %>% select(aggrfreq))
   if(ymax != 'NULL')
     maxfreq <- as.numeric(ymax)
-  # Automatically determine an additional zoomed level, to get around a few extremely talk peaks that squash everything else.
-  zoomfreq <- quantile(posdata$aggrfreq, probs=c(0.99))
+  # Automatically determine an additional zoomed level, to get around a few extremely tall peaks that squash everything else.
+  #zoomfreq <- quantile(posdata$aggrfreq, probs=c(0.99))
   
   
   # Plot mutations pileup
@@ -149,40 +157,42 @@ for (sf in statsfiles){
       geom_hline(aes(yintercept=quantile(aggrfreq, 0.25)), linetype='dotted', alpha=0.4) +
       geom_hline(aes(yintercept=median(aggrfreq)), linetype='dotdash', alpha=0.4) +
       geom_hline(aes(yintercept=quantile(aggrfreq, 0.75)), linetype='dashed', alpha=0.4) +
-      geom_line(aes(y=depth / maxdepth * maxfreq * 1.1), colour='grey80') +
       geom_bar(aes(y = aggrfreq, fill=aggrfreq), stat = 'identity') +
-      scale_y_continuous('Frequency (bars)', sec.axis = sec_axis(trans= ~ . * maxdepth / maxfreq / 1.2, name = "Coverage (line)")) +
       scale_fill_gradient(low='blue', high='magenta') +
       scale_x_continuous('Position', limits = c(minpos, maxpos), expand = c(0, 0)) +
       # coord_cartesian(ylim=c(NULL, 1.1 * maxfreq)) +
-      ggtitle("Fraction of reads with mutation at each position.", subtitle=basename(sf)) +
+      labs(title="Fraction of reads containing each mutated position", subtitle=basename(sf), y='Frequency') +
       theme(legend.position = 'none',
             panel.background = element_rect(fill="white"),
             panel.grid.major.y = element_line(colour='grey95'),
             panel.grid.minor.y = element_line(colour='grey95'))
-  print(pp + geom_label_repel(data=posdata %>%
-                                filter(mutated) %>%
-                                select(pos, aggrfreq) %>%
-                                unique() %>%
-                                filter(aggrfreq >= quantile(posdata$aggrfreq, 0.95)),
-                              aes(y=aggrfreq, label=pos), 
-                              force =1, min.segment.length = 0, label.size = 0, fill="transparent", xlim=c(minpos, maxpos))
-  )
-  print(pp + coord_cartesian(ylim=c(0, zoomfreq)) +
-          geom_label_repel(data=posdata %>%
-                             filter(mutated) %>%
-                             select(pos, aggrfreq) %>%
-                             unique() %>%
-                             filter(aggrfreq >= quantile(posdata$aggrfreq, 0.95)),
-                           aes(y=aggrfreq, label=pos), 
-                           force = 1, min.segment.length = 0, label.size = 0, fill="transparent", xlim=c(minpos, maxpos), ylim=c(0, zoomfreq))
-  )
+  # Optimal zoom level. Label the position of the top 5% highest peaks. Add read coverage track.
+  if (all( unique(posdata$depth) %in% c(0, 1) )) {   # Most probably pre-computed frequencies, in which case the coverage data is meaningless.
+    print(pp +
+            geom_label_repel(data=posdata %>% filter(mutated) %>% select(pos, aggrfreq) %>% unique() %>% filter(aggrfreq >= quantile(posdata$aggrfreq, 0.95)),
+                             aes(y=aggrfreq, label=pos), 
+                             force =1, min.segment.length = 0, label.size = 0, fill="transparent", xlim=c(minpos, maxpos))
+    )
+  } else {
+    print(pp +
+            geom_line(aes(y=depth / maxdepth * maxfreq * 1.1), colour='grey80') +
+            geom_label_repel(data=posdata %>% filter(mutated) %>% select(pos, aggrfreq) %>% unique() %>% filter(aggrfreq >= quantile(posdata$aggrfreq, 0.95)),
+                             aes(y=aggrfreq, label=pos), 
+                             force =1, min.segment.length = 0, label.size = 0, fill="transparent", xlim=c(minpos, maxpos)) +
+            scale_y_continuous(sec.axis = sec_axis(trans= ~ . * maxdepth / maxfreq / 1.2, name = "Coverage (line)"))
+    )
+  }
+  # Zoomed in to crop the top 1% of highest peaks, to mitigate against a few disproportionately tall peaks squashing the rest of the plot.
+  # print(pp + coord_cartesian(ylim=c(0, zoomfreq)))
+  # Zoomed out to full y-axis range, to put into perspective the mutation levels across different samples.
+  print(pp + coord_cartesian(ylim=c(0, 1)))
+  
 
   if(collectiveonly != 'yes'){
     # Plot interactive mutations pileup for each input
     htmlwidgets::saveWidget(ggplotly(posdata %>%
       filter(mutated) %>%
-      mutate(type = factor(type, levels=c("ref", "C>A", "G>A", "T>A", "A>C", "G>C", "T>C", "A>G", "C>G", "T>G", "A>T", "C>T", "G>T", "ins", "del"))) %>%
+      mutate(type = factor(type, levels=levvec)) %>%
       arrange(freq) %>%
       ggplot(aes(x = pos, y = freq)) +
         facet_grid(seq ~ .) +
@@ -191,14 +201,10 @@ for (sf in statsfiles){
         geom_hline(aes(yintercept=quantile(aggrfreq, 0.75)), linetype='dashed', alpha=0.4) +
         geom_bar(aes(fill=type), stat = 'identity', position=position_stack()) +
         scale_x_continuous('Position', limits = c(minpos, maxpos)) +
-        scale_fill_manual(values=c('ref'="transparent", 'ins'="grey50", 'del'="black",
-                                   'C>A'="gold", 'G>A'="orange", 'T>A'="darkorange", 
-                                   'A>C'="steelblue", 'G>C'="blue", 'T>C'="darkblue", 
-                                   'A>G'='violet', 'C>G'="magenta", 'T>G'="purple", 
-                                   'A>T'="red", 'C>T'="red3", 'G>T'='red4')) + 
+        scale_fill_manual(values=colvec) + 
         ylab("Frequency") +
         # coord_cartesian(ylim=c(NULL, 1.1 * maxfreq)) +
-        ggtitle("Fraction of reads with mutation at each position.", subtitle=basename(sf)) +
+        ggtitle("Fraction of reads with mutation at each position", subtitle=basename(sf)) +
         guides(ncol=4, by.row=TRUE) +
         theme(panel.background = element_rect(fill="white"),
               panel.grid.major.y = element_line(colour='grey95'),
@@ -222,8 +228,6 @@ maxpos <- max(mega$pos)
 maxfreq <- max(mega %>% filter(type != 'ref') %>% select(aggrfreq))
 if(ymax != 'NULL')
   maxfreq <- as.numeric(ymax)
-# Automatically determine an additional zoomed level, to get around a few extremely talk peaks that squash everything else.
-zoomfreq <- quantile(mega$aggrfreq, probs=c(0.99), na.rm = TRUE)
 
 # Plot mutations collective pileups
 htmlwidgets::saveWidget(ggplotly(
@@ -236,10 +240,10 @@ htmlwidgets::saveWidget(ggplotly(
       geom_bar(stat = 'identity', position=position_identity(), alpha=0.4, colour='transparent') +
       scale_x_continuous("Position", limits = c(minpos, maxpos)) +
       scale_y_continuous('Frequency') +
-      ggtitle("Fraction of reads with mutation at each position.") +
+      ggtitle("Fraction of reads with each mutated position") +
       theme(panel.background = element_rect(fill="white"),
             panel.grid.major.y = element_line(colour='grey95'),
-        panel.grid.minor.y = element_line(colour='grey95'))
+            panel.grid.minor.y = element_line(colour='grey95'))
   ),
   file.path(outdir, paste0(prefix, '_pileups.html'))
 )
@@ -255,7 +259,7 @@ htmlwidgets::saveWidget(ggplotly(
     geom_line(alpha=0.4) +
     scale_x_continuous('Position', limits = c(minpos, maxpos)) +
     scale_y_continuous('Coverage') +
-    ggtitle("Fraction of reads with mutation at each position.") +
+    ggtitle("Number of reads covering each position") +
     theme(legend.position = 'bottom',
           panel.background = element_rect(fill="white"),
           panel.grid.major.y = element_line(colour='grey95'),
