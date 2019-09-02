@@ -625,8 +625,8 @@ def get_columns_manual(file=None, cols=[0], colSep=["\t"], header=False, index=N
     df.astype(str, copy=False)   		# Uniform string type is simplest and safest.
     df = prepare_df(df, myalias=alias, keyCol=index, header=header, cols=expandedcols,
                     keyhead=keyhead, appendNum=True if len(expandedcols)>1 else False)
-    if index is not None:
-        df.drop(alias+"_|my_garbage_label_row_key", 1, inplace=True)
+    if alias+"_|my_garbage_label_row_key" in df.columns:
+            df.drop(alias+"_|my_garbage_label_row_key", 1, inplace=True)
     return df
 
 
