@@ -33,8 +33,10 @@ do_pre=0
 do_comparison=0
 guideLen=20
 infer_entrez=1
+legacy=""
+mageck_branch=""
 # Parse options.
-while getopts 'i:l:b:n:c:m:r:C:G:z:Z:p:s:u:d:O:g:M:A:E:eVr12' flag; do
+while getopts 'i:l:b:B:n:c:m:r:C:G:z:Z:p:s:u:d:O:g:M:A:E:eVr12L' flag; do
   case "${flag}" in
     i) indir="${OPTARG}" ;;           # Input directory with unaligned BAMs
     l) library="${OPTARG}" ;;         # sgRNA library
@@ -60,6 +62,8 @@ while getopts 'i:l:b:n:c:m:r:C:G:z:Z:p:s:u:d:O:g:M:A:E:eVr12' flag; do
     1) do_pre=1 ;;                 # Execute demultiplexing, alignment and quantification.
     2) do_comparison=1 ;;          # Execute Mageck
     e) infer_entrez=0 ;;           # Don't extract Enrtez from guide ID
+    L) legacy='--legacy' ;;			# Use mageck 0.5.5 instead of latest
+    B) mageck_branch="-r ${OPTARG}";;			# non-master branch
     *) usage ;;
   esac
 done
@@ -208,7 +212,7 @@ if [ $do_comparison -eq 1 ]; then
 
   echo ''
   echo "MAGECK."
-  nextflow run zuberlab/crispr-mageck-nf --contrasts $contrasts --counts $counts --outputDir $mageckdir --min_count $countthresh -profile ii2 --legacy
+  nextflow run zuberlab/crispr-mageck-nf --contrasts $contrasts --counts $counts --outputDir $mageckdir --min_count $countthresh -profile ii2 $legacy $mageck_branch
 
   echo ''
   echo "Rename columns."
@@ -248,15 +252,21 @@ if [ $do_comparison -eq 1 ]; then
   fi
 
   echo ''
-  echo "Merge all gene-level outputs."
+  echo "Merge all gene-level outputs and clean up duplicate group columns."
   genes="${mageckdir}/genes_all.tsv"
   if [ -f "$genes" ]; then
     rm $genes # clean up previous run, otherwise weird things happen
   fi
   srun --mem=10000 fileutilities.py T ${library}_forgenes.txt ${mageckdir}/*/${renamed}/genes_pos_stats.txt ${mageckdir}/*/${renamed}/genes_neg_stats.txt -r -i --appnd outer > $genes
+  dups=$(head -n1 $genes | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++} print "\n";')
+  srun --mem=10000 fileutilities.py T $genes -r --mrgdups $dups > ${genes/.tsv/_dedup.tsv}
+  genes="${genes/.tsv/_dedup.tsv}"
+  nc=$(perl -e '$ARGV[0] =~/^(\d+)/; print $1' $(fileutilities.py T $genes --cntcols))
+  srun --mem=10000 fileutilities.py T $genes -r --cols 0 $(expr $nc - 1) 1:$(expr $nc - 2) > ${genes/.tsv/_reord.tsv}
+  genes="${genes/.tsv/_reord.tsv}"
 
   echo ''
-  echo "Merge all guide-level outputs and clean up redundant columns."
+  echo "Merge all guide-level outputs and clean up duplicate group columns."
   guides="${mageckdir}/guides_all.tsv"
   if [ -f "$guides" ]; then
     rm $guides # clean up previous run, otherwise weird things happen
@@ -280,6 +290,8 @@ if [ $do_comparison -eq 1 ]; then
   rm ${library}_forguides.txt
   rm ${library}_forgenes.txt
   rm ${mageckdir}/genes_all.tsv
+  rm ${mageckdir}/genes_all_dedup.tsv
+  rm ${mageckdir}/genes_all_dedup_reord.tsv
   rm ${mageckdir}/guides_all.tsv
   rm ${mageckdir}/guides_all_dedup.tsv
   rm ${mageckdir}/guides_all_dedup_reord.tsv
