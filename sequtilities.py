@@ -133,7 +133,7 @@ def gtf2premrna(gtfs, filter=True):
     return result
 
 
-def samPatternStats(pattern, bam='-', bco=-4, bcl=4, literal=True, mmCap=2, wild='N', minFreq=0.01, filtered=False):
+def samPatternStats(pattern, bam='-', bco=-4, bcl=4, literal=True, mmCap=2, wild='N', minFreq=0.01, filtered=False, nreads=None):
     """Find a pattern's positions and flanking sequences in a BAM.
 
     Meant to be used to verify the position of a known spacer sequence and identify
@@ -150,6 +150,8 @@ def samPatternStats(pattern, bam='-', bco=-4, bcl=4, literal=True, mmCap=2, wild
         wild(char): What singular character(s) is/are used for unknown values (N).
         minFreq(int): Discard results occuring in fewer than 100 reads.
         filtered(bool): The return Counters are filtered to remove rare events.
+        nreads(int): How many reads to base the results on, for speed. (None => all of them)
+        
     Returns:
         List of Counters:
                     [0] Total number of reads (int)
@@ -216,6 +218,8 @@ def samPatternStats(pattern, bam='-', bco=-4, bcl=4, literal=True, mmCap=2, wild
                 for w in wild:      # allow more than one wildcard characters
                     waggr = waggr + seq.count(w, guidePos)
                 Wilds.update( ["\t".join(['Wildcards', str(waggr), '', ''])] )
+        if (reads is not None and reads == int(nreads)):		# Interrupt when the designated number of reads has been parsed
+            break   
     samin.close()
     # Filter out rare events to keep output uncluttered.
     if filtered:
@@ -234,7 +238,7 @@ def samPatternStats(pattern, bam='-', bco=-4, bcl=4, literal=True, mmCap=2, wild
     return [reads, matched, Lengths.most_common(), Positions.most_common(), Barcodes.most_common(), Wilds.most_common()]
 
 
-def fqPatternStats(pattern, fastq, bco=-4, bcl=4, literal=True, mmCap=2, wild='N', minFreq=0.01, filtered=False):
+def fqPatternStats(pattern, fastq, bco=-4, bcl=4, literal=True, mmCap=2, wild='N', minFreq=0.01, filtered=False, nreads=None):
     """Find a pattern's positions and flanking sequences in a BAM.
 
     Meant to be used to verify the position of a known spacer sequence and identify
@@ -251,6 +255,8 @@ def fqPatternStats(pattern, fastq, bco=-4, bcl=4, literal=True, mmCap=2, wild='N
         wild(char): What singular character(s) is/are used for unknown values (N).
         minFreq(int): Discard results occuring in fewer than 100 reads.
         filtered(bool): The return Counters are filtered to remove rare events.
+        nreads(int): How many reads to base the results on, for speed. (None => all of them)
+        
     Returns:
         List of Counters:
                     [0] Total number of reads (int)
@@ -318,6 +324,8 @@ def fqPatternStats(pattern, fastq, bco=-4, bcl=4, literal=True, mmCap=2, wild='N
                     for w in wild:      # allow more than one wildcard characters
                         waggr = waggr + seq.count(w, guidePos)
                     Wilds.update( ["\t".join(['Wildcards', str(waggr), '', ''])] )
+            if (reads is not None and reads == nreads):		# Interrupt when the designated number of reads has been parsed
+                break
     # Filter out rare events to keep output uncluttered.
     if filtered:
         for k in list(Lengths.keys()):      # List gets all the values of the iterator before I edit the dict. That way the iterator doesn't crash.
@@ -669,18 +677,18 @@ def main(args):
                                 The input stream is typically the output of `samtools view <somefile.bam>`. \
                                 The output is streamed to STDOUT, typically to be piped back to `samtools view -b`. \
                                 The header file will be prepended to the output stream.")
-    parser.add_argument('--samPatternStats', type=str, nargs=5,
+    parser.add_argument('--samPatternStats', type=str, nargs=6,
                                 help="Number and location of matches of the pattern in the reads of BAM files. \
                                 Arguments: [1] (str) anchor sequence, [2] (int) mismatches allowed in the anchor (use 'None' if anchor is regex),\
                                 [3] (char) wildcard character(s) (like 'N' for unknown nucleotides),\
                                 [4] (int) barcode offset (+n downstream of match end, \\-n upstream of match start, \
-                                escaping the minus sign is important), [5] (int) barode length.")
-    parser.add_argument('--fqPatternStats', type=str, nargs=5,
+                                escaping the minus sign is important), [5] (int) barode length, [6] Number of reads to inspect or 'all'.")
+    parser.add_argument('--fqPatternStats', type=str, nargs=6,
                                 help="Number and location of matches of the pattern in the reads of FASTQ files. \
                                 Arguments: [1] (str) anchor sequence, [2] (int) mismatches allowed in the anchor (use 'None' if anchor is regex),\
                                 [3] (char) wildcard character(s) (like 'N' for unknown nucleotides),\
                                 [4] (int) barcode offset (+n downstream of match end, \\-n upstream of match start, \
-                                escaping the minus sign is important), [5] (int) barode length.")
+                                escaping the minus sign is important), [5] (int) barode length, [6] Number of reads to inspect or 'all'.")
     
     parser.add_argument('--demuxA', type=str, nargs=7,
                                 help="Demultiplex a BAM using an anchor sequence to locate the barcodes. \
@@ -838,7 +846,7 @@ def main(args):
             sys.stderr.write(ml.donestring("filtering regions in SAM stream"))
 
 
-    # Adapter STATS from SAM stream
+    # ADAPTER STATS from sam stream or fastq
     # read length distribution, pattern position distribution, pattern match
     elif params.samPatternStats or params.fqPatternStats:
         # Do.
@@ -848,12 +856,12 @@ def main(args):
                 rx = (params.samPatternStats[1] == "None")
                 result = samPatternStats(pattern=params.samPatternStats[0], bam=f, mmCap=(int(params.samPatternStats[1]) if not rx else 0),
                                         bco=int(params.samPatternStats[3]), bcl=int(params.samPatternStats[4]),
-                                        literal=(not rx), wild=params.samPatternStats[2], filtered=False)
+                                        literal=(not rx), wild=params.samPatternStats[2], filtered=False, nreads=(int(params.samPatternStats[5]) if params.samPatternStats[5] != "all" else None))
             else:
                 rx = (params.fqPatternStats[1] == "None")
                 result = fqPatternStats(pattern=params.fqPatternStats[0], fastq=f, mmCap=(int(params.fqPatternStats[1]) if not rx else 0),
                                         bco=int(params.fqPatternStats[3]), bcl=int(params.fqPatternStats[4]),
-                                        literal=(not rx), wild=params.fqPatternStats[2], filtered=False)
+                                        literal=(not rx), wild=params.fqPatternStats[2], filtered=False, nreads=(int(params.fqPatternStats[5]) if params.samPatternStats[5] != "all" else None))
             if outfiles:
                 # Send to individual file instead of STDOUT.
                 outstream = open(outfiles[i], 'w')
