@@ -3,5 +3,3 @@
 .Rhistory
 *.pyc
 __pycache__/*
-*.pyc
-*.pyc
