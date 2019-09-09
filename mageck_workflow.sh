@@ -23,7 +23,7 @@ countthresh=50
 spacer='TTCCAGCATAGCTCTTAAAC'
 umi=6
 demux=4
-bcmm=1
+bcmm=0
 bcoffset=-4
 smm=2
 entrezfield=1   # 0-based index
@@ -51,7 +51,7 @@ while getopts 'i:l:b:B:n:c:m:r:C:G:z:Z:p:s:u:d:O:g:M:A:E:eVr12L' flag; do
     d) demux="${OPTARG}" ;;           # De-multiplexing barcode length (4)
     O) bcoffset="${OPTARG}" ;;           # De-multiplexing barcode postition relastive to anchor (-4)
     g) guideLen="${OPTARG}" ;;        # Guide length (20). For clipping.
-    M) bcmm="${OPTARG}" ;;            # Barcode mismatch allowance (1)
+    M) bcmm="${OPTARG}" ;;            # Barcode mismatch allowance (0)
     A) smm="${OPTARG}" ;;            # Anchor mismatch allowance (2)
     E) entrezfield="${OPTARG}" ;;     # 0-based index position in the undesrcore-separated composite guide IDs that represents the gene Entrez ID (1). -1 is a flag value that sets Entrex same as group value.
     Z) refSamps="${OPTARG}" ;;        # Comma-separated sample-names to apply the counts threshold for control guide purposes
@@ -281,8 +281,14 @@ if [ $do_comparison -eq 1 ]; then
 
   echo ''
   echo "Add -log10(p)."
-  srun --mem=10000 add_log10p.R -i $genes -o ${genes/.tsv/_l10p.tsv} -r group
-  srun --mem=10000 add_log10p.R -i $guides -o ${guides/.tsv/_l10p.tsv}
+  srun --mem=10000 mageck_add_log10p.R -i $genes -o ${genes/.tsv/_l10p.tsv} -r group
+  srun --mem=10000 mageck_add_log10p.R -i $guides -o ${guides/.tsv/_l10p.tsv}
+  genes="${genes/.tsv/_l10p.tsv}"
+  
+  echo ''
+  echo "Add good guides ratio."
+  srun --mem=10000 mageck_add_ggratio.R -i $genes -o ${genes/.tsv/_gg.tsv} -r group
+
 
   echo ''
   echo "Cleaning up intermediate files."
@@ -295,6 +301,7 @@ if [ $do_comparison -eq 1 ]; then
   rm ${mageckdir}/guides_all.tsv
   rm ${mageckdir}/guides_all_dedup.tsv
   rm ${mageckdir}/guides_all_dedup_reord.tsv
+  rm ${mageckdir}/guides_all_dedup_reord_l10p.tsv
   rm -r ${mageckdir}/*/${renamed}
   
   echo ''
