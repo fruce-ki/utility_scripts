@@ -25,7 +25,7 @@ while getopts 'i:r:b:a:o:q:' flag; do
     r) ref="${OPTARG}" ;;			# whole reference fasta for alignment
     b) bed="${OPTARG}" ;;			# bed of 3'UTRs (for map filtering)
     a) annot="${OPTARG}" ;;			# GTF annotation (for counting)
-		o) outdir="${OPTARG}" ;;			# output directory
+    o) outdir="${OPTARG}" ;;			# output directory
     q) minq="${OPTARG}" ;;			# minimum alignement quality (10)
     *) usage ;;
   esac
