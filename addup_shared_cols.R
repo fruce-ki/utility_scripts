@@ -27,4 +27,4 @@ for (addfile in addfiles){
   }
 }
 
-fwrite(basedf, file=outfile)
+fwrite(basedf, file=outfile, sep="\t")

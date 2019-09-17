@@ -15,7 +15,7 @@ spec = matrix(c(
 opt = getopt(spec)
 
 if (is.null(opt$ppat))
-  opt$ppat <- '\\.p\\.'
+  opt$ppat <- '\\.p[\\._]'
 if(is.null(opt$id))
   opt$id <- 'id'
 

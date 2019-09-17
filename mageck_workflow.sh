@@ -15,7 +15,7 @@ function usage() {
     echo "Usage:"
     echo "      $0 -i INDIR -l GUIDES_LIB -b DEMUX_TABLE -n COUNTS_OUTDIR -c CONTRASTS_TABLE -m MAGECK_OUTDIR [-1] [-2]"
     echo "      There are many more options and I've lost track. Consult getops in the source code."
-		exit 1
+    exit 1
 }
 # Defaults
 pad="C"
@@ -26,17 +26,15 @@ demux=4
 bcmm=0
 bcoffset=-4
 smm=2
-entrezfield=1   # 0-based index
 variable=0
 revcomp=0
 do_pre=0
 do_comparison=0
 guideLen=20
-infer_entrez=1
 legacy=""
 mageck_branch=""
 # Parse options.
-while getopts 'i:l:b:B:n:c:m:r:C:G:z:Z:p:s:u:d:O:g:M:A:E:eVr12L' flag; do
+while getopts 'i:l:b:B:n:c:m:r:C:G:z:Z:p:s:u:d:O:g:M:A:E:e:Vr12L' flag; do
   case "${flag}" in
     i) indir="${OPTARG}" ;;           # Input directory with unaligned BAMs
     l) library="${OPTARG}" ;;         # sgRNA library
@@ -49,19 +47,19 @@ while getopts 'i:l:b:B:n:c:m:r:C:G:z:Z:p:s:u:d:O:g:M:A:E:eVr12L' flag; do
     s) spacer="${OPTARG}" ;;          # Anchor sequence ('TTCCAGCATAGCTCTTAAAC')
     u) umi="${OPTARG}" ;;             # UMI length (6)
     d) demux="${OPTARG}" ;;           # De-multiplexing barcode length (4)
-    O) bcoffset="${OPTARG}" ;;           # De-multiplexing barcode postition relastive to anchor (-4)
+    O) bcoffset="${OPTARG}" ;;        # De-multiplexing barcode postition relastive to anchor (-4)
     g) guideLen="${OPTARG}" ;;        # Guide length (20). For clipping.
     M) bcmm="${OPTARG}" ;;            # Barcode mismatch allowance (0)
-    A) smm="${OPTARG}" ;;            # Anchor mismatch allowance (2)
-    E) entrezfield="${OPTARG}" ;;     # 0-based index position in the undesrcore-separated composite guide IDs that represents the gene Entrez ID (1). -1 is a flag value that sets Entrex same as group value.
+    A) smm="${OPTARG}" ;;             # Anchor mismatch allowance (2)
     Z) refSamps="${OPTARG}" ;;        # Comma-separated sample-names to apply the counts threshold for control guide purposes
     C) ctrlguides="${OPTARG}" ;;      # Comma-separated list of control guide group names.
     G) guidespergene="${OPTARG}" ;;   # Guides per gene.
     V) variable=1 ;;                  # Demultiplex manually, for staggered libraries (no).
     r) revcomp=1 ;;                   # Reverse complement the reads to match the barcodes? (no)
-    1) do_pre=1 ;;                 # Execute demultiplexing, alignment and quantification.
-    2) do_comparison=1 ;;          # Execute Mageck
-    e) infer_entrez=0 ;;           # Don't extract Enrtez from guide ID
+    1) do_pre=1 ;;                    # Execute demultiplexing, alignment and quantification.
+    2) do_comparison=1 ;;             # Execute Mageck
+    e) guidexref="${OPTARG}" ;;       # Append Entrez and other IDs from this guides-level file
+    E) genexref="${OPTARG}" ;;        # Append Entrez and other IDs from this genes-level file
     L) legacy='--legacy' ;;			# Use mageck 0.5.5 instead of latest
     B) mageck_branch="-r ${OPTARG}";;			# non-master branch
     *) usage ;;
@@ -219,45 +217,42 @@ if [ $do_comparison -eq 1 ]; then
   renamed="renamed"
   srun fileutilities.py T $mageckdir --dir | fileutilities.py P --loop sh ~/utility_scripts/mageck_rename_columns.sh {abs} {abs}/${renamed}
 
-  echo ''
-  echo "Extract entrez IDs from sgRNA IDs."
-  # Also use the re-grouped group field.
-  lib="$(dirname $library)"
-  srun cut -f 1,2 $library | perl -e '$pat = join("|", split(",", $ARGV[0])); 
-                                      while($line=<STDIN>){ 
-                                        chomp($line);
-                                        ($id, $group)=split("\t", $line); 
-                                        if ($id=~/(?<!\w)id(?!\w)/) { 
-                                          print "Entrez\n"; 
-                                        } 
-                                        elsif ( $group=~/^$pat/ ){ 
-                                          print "$group\n";l 
-                                        } 
-                                        else { 
-                                          @a= split("_", $id);
-                                          print "$a[$ARGV[1]]\n";
-                                        }
-                                      }' $ctrlguides $entrezfield > ${lib}/entrez.txt
-  srun fileutilities.py T $library ${lib}/entrez.txt -r --appnd outer | cut -f 1,3,4 > ${library}_entrez.txt
-  srun cut -f 1,2 $counts > tmp.txt
-  if [ $infer_entrez -eq 1 ]; then
-    srun fileutilities.py T tmp.txt ${library}_entrez.txt -i -r --appnd outer > ${library}_forguides.txt
-    head -n 1 ${library}_forguides.txt | cut -f 2,4 > ${library}_forgenes.txt                         # prevent header from getting sorted to another row
-    srun tail -n +2 ${library}_forguides.txt | cut -f 2,4 | sort | uniq >> ${library}_forgenes.txt    # prevent header from getting sorted to another row
-    rm tmp.txt
-  else
-    mv tmp.txt ${library}_forguides.txt
-    head -n 1 ${library}_forguides.txt | cut -f 2 > ${library}_forgenes.txt                         # prevent header from getting sorted to another row
-    srun tail -n +2 ${library}_forguides.txt | cut -f 2 | sort | uniq >> ${library}_forgenes.txt    # prevent header from getting sorted to another row
-  fi
+  ## WARNING:
+  ## If appending throws ValueError about the shape not matching the index, it means that there are repeated row keys (probably in the xref files).
+  ## Do NOT switch from --appnd (pandas concat) to merge (pandas merge)!!! Merge will do all the possible combinations.
 
   echo ''
-  echo "Merge all gene-level outputs and clean up duplicate group columns."
+  echo "Merge all gene-level outputs."
   genes="${mageckdir}/genes_all.tsv"
   if [ -f "$genes" ]; then
     rm $genes # clean up previous run, otherwise weird things happen
   fi
-  srun --mem=10000 fileutilities.py T ${library}_forgenes.txt ${mageckdir}/*/${renamed}/genes_pos_stats.txt ${mageckdir}/*/${renamed}/genes_neg_stats.txt -r -i --appnd outer > $genes
+  srun --mem=10000 fileutilities.py T ${mageckdir}/*/${renamed}/genes_pos_stats.txt ${mageckdir}/*/${renamed}/genes_neg_stats.txt -r -i --appnd outer > $genes
+
+  echo ''
+  echo "Merge all guide-level outputs."
+  guides="${mageckdir}/guides_all.tsv"
+  if [ -f "$guides" ]; then
+    rm $guides # clean up previous run, otherwise weird things happen
+  fi
+  srun --mem=10000 fileutilities.py T ${mageckdir}/*/${renamed}/guides_stats.txt -r -i --appnd outer > $guides
+
+  if [ ! -z "$guidexref" ]; then
+    echo ''
+    echo "Add other cross-referencing ID fields to guides"
+    srun --mem=10000 fileutilities.py T $guidexref $guides -r -i --appnd outer > ${guides/.tsv/_xref.tsv}
+    guides="${guides/.tsv/_xref.tsv}"
+  fi
+  
+  if [ ! -z "$genexref" ]; then
+    echo ''
+    echo "Add other cross-referencing ID fields to genes"
+    srun --mem=10000 fileutilities.py T $genexref $genes -r -i --appnd outer > ${genes/.tsv/_xref.tsv}
+    genes="${genes/.tsv/_xref.tsv}"
+  fi
+
+  echo ''
+  echo "Deduplicate group columns."
   dups=$(head -n1 $genes | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++} print "\n";')
   srun --mem=10000 fileutilities.py T $genes -r --mrgdups $dups > ${genes/.tsv/_dedup.tsv}
   genes="${genes/.tsv/_dedup.tsv}"
@@ -265,18 +260,11 @@ if [ $do_comparison -eq 1 ]; then
   srun --mem=10000 fileutilities.py T $genes -r --cols 0 $(expr $nc - 1) 1:$(expr $nc - 2) > ${genes/.tsv/_reord.tsv}
   genes="${genes/.tsv/_reord.tsv}"
 
-  echo ''
-  echo "Merge all guide-level outputs and clean up duplicate group columns."
-  guides="${mageckdir}/guides_all.tsv"
-  if [ -f "$guides" ]; then
-    rm $guides # clean up previous run, otherwise weird things happen
-  fi
-  srun --mem=10000 fileutilities.py T ${library}_forguides.txt ${mageckdir}/*/${renamed}/guides_stats.txt -r -i --appnd outer > $guides
   dups=$(head -n1 $guides | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++} print "\n";')
-  srun --mem=10000 fileutilities.py T $guides -r --mrgdups $dups > ${guides/.tsv/_dedup.tsv}
+   srun --mem=10000 fileutilities.py T $guides -r --mrgdups $dups > ${guides/.tsv/_dedup.tsv}
   guides="${guides/.tsv/_dedup.tsv}"
   nc=$(perl -e '$ARGV[0] =~/^(\d+)/; print $1' $(fileutilities.py T $guides --cntcols))
-  srun --mem=10000 fileutilities.py T $guides -r --cols 0 $(expr $nc - 1) 1:$(expr $nc - 2) > ${guides/.tsv/_reord.tsv}
+   srun --mem=10000 fileutilities.py T $guides -r --cols 0 $(expr $nc - 1) 1:$(expr $nc - 2) > ${guides/.tsv/_reord.tsv}
   guides="${guides/.tsv/_reord.tsv}"
 
   echo ''
@@ -284,24 +272,24 @@ if [ $do_comparison -eq 1 ]; then
   srun --mem=10000 mageck_add_log10p.R -i $genes -o ${genes/.tsv/_l10p.tsv} -r group
   srun --mem=10000 mageck_add_log10p.R -i $guides -o ${guides/.tsv/_l10p.tsv}
   genes="${genes/.tsv/_l10p.tsv}"
+  guides="${guides/.tsv/_l10p.tsv}"
   
   echo ''
-  echo "Add good guides ratio."
+  echo "Add good guides ratio to genes."
   srun --mem=10000 mageck_add_ggratio.R -i $genes -o ${genes/.tsv/_gg.tsv} -r group
-
+  genes="${genes/.tsv/_ggratio.tsv}"
 
   echo ''
   echo "Cleaning up intermediate files."
-  rm ${library}_entrez.txt
-  rm ${library}_forguides.txt
-  rm ${library}_forgenes.txt
   rm ${mageckdir}/genes_all.tsv
-  rm ${mageckdir}/genes_all_dedup.tsv
-  rm ${mageckdir}/genes_all_dedup_reord.tsv
+  rm ${mageckdir}/genes_all_xref.tsv
+  rm ${mageckdir}/genes_all_xref_dedup.tsv
+  rm ${mageckdir}/genes_all_xref_dedup_reord.tsv
+  rm ${mageckdir}/genes_all_xref_dedup_reord_l10p.tsv
   rm ${mageckdir}/guides_all.tsv
-  rm ${mageckdir}/guides_all_dedup.tsv
-  rm ${mageckdir}/guides_all_dedup_reord.tsv
-  rm ${mageckdir}/guides_all_dedup_reord_l10p.tsv
+  rm ${mageckdir}/guides_all_xref.tsv
+  rm ${mageckdir}/guides_all_xref_dedup.tsv
+  rm ${mageckdir}/guides_all_xref_dedup_reord.tsv
   rm -r ${mageckdir}/*/${renamed}
   
   echo ''
