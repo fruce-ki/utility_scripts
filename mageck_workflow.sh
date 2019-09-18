@@ -116,7 +116,7 @@ if [ $do_pre -eq 1 ]; then
     nextflow run zuberlab/crispr-process-nf $revcomp --inputDir $indir --library $library --padding_base $pad --spacer_seq $spacer --spacer_length ${#spacer} --barcode_demux_length $demux --barcode_random_length $umi --barcode_demux_mismatches $bcmm --barcodes $barcodes --outputDir $countsdir -profile ii2
   else
     mkdir -p ${countsdir}/fastq ${countsdir}/fastqc ${countsdir}/counts/${libname} ${countsdir}/aligned/${libname}
-    
+
     echo ''
     echo "Demultiplexing BAM using anchor sequence."
     module load python-levenshtein/0.12.0-foss-2017a-python-2.7.13
@@ -125,46 +125,46 @@ if [ $do_pre -eq 1 ]; then
     module unload python-levenshtein/0.12.0-foss-2017a-python-2.7.13
     module unload pysam/0.14.1-foss-2017a-python-2.7.13
     wait_for_jobs demultip
-    
+
     echo ''
     echo "FastQC (in the background)." # and don't wait for it. I don't need its output for a while.
     module load fastqc/0.11.5-java-1.8.0_121
     fileutilities.py T ${countsdir}/fastq/*/*.fqc --loop srun ,--mem-per-cpu=5000 ,--cpus-per-task 4 fastqc ,-q ,-t 4 ,-f fastq ,-o ${countsdir}/fastqc {abs} \&
     module unload fastqc/0.11.5-java-1.8.0_121
-    
+
     echo ''
     echo "Compressing FASTQ (in the background)."
     fileutilities.py T ${countsdir}/fastq/*/*.fq --loop srun ,--mem=50000 gzip {abs} \&
-    
+
     echo ''
     echo "Guides library to FASTA."
     cw=$(realpath $(pwd))
     cd $(dirname $library)
     srun ~/crispr-process-nf/bin/process_library.R $(basename $library) C
     cd $cw
-    
+
     echo ''
     echo "Bowtie2 indexing."
     module load bowtie2/2.2.9-foss-2017a
     srun bowtie2-build ${library/.txt/.fasta} ${library/.txt/}
-    
+
     echo ''
     echo "... waiting for gzip to catch up."
     wait_for_jobs gzip
-    
+
     echo ''
     echo "Bowtie2 aligning."
     fileutilities.py T ${countsdir}/fastq/*/*.fq.gz --loop srun ,--mem=10000 ,--cpus-per-task=4 bowtie2 ,-x ${library/.txt/}  ,-U {abs} ,--threads 4 ,-L 20 ,--score-min 'C,0,-1' ,-N 0 ,--seed 42 '2>' ${countsdir}/aligned/${libname}/{bas}.log \> ${countsdir}/aligned/${libname}/{bas}.sam \&
     module unload bowtie2/2.2.9-foss-2017a
     wait_for_jobs bowtie2
-    
+
     echo ''
     echo "Quantifying with featureCounts."
     module load subread/1.6.4-foss-2017a
     fileutilities.py T ${countsdir}/aligned/${libname}/*.sam --loop srun ,--mem-per-cpu=5000 ,--cpus-per-task=4 featureCounts ,-T 4 ,-a ${library/.txt/.saf} ,-F SAF ,-o ${countsdir}/counts/${libname}/{bas}.txt {abs} \&
     module unload subread/1.6.4-foss-2017a
     wait_for_jobs featureC
-    
+
     echo ''
     echo "Combining samples into one table."
     srun --mem=5000 ~/crispr-process-nf/bin/combine_counts.R $library ${countsdir}/counts/${libname}/*.fq.txt > ${countsdir}/counts/${libname}/counts_mageck.txt
@@ -172,21 +172,21 @@ if [ $do_pre -eq 1 ]; then
     mv ${countsdir}/counts/${libname}/counts_mageck.txt ${countsdir}/counts/${libname}/_counts_mageck.txt
     head -n 1 ${countsdir}/counts/${libname}/_counts_mageck.txt | perl -e 'while(<STDIN>){~s/\S+\/(\w{9}_\d_)+(\d{8}\w?_\d{8}_)?//g;~s/\.fq//g;print}' > ${countsdir}/counts/${libname}/counts_mageck.txt
     tail -n +2 ${countsdir}/counts/${libname}/_counts_mageck.txt >> ${countsdir}/counts/${libname}/counts_mageck.txt
-    
+
     echo ''
     echo "MultiQC"
     wait_for_jobs fastqc  # It should be long finished by now, but better ask.
     module load multiqc/1.3-foss-2017a-python-2.7.13
     srun multiqc -f -x *.run -o ${countsdir}/multiqc ${countsdir}/fastqc ${countsdir}/aligned/${libname} ${countsdir}/counts/${libname}
     module unload multiqc/1.3-foss-2017a-python-2.7.13
-    
+
     echo ''
     echo "Cleaning up intermediate files"
     rm ${countsdir}/fastq/*/*.fqc
     rm -r ${countsdir}/fastqc
     rm ${countsdir}/counts/${libname}/*fq.txt ${countsdir}/counts/${libname}/*fq.txt.summary
   fi
-  
+
   echo ''
   echo "Pre-processing finished!"
 fi
@@ -202,7 +202,7 @@ if [ $do_comparison -eq 1 ]; then
   echo ''
   echo "Group control guides into genes."
   if ! [ -z "$ctrlguides" ]; then
-    srun Rscript ~/utility_scripts/nonTargetGuides2controlGenes.R -c $ctrlguides -f $counts -o ${counts/.txt/_ctrls-grouped.txt} -n $guidespergene -g group -t id -m $countthresh -z $refSamps
+    srun mageck_nonTargetGuides2controlGenes.R -c $ctrlguides -f $counts -o ${counts/.txt/_ctrls-grouped.txt} -n $guidespergene -g group -t id -m $countthresh -z $refSamps
     counts="${counts/.txt/_ctrls-grouped.txt}"
   else
     ctrlguides="hakunamatata_dummy" # dummy value that will not match patterns later on
@@ -243,7 +243,7 @@ if [ $do_comparison -eq 1 ]; then
     srun --mem=10000 fileutilities.py T $guidexref $guides -r -i --appnd outer > ${guides/.tsv/_xref.tsv}
     guides="${guides/.tsv/_xref.tsv}"
   fi
-  
+
   if [ ! -z "$genexref" ]; then
     echo ''
     echo "Add other cross-referencing ID fields to genes"
@@ -261,23 +261,23 @@ if [ $do_comparison -eq 1 ]; then
   genes="${genes/.tsv/_reord.tsv}"
 
   dups=$(head -n1 $guides | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++} print "\n";')
-   srun --mem=10000 fileutilities.py T $guides -r --mrgdups $dups > ${guides/.tsv/_dedup.tsv}
+  srun --mem=10000 fileutilities.py T $guides -r --mrgdups $dups > ${guides/.tsv/_dedup.tsv}
   guides="${guides/.tsv/_dedup.tsv}"
   nc=$(perl -e '$ARGV[0] =~/^(\d+)/; print $1' $(fileutilities.py T $guides --cntcols))
-   srun --mem=10000 fileutilities.py T $guides -r --cols 0 $(expr $nc - 1) 1:$(expr $nc - 2) > ${guides/.tsv/_reord.tsv}
+  srun --mem=10000 fileutilities.py T $guides -r --cols 0 $(expr $nc - 1) 1:$(expr $nc - 2) > ${guides/.tsv/_reord.tsv}
   guides="${guides/.tsv/_reord.tsv}"
 
   echo ''
   echo "Add -log10(p)."
-  srun --mem=10000 mageck_add_log10p.R -i $genes -o ${genes/.tsv/_l10p.tsv} -r group
-  srun --mem=10000 mageck_add_log10p.R -i $guides -o ${guides/.tsv/_l10p.tsv}
-  genes="${genes/.tsv/_l10p.tsv}"
-  guides="${guides/.tsv/_l10p.tsv}"
-  
+  srun --mem=10000 mageck_add_log10p.R -i $genes -o ${genes/.tsv/_l10p.txt} -r group
+  srun --mem=10000 mageck_add_log10p.R -i $guides -o ${guides/.tsv/_l10p.txt}
+  genes="${genes/.tsv/_l10p.txt}"
+  guides="${guides/.tsv/_l10p.txt}"
+
   echo ''
   echo "Add good guides ratio to genes."
-  srun --mem=10000 mageck_add_ggratio.R -i $genes -o ${genes/.tsv/_gg.tsv} -r group
-  genes="${genes/.tsv/_ggratio.tsv}"
+  srun --mem=10000 mageck_add_ggratio.R -i $genes -o ${genes/.txt/_gg.txt} -f $counts -m $countthresh -z $refSamps
+  genes="${genes/.txt/_ggratio.txt}"
 
   echo ''
   echo "Cleaning up intermediate files."
@@ -285,13 +285,13 @@ if [ $do_comparison -eq 1 ]; then
   rm ${mageckdir}/genes_all_xref.tsv
   rm ${mageckdir}/genes_all_xref_dedup.tsv
   rm ${mageckdir}/genes_all_xref_dedup_reord.tsv
-  rm ${mageckdir}/genes_all_xref_dedup_reord_l10p.tsv
+  rm ${mageckdir}/genes_all_xref_dedup_reord_l10p.txt
   rm ${mageckdir}/guides_all.tsv
   rm ${mageckdir}/guides_all_xref.tsv
   rm ${mageckdir}/guides_all_xref_dedup.tsv
   rm ${mageckdir}/guides_all_xref_dedup_reord.tsv
   rm -r ${mageckdir}/*/${renamed}
-  
+
   echo ''
   echo "Comparisons finished!"
 fi
