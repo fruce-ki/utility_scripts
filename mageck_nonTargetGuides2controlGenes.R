@@ -37,28 +37,28 @@ if (! is.null(opt$reference) )    { opt$reference <- unlist(strsplit(opt$referen
 groupNames <- unlist(strsplit(opt$controlGroups, ',', fixed=TRUE))
 
 # Counts
-dt <- fread(opt$countsFile)
+DT <- fread(opt$countsFile)
 
 # Rename id and group columns to facilitate programming, try to avoid a name that might already exist.
-names(dt)[which(names(dt)==opt$groupCol)] <- 'sexygroup666'
-names(dt)[which(names(dt)==opt$targetCol)] <- 'sexyid666'
+names(DT)[which(names(DT)==opt$groupCol)] <- 'sexygroup666'
+names(DT)[which(names(DT)==opt$targetCol)] <- 'sexyid666'
 
 for (gr in groupNames){
   # All guides above the threshold.
   meanCount <- NULL
   if (is.null(opt$reference)) {
     # All samples == columns excluding the guide and group ids.
-    meanCount <- rowMeans(dt[, -c('sexygroup666', 'sexyid666'), with=FALSE])
+    meanCount <- rowMeans(DT[, -c('sexygroup666', 'sexyid666'), with=FALSE])
   } else {
     # Specified samples only.
-    meanCount <- rowMeans(dt[, c(opt$reference), with=FALSE])
+    meanCount <- rowMeans(DT[, c(opt$reference), with=FALSE])
   }
 
-  aux <- data.table(id = dt$sexyid666,
-                    grp = dt$sexygroup666,
+  aux <- data.table(id = DT$sexyid666,
+                    grp = DT$sexygroup666,
                     cnt = meanCount,
                     nonzero = meanCount >= opt$mincount,
-                    sel = dt$sexygroup666 == gr
+                    sel = DT$sexygroup666 == gr
           )[order(cnt)]
   aux <- aux[(sel), ]
 
@@ -109,12 +109,12 @@ for (gr in groupNames){
 
   # And put the new values back into the table
   setkey(aux, id)
-  setkey(dt, sexyid666)
-  dt[aux$id, sexygroup666 := aux$grp]
+  setkey(DT, sexyid666)
+  DT[aux$id, sexygroup666 := aux$grp]
 }
 
 # Restore original column names
-names(dt)[which(names(dt)=='sexygroup666')] <- opt$groupCol
-names(dt)[which(names(dt)=='sexyid666')] <- opt$targetCol
+names(DT)[which(names(DT)=='sexygroup666')] <- opt$groupCol
+names(DT)[which(names(DT)=='sexyid666')] <- opt$targetCol
 
-fwrite(dt, file=opt$outFile, sep = "\t", quote=FALSE)
+fwrite(DT, file=opt$outFile, sep = "\t", quote=FALSE)
