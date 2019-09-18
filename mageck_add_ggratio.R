@@ -15,7 +15,7 @@ spec = matrix(c(
   'reference'     , 'z', 1, "character", "Comma separated column names across which to apply mincount for the controls. (if NULL, then all)"
 ), byrow=TRUE, ncol=5)
 opt = getopt(spec)
-# opt <- list(infile='/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/HLA1_staggered_v2/process/mageck/genes_all_xref_dedup_reord_l10p_gg.tsv', countsFile='/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/HLA1_staggered_v2/process/crispr-processed/counts/library/counts_mageck_ctrls-grouped.txt', reference='NoIFNG_d0,NoIFNG_d0_2,plasmid')
+# opt <- list(infile='/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/HLA1_staggered_v2/process/mageck/genes_all_xref_dedup_reord_l10p_gg.tsv', countsFile='/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/HLA1_staggered_v2/process/crispr-processed/counts/library/counts_mageck_ctrls-grouped.txt', reference='NoIFNG_d0,NoIFNG_d0_2,plasmid', mincount=50)
 
 if ( is.null(opt$gpat) )          { opt$gpat <- '\\.guides\\.' }
 if ( is.null(opt$ggpat) )         { opt$ggpat <- '\\.guides_good\\.' }
