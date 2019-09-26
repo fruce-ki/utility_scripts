@@ -8,7 +8,7 @@ spec <- matrix(c(
   'countsFile'    , 'f', 1, "character", "Tab-separated table of counts.",
   'groupCol'      , 'g', 2, "character", "Name of the column containing the group names ('group').",
   'help'          , 'h', 0, "logical"  , "Help.",
-  'mincount'      , 'm', 2, "numeric"  , "Minimum count PER MILLION (will be scaled to libraries) to separate control guides into detected and non (1).",
+  'mincount'      , 'm', 2, "numeric"  , "Minimum count to separate control guides into detected and non (1).",
   'guidesPerGene' , 'n', 2, "numeric"  , "Desired number of guides per control \"gene\" (6).",
   'outFile'       , 'o', 2, "character", "Output file (overwrite input file).",
   'nonrandom'     , 'r', 0, "logical"  , "Assign guides to groups in order of abundance instead of randomly (FALSE).",
@@ -17,7 +17,7 @@ spec <- matrix(c(
   'reference'     , 'z', 2, "character", "Comma separated column names across which to apply mincount for the controls. (if NULL, then all)"
 ), byrow=TRUE, ncol=5)
 opt <- getopt(spec)
-# opt <- list(controlGroups='CTRLHS,CTRLMM', countsFile='/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/HLA1_staggered_v2/process/crispr-processed/counts/library/counts_mageck.txt', guidesPerGene=6, mincount=1, reference='NoIFNG_d0,NoIFNG_d0_2')
+# opt <- list(controlGroups='CTRLHS,CTRLMM', countsFile='/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/HLA1_staggered/process/crispr-processed/counts/library/counts_mageck.txt', guidesPerGene=6, mincount=50, reference='NoIFNG_d0,imc_surface_plasmid')
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -33,37 +33,31 @@ if ( is.null(opt$nonrandom) )     { opt$nonrandom <- FALSE } else { opt$randomis
 if ( is.null(opt$mincount) )      { opt$mincount <- 1 }
 if (! is.null(opt$reference) )    { opt$reference <- unlist(strsplit(opt$reference, ',')) }
 
-
 # Group 
 groupNames <- unlist(strsplit(opt$controlGroups, ',', fixed=TRUE))
 
 # Counts
 DT <- fread(opt$countsFile)
 
-# Is/are there plasmid samples?
-plasmids <- names(DT)[grepl('plasmid', names(DT))]
-
-# For filtering, scale down the relevant samples to 1 million
-DT2 <- as.data.table(lapply (DT[, union(plasmids, opt$reference), with=FALSE], function(x) { x / sum(x) * 1000000 }))
-
-# Mark guides the are missing from plasmids or references
-DT2[, plasmid_pass := rowSums(DT[, plasmids, with=FALSE] >= opt$mincount) >= 1] # if present in even just one plasmid
-DT2[, ref_pass := rowSums(DT[, opt$reference, with=FALSE] >= opt$mincount) >= length(opt$reference)] # if present in all the references
-message( paste(length(DT2$plasmid_pass) - sum(DT2$plasmid_pass), "guides removed for presence below", opt$mincount, "per million in", paste(plasmids, collapse=', '), ".") )
-
-# Remove guides that are not present in the plasmids
-DT <- DT[(DT2$plasmid_pass), ]
-DT2 <- DT2[(plasmid_pass), ]
-
 # Rename id and group columns to facilitate programming, try to avoid a name that might already exist.
 names(DT)[which(names(DT)==opt$groupCol)] <- 'sexygroup666'
 names(DT)[which(names(DT)==opt$targetCol)] <- 'sexyid666'
 
 for (gr in groupNames){
+  # All guides above the threshold.
+  meanCount <- NULL
+  if (is.null(opt$reference)) {
+    # All samples == columns excluding the guide and group ids.
+    meanCount <- rowMeans(DT[, -c('sexygroup666', 'sexyid666'), with=FALSE])
+  } else {
+    # Specified samples only.
+    meanCount <- rowMeans(DT[, c(opt$reference), with=FALSE])
+  }
+
   aux <- data.table(id = DT$sexyid666,
                     grp = DT$sexygroup666,
-                    cnt = rowMeans(DT[, c(opt$reference), with=FALSE]),
-                    nonzero = DT2$ref_pass,
+                    cnt = meanCount,
+                    nonzero = meanCount >= opt$mincount,
                     sel = DT$sexygroup666 == gr
           )[order(cnt)]
   aux <- aux[(sel), ]

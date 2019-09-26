@@ -19,7 +19,7 @@ function usage() {
 }
 # Defaults
 pad="C"
-countthresh=1  # per million
+countthresh=50
 spacer='TTCCAGCATAGCTCTTAAAC'
 umi=6
 demux=4
@@ -38,11 +38,11 @@ while getopts 'i:l:b:B:n:c:m:r:C:G:z:Z:p:s:u:d:O:g:M:A:E:e:Vr12L' flag; do
   case "${flag}" in
     i) indir="${OPTARG}" ;;           # Input directory with unaligned BAMs
     l) library="${OPTARG}" ;;         # sgRNA library
-    b) barcodes="${OPTARG}" ;;        # Demultiplexing table: lane \t sample_name \t barcode [\t anchor_pos]
+    b) barcodes="${OPTARG}" ;;        # Demultiplexing table: lane \t sample_name \t barcode
     n) countsdir="${OPTARG}" ;;       # Output directory for FASTQs and counts table
     c) contrasts="${OPTARG}" ;;       # Comparison details for MAGECK nextflow: name \t control \t treatment \t norm_method \t fdr_method \t lfc_method \t cnv_correction \t filter
     m) mageckdir="${OPTARG}" ;;       # Output directory for MAGECK nextflow
-    z) countthresh="${OPTARG}" ;;     # Minimum read count per million (1)
+    z) countthresh="${OPTARG}" ;;     # Minimum read count per guide (50)
     p) pad="${OPTARG}" ;;             # Padding base ("C")
     s) spacer="${OPTARG}" ;;          # Anchor sequence ('TTCCAGCATAGCTCTTAAAC')
     u) umi="${OPTARG}" ;;             # UMI length (6)
@@ -119,11 +119,11 @@ if [ $do_pre -eq 1 ]; then
 
     echo ''
     echo "Demultiplexing BAM using anchor sequence."
-    # module load python-levenshtein/0.12.0-foss-2017a-python-2.7.13
-    # module load pysam/0.14.1-foss-2017a-python-2.7.13
+    module load python-levenshtein/0.12.0-foss-2017a-python-2.7.13
+    module load pysam/0.14.1-foss-2017a-python-2.7.13
     fileutilities.py T ${indir}/*.bam --loop srun ,--mem=50000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q \&
-    # module unload python-levenshtein/0.12.0-foss-2017a-python-2.7.13
-    # module unload pysam/0.14.1-foss-2017a-python-2.7.13
+    module unload python-levenshtein/0.12.0-foss-2017a-python-2.7.13
+    module unload pysam/0.14.1-foss-2017a-python-2.7.13
     wait_for_jobs demultip
 
     echo ''
@@ -200,7 +200,7 @@ fi
 
 if [ $do_comparison -eq 1 ]; then
   echo ''
-  echo "Remove guides not seen in plasmid, & Group control guides into genes."
+  echo "Group control guides into genes."
   if ! [ -z "$ctrlguides" ]; then
     srun mageck_nonTargetGuides2controlGenes.R -c $ctrlguides -f $counts -o ${counts/.txt/_ctrls-grouped.txt} -n $guidespergene -g group -t id -m $countthresh -z $refSamps
     counts="${counts/.txt/_ctrls-grouped.txt}"
@@ -294,10 +294,6 @@ if [ $do_comparison -eq 1 ]; then
 
   echo ''
   echo "Comparisons finished!"
-
-  echo ''
-  echo "Creating table scaled to 50M"
-  srun scale_table.R -i $counts -o ${counts/.txt/_scale50M.txt} -v 50000000
 fi
 
 if [ -d "./work" ]; then
