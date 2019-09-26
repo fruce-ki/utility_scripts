@@ -151,7 +151,7 @@ def samPatternStats(pattern, bam='-', bco=-4, bcl=4, literal=True, mmCap=2, wild
         minFreq(int): Discard results occuring in fewer than 100 reads.
         filtered(bool): The return Counters are filtered to remove rare events.
         nreads(int): How many reads to base the results on, for speed. (None => all of them)
-        
+
     Returns:
         List of Counters:
                     [0] Total number of reads (int)
@@ -219,7 +219,7 @@ def samPatternStats(pattern, bam='-', bco=-4, bcl=4, literal=True, mmCap=2, wild
                     waggr = waggr + seq.count(w, guidePos)
                 Wilds.update( ["\t".join(['Wildcards', str(waggr), '', ''])] )
         if (reads is not None and reads == int(nreads)):		# Interrupt when the designated number of reads has been parsed
-            break   
+            break
     samin.close()
     # Filter out rare events to keep output uncluttered.
     if filtered:
@@ -256,7 +256,7 @@ def fqPatternStats(pattern, fastq, bco=-4, bcl=4, literal=True, mmCap=2, wild='N
         minFreq(int): Discard results occuring in fewer than 100 reads.
         filtered(bool): The return Counters are filtered to remove rare events.
         nreads(int): How many reads to base the results on, for speed. (None => all of them)
-        
+
     Returns:
         List of Counters:
                     [0] Total number of reads (int)
@@ -371,14 +371,14 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, anchorS
         guideLen :      Guides will be clipped at this length.
         anchorSeq :     Spacer sequence to anchor.
         anchorRegex :   `anchorSeq` is a regex.
-        barcodes :      Demultiplexing table, tab-delimited (lane, sample_name, barcode, position). 
-                        Position is 1-based and refers to the start of the anchoring !!SPACER!!, NOT the barcode start!
+        barcodes :      Demultiplexing table, tab-delimited (lane, sample_name, barcode, anchor_pos).
+                        `anchor_pos` is 1-based and refers to the start of the anchoring spacer, NOT the samples barcode start!
                         If omitted, anchoring will fall back to regex search.
         bcmm :          Mismatches allowed in matching the demultiplexing barcodes.
         smm :           Mismatches allowed in matching the spacer sequence.
         qualOffset :    Base-call quality offset for conversion from pysam to fastq.
         abort :         Upper limit for how far into the read to search for the anchor, when no explicit positions are given in the barcodes file.
-        unmatched :     Create a FASTQ file for all the reads that did not match the anchor or barcode within the given tolerances. 
+        unmatched :     Create a FASTQ file for all the reads that did not match the anchor or barcode within the given tolerances.
                         Otherwise they will simply be ignored.
         trimQC :        Create a partly-trimmed additional FASTQ (ending in .fqc) that includes the barcode and anchor untrimmed. Only what's upstream of them is trimmed.
                         In case you want to generate stats reports for the barcodes and anchor.
@@ -405,12 +405,14 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, anchorS
             if i == 0:
                 if not ("lane" in row.keys() or "sample_name" in row.keys() or "barcode" in row.keys()):
                     raise Exception("Error: 'lane', 'sample_name', or 'barcode' field is missing from the barcodes table.")
-                if 'position' in row.keys():
+                if 'anchor_pos' in row.keys():
                     withPos = True              # Spacer start positions have been defined.
+                if 'position' in row.keys():
+                    exit("The 'position' field is deprecated. It should now be named 'anchor_pos'.")
             if row['lane'] == lane or row['lane'] == lane + '.bam':    # Only interested in the details for the lane being demultiplexed by this instance of the script.
                 demuxS[ row['barcode'] ] = row['sample_name']
                 if withPos:
-                    pos = int(row['position']) - 1  # 0-based indexing
+                    pos = int(row['anchor_pos']) - 1  # 0-based indexing
                     if pos < 0:
                         raise ValueError(' '.join("Invalid barcode position definition for", row['lane'], row['barcode'], row['sample_name']))
                     if pos not in spacerP:
@@ -542,7 +544,7 @@ def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=3
         outputdir :     Output directory where demultiplexed fastq files will be saved.
         tally :         File to write a tally of the reads assigned to each sample. (Default STDOUT)
         qualOffset :    Base-call quality offset for conversion from pysam to fastq.
-        unmatched :     Create a FASTQ file for all the reads that did not match the anchor or barcode within the given tolerances. 
+        unmatched :     Create a FASTQ file for all the reads that did not match the anchor or barcode within the given tolerances.
                         Otherwise they will simply be ignored.
 
     Returns:
@@ -689,7 +691,7 @@ def main(args):
                                 [3] (char) wildcard character(s) (like 'N' for unknown nucleotides),\
                                 [4] (int) barcode offset (+n downstream of match end, \\-n upstream of match start, \
                                 escaping the minus sign is important), [5] (int) barode length, [6] Number of reads to inspect or 'all'.")
-    
+
     parser.add_argument('--demuxA', type=str, nargs=7,
                                 help="Demultiplex a BAM using an anchor sequence to locate the barcodes. \
                                 Arguments: [1] (str) barcodes file, [2] (str) anchor sequence (literal or regex),\
@@ -892,15 +894,15 @@ def main(args):
         if params.demuxA:
             rx = (params.demuxA[2] == 'None')
             for i,f in enumerate(flist):
-                demuxWAnchor(f, barcodes=params.demuxA[0], outputdir=outfiles[i], tally=None, 
+                demuxWAnchor(f, barcodes=params.demuxA[0], outputdir=outfiles[i], tally=None,
                             anchorSeq=params.demuxA[1], anchorRegex=rx, smm=(int(params.demuxA[2]) if not rx else 0),
-                            bcOffset=int(params.demuxA[3]),  bcmm=int(params.demuxA[4]), 
+                            bcOffset=int(params.demuxA[3]),  bcmm=int(params.demuxA[4]),
                             abort=int(params.demuxA[5]), qualOffset=int(params.demuxA[6]), unmatched=False, trimQC=False)
                 if params.STDERRcomments:
                     sys.stderr.write(ml.donestring("anchored demultiplexing of " + f))
         elif params.demuxBC:
             for i,f in enumerate(flist):
-                demuxBC(f, barcodes=params.demuxBC[0], outputdir=outfiles[i], tally=None, 
+                demuxBC(f, barcodes=params.demuxBC[0], outputdir=outfiles[i], tally=None,
                         qualOffset=int(params.demuxBC[1]), unmatched=False)
                 if params.STDERRcomments:
                     sys.stderr.write(ml.donestring("tagged demultiplexing of " + f))
