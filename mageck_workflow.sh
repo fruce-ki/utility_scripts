@@ -119,18 +119,18 @@ if [ $do_pre -eq 1 ]; then
 
     echo ''
     echo "Demultiplexing BAM using anchor sequence."
-    module load python-levenshtein/0.12.0-foss-2017a-python-2.7.13
-    module load pysam/0.14.1-foss-2017a-python-2.7.13
-    fileutilities.py T ${indir}/*.bam --loop srun ,--mem=50000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q \&
-    module unload python-levenshtein/0.12.0-foss-2017a-python-2.7.13
-    module unload pysam/0.14.1-foss-2017a-python-2.7.13
-    wait_for_jobs demultip
+#   # module load python-levenshtein/0.12.0-foss-2017a-python-2.7.13
+#   # module load pysam/0.14.1-foss-2017a-python-2.7.13
+    # fileutilities.py T ${indir}/*.bam --loop srun ,--mem=50000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q \&
+#   # # module unload python-levenshtein/0.12.0-foss-2017a-python-2.7.13
+#   # module unload pysam/0.14.1-foss-2017a-python-2.7.13
+    # wait_for_jobs demultip
 
     echo ''
     echo "FastQC (in the background)." # and don't wait for it. I don't need its output for a while.
-    module load fastqc/0.11.5-java-1.8.0_121
+#   # module load fastqc/0.11.5-java-1.8.0_121
     fileutilities.py T ${countsdir}/fastq/*/*.fqc --loop srun ,--mem-per-cpu=5000 ,--cpus-per-task 4 fastqc ,-q ,-t 4 ,-f fastq ,-o ${countsdir}/fastqc {abs} \&
-    module unload fastqc/0.11.5-java-1.8.0_121
+#   # module unload fastqc/0.11.5-java-1.8.0_121
 
     echo ''
     echo "Compressing FASTQ (in the background)."
@@ -145,7 +145,7 @@ if [ $do_pre -eq 1 ]; then
 
     echo ''
     echo "Bowtie2 indexing."
-    module load bowtie2/2.2.9-foss-2017a
+#   # module load bowtie2/2.2.9-foss-2017a
     srun bowtie2-build ${library/.txt/.fasta} ${library/.txt/}
 
     echo ''
@@ -155,14 +155,14 @@ if [ $do_pre -eq 1 ]; then
     echo ''
     echo "Bowtie2 aligning."
     fileutilities.py T ${countsdir}/fastq/*/*.fq.gz --loop srun ,--mem=10000 ,--cpus-per-task=4 bowtie2 ,-x ${library/.txt/}  ,-U {abs} ,--threads 4 ,-L 20 ,--score-min 'C,0,-1' ,-N 0 ,--seed 42 '2>' ${countsdir}/aligned/${libname}/{bas}.log \> ${countsdir}/aligned/${libname}/{bas}.sam \&
-    module unload bowtie2/2.2.9-foss-2017a
+#   # module unload bowtie2/2.2.9-foss-2017a
     wait_for_jobs bowtie2
 
     echo ''
     echo "Quantifying with featureCounts."
-    module load subread/1.6.4-foss-2017a
+#   # module load subread/1.6.4-foss-2017a
     fileutilities.py T ${countsdir}/aligned/${libname}/*.sam --loop srun ,--mem-per-cpu=5000 ,--cpus-per-task=4 featureCounts ,-T 4 ,-a ${library/.txt/.saf} ,-F SAF ,-o ${countsdir}/counts/${libname}/{bas}.txt {abs} \&
-    module unload subread/1.6.4-foss-2017a
+#   # module unload subread/1.6.4-foss-2017a
     wait_for_jobs featureC
 
     echo ''
@@ -176,9 +176,9 @@ if [ $do_pre -eq 1 ]; then
     echo ''
     echo "MultiQC"
     wait_for_jobs fastqc  # It should be long finished by now, but better ask.
-    module load multiqc/1.3-foss-2017a-python-2.7.13
+#   # module load multiqc/1.3-foss-2017a-python-2.7.13
     srun multiqc -f -x *.run -o ${countsdir}/multiqc ${countsdir}/fastqc ${countsdir}/aligned/${libname} ${countsdir}/counts/${libname}
-    module unload multiqc/1.3-foss-2017a-python-2.7.13
+#   # module unload multiqc/1.3-foss-2017a-python-2.7.13
 
     echo ''
     echo "Cleaning up intermediate files"
