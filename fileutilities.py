@@ -764,6 +764,8 @@ def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='
         flist.aliases[0]
     except AttributeError:
         flist = FilesList(flist)
+    except IndexError:
+        flist = FilesList(flist)
     # Determine how many columns each file has.
     numofcols = count_columns(flist, colSep=colSep)
     # Fetch and incrementally merge.
@@ -790,7 +792,7 @@ def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='
                                   sort=False, suffixes=('','_'+ myalias))
     # In addition to the new row_ID columns, the index column was kept for each table. Drop them as redundant.
     # If the index columns are not exact duplicates (due to gappy rows),
-    # dedup_columns can be used afterwards on the merged file).
+    #   dedup_columns() can be used afterwards on the merged file).
     if dedup:
         index_cols = [col for col in result.columns if '_|' + str(index) in col]
         result.drop(columns=index_cols, inplace=True)
@@ -808,7 +810,7 @@ def getDuplicateColumns(df):
     Args:
     	df: Dataframe object
     Returns:
-        List of columns whose contents are redudnant (one occurence will of each will not be included in the list).
+        List of columns whose contents are redudnant (one occurence of each will not be included in the list).
     '''
     duplicateColumnNames = set()
     # Iterate over all the columns in dataframe
@@ -1299,9 +1301,8 @@ def main(args):
                                 The first column of each file will be used as row index to merge on regardless of -i flag. \
                                 First argument is type: 'left', 'right', 'inner', 'outer'. \
 								Second argument is preserve first row: 'yes', 'no' (because merge sorts rows) \
-								Third argument is deduplicate: 'yes', 'no' (index columns get repeated for each file. \
-                                For very large tables, best don't deduplicate, and use --mrgdups on the output). \
-                                For left/right joins, the order of files affects the result.")
+								Third argument is drop the index columns (one per included file): 'yes', 'no' \
+                                To instead merge the index columns into one column, apply --mrgdups on the output.")
     parser.add_argument('--mrgdups', type=int, nargs='+',
     							help="Combine gappy duplicate columns into a single column with all the values.\
     							Columns are specified by their 0-based positional index given as arguments here.")
