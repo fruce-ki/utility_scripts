@@ -28,7 +28,8 @@ if (! is.null(opt$reference) )    { opt$reference <- unlist(strsplit(opt$referen
 DT <- fread(opt$countsFile, select=c("id", "group", opt$reference))
 
 # Figure out the number of guides per group that pass the filtering threshold.
-DT[ , pass := rowSums(DT[, -c(1,2)]) / length(opt$reference) >= opt$mincount ]
+# mincount must be met for each control sample, same as the mageck nextflow criterion.
+DT[ , pass := rowSums(DT[, -c(1,2)] >= opt$mincount) == length(opt$reference)  ]
 DT <- unique(DT[ , nguides := sum(pass), by=group] [, .(group, nguides)])
 DT[nguides==0, nguides := NA_integer_]
 
