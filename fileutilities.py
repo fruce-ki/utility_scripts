@@ -364,7 +364,7 @@ def prepare_df(df, myalias="", keyCol=None, keyhead="row_ID", header=False, cols
         keyhead = "row_ID"
     if keyCol is not None:
         # Add index without dropping it, so as not to affect column positions.
-        df.set_index(df.columns.values.tolist()[keyCol], inplace=True, drop=False)
+        df.set_index(df.columns.values.tolist()[keyCol], inplace=True, drop=False, verify_integrity=True)
         df.index.name = str(keyhead)
     # Make custom column labels, based on alias and column position.
     if not cols:
@@ -439,6 +439,8 @@ def get_valuesSet(flist=[None], axis='r', index=0, filter='a', colSep=["\t"]):
         flist.aliases[0]
     except AttributeError:
         flist = FilesList(flist)
+    except IndexError:
+        flist = FilesList(flist)
     # Main part of this function.
     results = []
     for f, (myfile, myalias) in flist.enum():
@@ -510,6 +512,8 @@ def get_columns(flist=[None], cols=[0], colSep=["\t"], header=False, index=None,
     try:
         flist.aliases[0]
     except AttributeError:
+        flist = FilesList(flist)
+    except IndexError:
         flist = FilesList(flist)
     # Parse.
     keyhead = None
@@ -669,6 +673,8 @@ def get_random_columns(flist, colSep=["\t"], k=1, header=False, index=None, merg
         flist.aliases[0]
     except AttributeError:
         flist = FilesList(flist)
+    except IndexError:
+        flist = FilesList(flist)
     # Get columns.
     for f, (myfile, myalias) in flist.enum():
         cols = []
@@ -721,10 +727,12 @@ def append_columns(flist, colSep=["\t"], header=False, index=None, merge=True, t
         flist.aliases[0]
     except AttributeError:
         flist = FilesList(flist)
+    except IndexError:
+        flist = FilesList(flist)
     # Determine how many columns each file has.
     numofcols = count_columns(flist, colSep=colSep)
     # Delegate fetching all the columns.
-    data = []
+    data = list()
     keyhead = None
     for f, (myfile, myalias) in flist.enum():
         # List the columns and remove the index one from among them.
@@ -743,8 +751,6 @@ def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='
     """Incrementally merge tables.
 
 	Join the first two files and then join the third file to the merged first two, etc.
-	For assymetric joins (left or right) the order of files in flist can change the outcome.
-	For symmetric joins (inner or outter) the order of files should not change the outcome.
 
     Args:
         flist: A list/FilesList of files to combine.
@@ -784,15 +790,15 @@ def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='
                                 left_index=True, right_index=True, how="outer")
                 result = pd.concat([hnew, pd.merge(left=result.iloc[1:,:], right=df.iloc[1:,:], how=type, on=None,
                                                    left_index=True, right_index=True,
-                                                   sort=False, suffixes=('','_'+ myalias))],
+                                                   sort=False, suffixes=('','_'+ myalias),
+                                                   validate="one_to_one")],
                                     axis=0, ignore_index=False, sort=False)
             else:
                 result = pd.merge(left=result, right=df, how=type, on=None,
                                   left_index=True, right_index=True,
-                                  sort=False, suffixes=('','_'+ myalias))
+                                  sort=False, suffixes=('','_'+ myalias),
+                                  validate="one_to_one")
     # In addition to the new row_ID columns, the index column was kept for each table. Drop them as redundant.
-    # If the index columns are not exact duplicates (due to gappy rows),
-    #   dedup_columns() can be used afterwards on the merged file).
     if dedup:
         index_cols = [col for col in result.columns if '_|' + str(index) in col]
         result.drop(columns=index_cols, inplace=True)
@@ -1296,13 +1302,11 @@ def main(args):
                                 help="Append all the columns from same-length target files into a single table. \
                                 Can be 'outer' or 'inner' join. If index is used, the values must be unique \
                                 within each file.")
-    parser.add_argument('--merge', nargs=3, type=str,
+    parser.add_argument('--merge', nargs=2, type=str,
                                 help="Merge table files. Index may contain duplicates and files may differ in dimensions. \
                                 The first column of each file will be used as row index to merge on regardless of -i flag. \
                                 First argument is type: 'left', 'right', 'inner', 'outer'. \
-								Second argument is preserve first row: 'yes', 'no' (because merge sorts rows) \
-								Third argument is drop the index columns (one per included file): 'yes', 'no' \
-                                To instead merge the index columns into one column, apply --mrgdups on the output.")
+								Second argument is preserve first row: 'yes', 'no' (because merge sorts rows).")
     parser.add_argument('--mrgdups', type=int, nargs='+',
     							help="Combine gappy duplicate columns into a single column with all the values.\
     							Columns are specified by their 0-based positional index given as arguments here.")
@@ -1488,7 +1492,7 @@ def main(args):
             df = append_columns(flist, colSep=params.sep, header=params.labels, index=idx, type=params.appnd)
         else:
             df = merge_tables(flist, colSep=params.sep, header=params.labels, index=0, type=params.merge[0],
-                              saveHeader=params.merge[1] == "yes", dedup=params.merge[2] == "yes")
+                              saveHeader=params.merge[1] == "yes", dedup=True)
         if params.metadata:
             # Dump all the metadata from all the merged input sources.
             for i, (myfile, myalias) in flist.enum():
