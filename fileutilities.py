@@ -799,9 +799,11 @@ def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='
                                   sort=False, suffixes=('','_'+ myalias),
                                   validate="one_to_one")
     # In addition to the new row_ID columns, the index column was kept for each table. Drop them as redundant.
+    index_cols = [col for col in result.columns if '_|' + str(index) in col]
+    result.drop(columns=index_cols, inplace=True)
     if dedup:
-        index_cols = [col for col in result.columns if '_|' + str(index) in col]
-        result.drop(columns=index_cols, inplace=True)
+        # Look for additional columns with identical content and drop them too.
+        result = result.drop(columns=getDuplicateColumns(result))
     return result
 
 
@@ -1302,11 +1304,12 @@ def main(args):
                                 help="Append all the columns from same-length target files into a single table. \
                                 Can be 'outer' or 'inner' join. If index is used, the values must be unique \
                                 within each file.")
-    parser.add_argument('--merge', nargs=2, type=str,
-                                help="Merge table files. Index may contain duplicates and files may differ in dimensions. \
-                                The first column of each file will be used as row index to merge on regardless of -i flag. \
-                                First argument is type: 'left', 'right', 'inner', 'outer'. \
-								Second argument is preserve first row: 'yes', 'no' (because merge sorts rows).")
+    parser.add_argument('--merge', nargs=3, type=str,
+                                help="Merge table files. \
+                                The first column of each file will be used as row index regardless of absense of -i flag. \
+                                First argument is join type: 'left', 'right', 'inner', 'outer'. \
+								Second argument is preserve first header row: 'yes', 'no' (because merge sorts rows). \
+                                Third argument is detect and drop additional duplicated columns: 'yes', 'no'.")
     parser.add_argument('--mrgdups', type=int, nargs='+',
     							help="Combine gappy duplicate columns into a single column with all the values.\
     							Columns are specified by their 0-based positional index given as arguments here.")
@@ -1492,7 +1495,7 @@ def main(args):
             df = append_columns(flist, colSep=params.sep, header=params.labels, index=idx, type=params.appnd)
         else:
             df = merge_tables(flist, colSep=params.sep, header=params.labels, index=0, type=params.merge[0],
-                              saveHeader=params.merge[1] == "yes", dedup=True)
+                              saveHeader=(params.merge[1]=="yes"), dedup=(params.merge[2]=="yes"))
         if params.metadata:
             # Dump all the metadata from all the merged input sources.
             for i, (myfile, myalias) in flist.enum():
