@@ -1306,7 +1306,7 @@ def main(args):
                                 within each file.")
     parser.add_argument('--merge', nargs=3, type=str,
                                 help="Merge table files. \
-                                The first column of each file will be used as row index regardless of absense of -i flag. \
+                                The first column of each file will be used as row index regardless of -i flag status. \
                                 First argument is join type: 'left', 'right', 'inner', 'outer'. \
 								Second argument is preserve first header row: 'yes', 'no' (because merge sorts rows). \
                                 Third argument is detect and drop additional duplicated columns: 'yes', 'no'.")
@@ -1500,7 +1500,7 @@ def main(args):
             # Dump all the metadata from all the merged input sources.
             for i, (myfile, myalias) in flist.enum():
                 outstream.write(metadata[myfile])
-        sys.stdout.write(df.to_csv(sep=params.sep[0], header=params.relabel, index=params.index))
+        sys.stdout.write(df.to_csv(sep=params.sep[0], header=params.relabel, index=(params.index or params.merge)))
         if params.STDERRcomments:
             if params.appnd:
                 sys.stderr.write(ml.donestring(params.appnd +" append of columns, index "+ str(idx is not None)))
