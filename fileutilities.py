@@ -1074,7 +1074,7 @@ class FilesList(list):
         self.aliases.append(myalias)
         self.aliases = autonumerate(self.aliases)
 
-    def populate_from_files(self, myfiles, colSep="\t", verbatim=True):
+    def populate_from_files(self, myfiles, colSep="\t", verbatim=True, alias_verbatim=True):
         """Parse the list of files from one or multiple text files.
 
         Read in multiple lists of files from text and append them to the
@@ -1125,10 +1125,11 @@ class FilesList(list):
         if not verbatim:
             paths = expand_fpaths(paths)
         self.extend(paths)
-        self.aliases = autonumerate(self.aliases)
+        if not alias_verbatim:
+            self.aliases = autonumerate(self.aliases)
         return self
 
-    def populate_from_directories(self, dirpaths, patterns=None, verbatim=True):
+    def populate_from_directories(self, dirpaths, patterns=None, verbatim=True, alias_verbatim=True):
         """Get files based on naming patterns from within a list of directories.
 
         Useful for selecting among files that follow a naming convention. The
@@ -1343,14 +1344,14 @@ def main(args):
                     flist.append(fields[0])
     elif params.INPUTTYPE == 'L':
         # Create the FilesList, by appending the contents of all provided lists.
-        flist = FilesList().populate_from_files(targets, verbatim=params.verbatim)
+        flist = FilesList().populate_from_files(targets, verbatim=params.verbatim, alias_verbatim=params.verbatim)
     elif params.INPUTTYPE == 'T':
         # Create the FilesList by supplying a direct list of files.
         flist = FilesList(targets, verbatim=params.verbatim)
     elif params.INPUTTYPE == 'D':
         # Data will be read from STDIN. No files needed. Make an empty list.
         # Not all functions will switch to STDIN given this. Several will simply do nothing.
-        flist = FilesList(verbatim=params.verbatim)
+        flist = FilesList(verbatim=params.verbatim, alias_verbatim=params.verbatim)
     else:
         sys.exit(ml.errstring("Unknown INPUTTYPE."))
 
