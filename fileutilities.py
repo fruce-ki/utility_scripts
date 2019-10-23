@@ -713,7 +713,7 @@ def append_columns(flist, colSep=["\t"], header=False, index=None, merge=True, t
         flist: A list/FilesList of files to combine.
         colSep[str]: A list of characters used as field delimiters.
                     (Default ["\t"])
-        header(bool): First non-comment line as column labels. (Default False)
+        header(bool): First non-comment line are column labels to be discasrded. (Default False)
         index(int): Column to use as row index (same in all files).
                     (Default None)
                     If None, the number of rows can differ between files and will be
@@ -729,21 +729,26 @@ def append_columns(flist, colSep=["\t"], header=False, index=None, merge=True, t
         flist = FilesList(flist)
     except IndexError:
         flist = FilesList(flist)
-    # Determine how many columns each file has.
-    numofcols = count_columns(flist, colSep=colSep)
-    # Delegate fetching all the columns.
+    numofcols = count_columns(flist, colSep=colSep) # Determine how many columns each file has.
     data = list()
     keyhead = None
     for f, (myfile, myalias) in flist.enum():
         # List the columns and remove the index one from among them.
         cols = [i for i in range(0,numofcols[f]) if i != index]
-        df =get_columns(FilesList(files=[myfile], aliases=[myalias]), cols=cols,
+        # Delegate fetching all the columns.
+        df = get_columns(FilesList(files=[myfile], aliases=[myalias]), cols=cols,
                      colSep=colSep, header=header, merge=False, index=index)[0]
+        if index is not None:
+            # Then the first value of the row index is the name of the index column and its value may differ across the tables.
+            # This messes up merging. So ensure they all have the same value.
+            if f == 0:
+                keyhead = df.index[0]
+            else:
+                x = df.index.tolist()
+                x[0] = keyhead
+                df.index = x
         data.append( df )
-    # Merge. Row indexes will have been assigned by get_columns(), if applicable.
-    keyhead = data[0].index.name
     result = pd.concat(data, axis=1, join=type, ignore_index=False, sort=False)
-    result.index.name = keyhead
     return result
 
 
@@ -781,6 +786,15 @@ def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='
         cols = [i for i in range(0,numofcols[f])]
         df = get_columns(FilesList(files=[myfile], aliases=[myalias]), cols=cols,
                         colSep=colSep, header=header, merge=False, index=index)[0]
+        if index is not None:
+            # Then the first value of the row index is the name of the index column and its value may differ across the tables.
+            # This messes up merging. So ensure they all have the same value.
+            if f == 0:
+                keyhead = df.index[0]
+            else:
+                x = df.index.tolist()
+                x[0] = keyhead
+                df.index = x
         if (f == 0):
             result = df
         else:
@@ -1301,10 +1315,9 @@ def main(args):
     parser.add_argument('--rndcols', type=int,
                                 help="Randomly select this many columns from the target files. \
                                 With --index, the index column will not be part of the random selection.")
-    parser.add_argument('--appnd', type=str,
-                                help="Append all the columns from same-length target files into a single table. \
-                                Can be 'outer' or 'inner' join. If index is used, the values must be unique \
-                                within each file.")
+    parser.add_argument('--appnd', action='store_true',
+                                help="Add all the columns from the target files into a single table (via outer join). \
+                                If index is used, the values must be unique within each file.")
     parser.add_argument('--merge', nargs=3, type=str,
                                 help="Merge table files. \
                                 The first column of each file will be used as row index regardless of -i flag status. \
@@ -1493,7 +1506,7 @@ def main(args):
         if params.appnd:
             if params.index:
                 idx = 0
-            df = append_columns(flist, colSep=params.sep, header=params.labels, index=idx, type=params.appnd)
+            df = append_columns(flist, colSep=params.sep, header=params.labels, index=idx, type="outer")
         else:
             df = merge_tables(flist, colSep=params.sep, header=params.labels, index=0, type=params.merge[0],
                               saveHeader=(params.merge[1]=="yes"), dedup=(params.merge[2]=="yes"))
@@ -1504,7 +1517,7 @@ def main(args):
         sys.stdout.write(df.to_csv(sep=params.sep[0], header=params.relabel, index=(params.index or params.merge)))
         if params.STDERRcomments:
             if params.appnd:
-                sys.stderr.write(ml.donestring(params.appnd +" append of columns, index "+ str(idx is not None)))
+                sys.stderr.write(ml.donestring("appending columns, index "+ str(idx is not None)))
             else:
                 sys.stderr.write(ml.donestring(params.merge[0] +" merge of tables"))
 
