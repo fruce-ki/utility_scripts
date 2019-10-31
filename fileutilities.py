@@ -1364,7 +1364,7 @@ def main(args):
     elif params.INPUTTYPE == 'D':
         # Data will be read from STDIN. No files needed. Make an empty list.
         # Not all functions will switch to STDIN given this. Several will simply do nothing.
-        flist = FilesList(verbatim=params.verbatim, alias_verbatim=params.verbatim)
+        flist = FilesList(verbatim=params.verbatim)
     else:
         sys.exit(ml.errstring("Unknown INPUTTYPE."))
 
