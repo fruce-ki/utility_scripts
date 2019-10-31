@@ -1,6 +1,20 @@
-### PCA
-########
+---
+title: "PCA"
+author: "Kimon Froussios"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: yes
+---
 
+\VignetteEngine{knitr::knitr}
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE)
+```
+
+```{r message=FALSE, warning=FALSE}
 library(data.table)
 library(ggplot2)
 library(plotly)
@@ -8,6 +22,10 @@ library(matrixStats)
 library(ggExtra)
 library(htmltools)
 library(cluster)
+
+theme_set(theme_bw())
+
+# Calculate PCA and plots
 do_pca <- function(counts, covars, ntop=50L, center=TRUE, scale=TRUE){
   # Convert table to matrix
   countsmat <- as.matrix(counts[, 2:length(counts)])
@@ -21,24 +39,24 @@ do_pca <- function(counts, covars, ntop=50L, center=TRUE, scale=TRUE){
   genevar[, istop := name %in% head(genevar[order(genevar$StDev, decreasing = TRUE), name], n=ntop)]
   
   pvar1 <- ggMarginal(ggplot(genevar) +
-                        geom_point(aes(x=Mean, y=StDev, label=name, colour=istop), shape=16, size=0.8, alpha=0.5) +
-                        labs(x="Mean", y="Standard Deviation") +
-                        scale_x_log10() +
-                        scale_colour_manual(values=c("black", "purple")) +
-                        scale_y_log10() +
-                        ggtitle("All features across all observations") +
-                        theme(legend.position = "none"),
-                      type = "histogram")
+      geom_point(aes(x=Mean, y=StDev, label=name, colour=istop), shape=16, size=0.8, alpha=0.5) +
+      labs(x="Mean", y="Standard Deviation") +
+      scale_x_log10() +
+      scale_colour_manual(values=c("black", "purple")) +
+      scale_y_log10() +
+      ggtitle("All features across all observations") +
+      theme(legend.position = "none"),
+    type = "histogram")
   
   genevar <- genevar[(istop),]
   setorder(genevar, -StDev)
   
   pvar2 <- ggplot(genevar) +
-    geom_point(aes(x=Mean, y=StDev, label=name), shape=16, size=0.8, alpha=0.5, colour="purple") +
-    labs(x="Mean", y="Standard Deviation") +
-    scale_x_log10() +
-    scale_y_log10() +
-    ggtitle(paste("Top", ntop, "features"))
+      geom_point(aes(x=Mean, y=StDev, label=name), shape=16, size=0.8, alpha=0.5, colour="purple") +
+      labs(x="Mean", y="Standard Deviation") +
+      scale_x_log10() +
+      scale_y_log10() +
+      ggtitle(paste("Top", ntop, "features"))
   
   # Correlation of the samples for the selected features only
   sel <- rownames(countsmat) %in% genevar$name
@@ -90,7 +108,7 @@ do_pca <- function(counts, covars, ntop=50L, center=TRUE, scale=TRUE){
   # Add covariates info
   counts <- cbind(covars, as.data.frame(countsmat))
   rownames(counts) <- rownames(countsmat)
-  
+
   # Calculate principal components (after getting rid of zero-variance genes that can't be standardized)
   countsmat <- countsmat[, genevar$name]
   nonconstant <- which(apply(countsmat, 2, var)!=0)
@@ -105,10 +123,10 @@ do_pca <- function(counts, covars, ntop=50L, center=TRUE, scale=TRUE){
   # Coefficient names
   ig <- names(covars)
   ig <- ig[! ig %in% c('sample', 'Sample', 'name', 'Name', 'sizeFactor')]
-  
+
   
   pcaimp <- as.data.table(cbind(as.data.frame(t(summary(pca)$importance)), 
-                                data.frame(PC = 1:length(colnames(pca$x)))))
+                  data.frame(PC = 1:length(colnames(pca$x)))))
   pcaimp <- melt(pcaimp, variable.name = "type", value.name = "Proportion", id.vars = c("PC", "Standard deviation"))
   
   pcmax=15
@@ -122,7 +140,7 @@ do_pca <- function(counts, covars, ntop=50L, center=TRUE, scale=TRUE){
     labs(title = "PCA Screeplot", x = "Principal Component") +
     theme(axis.title.y = element_blank(),
           legend.position = "none")
-  
+
   # Plot first 3 PCs in 2D pairs.
   # Highlight one variable at a time.
   l1 <- lapply(ig, function(varname) { 
@@ -132,7 +150,7 @@ do_pca <- function(counts, covars, ntop=50L, center=TRUE, scale=TRUE){
         coord_fixed()
     )})
   # do.call(grid.arrange, c(l1, ncol=2))
-  
+
   l2 <- lapply(ig, function(varname) { 
     return( 
       ggplot(pc, aes_string(x="PC1", y="PC3", label="name", colour=varname)) +
@@ -140,7 +158,7 @@ do_pca <- function(counts, covars, ntop=50L, center=TRUE, scale=TRUE){
         coord_fixed()
     )})
   # do.call(grid.arrange, c(l2, ncol=2))
-  
+
   l3 <- lapply(ig, function(varname) { 
     return( 
       ggplot(pc, aes_string(x="PC2", y="PC3", label="name", colour=varname)) +
@@ -151,110 +169,86 @@ do_pca <- function(counts, covars, ntop=50L, center=TRUE, scale=TRUE){
   
   return(list(pvar1=pvar1, pvar2=pvar2, genevar=genevar, pcor1=pcor1, pcor2=pcor2, nPC=sum(grepl("PC\\d+", names(pc), perl=TRUE)), pimp=pimp, pc_1_2=l1, pc_1_3=l2, pc_2_3=l3))
 }
+```
 
-### Correlations within the dataframe.
-######################################
+Input
 
-# library(cluster)
-# library(ggplot2)
-# library(data.table)
-# colanes and rownames yes, non-numeric columns no.
-my_pairwise_internal_coords <- function(df, method="pearson") {
-  # Correlations
-  cm <- cor(df[complete.cases(df)], method=method)
-  
-  # Cluster
-  hcfit <- hclust(dist(t(cm)))
-  rn <- rownames(cm)
-  cm <- as.data.table(cm)
-  cm[, observation1 := rn]
-  cm <- melt(genec, id.vars = "observation1", value.name = "correlation", variable.name = "observation2")
-  cm[, observation1 := factor(observation1, ordered=TRUE, levels=rn[hcfit$order]) ]
-  cm[, observation2 := factor(observation2, ordered=TRUE, levels=rn[hcfit$order]) ]
-  
-  # Plot
-  p <- ggplot(cm, aes(x=ibservation1, y=observation2, fill=correlation, label=round(correlation, 2))) +
-    geom_tile() +
-    geom_text(aes(colour=correlation)) +
-    scale_x_discrete(position="right") +
-    scale_fill_gradientn(limits=c(-1, 1), colors=c("steelblue2", "blue", "darkblue", "black", "darkred", "red", "orange") ) +
-    scale_colour_gradientn(limits=c(-1, 1), colors=c("black", "white", "white", "white", "black") ) +
-    labs(x='', y='') +
-    theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
-          panel.background = element_rect(fill="white"))
-  return(p)
-}
-  
-  
-### GGpairs for continuous variables within a dataframe.
-########################################################
+```{r input}
+covars <- fread('/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/M9179_quantseq/description/covars.txt')
+# Gene and sg are mutually redundant info
+covars <- covars[, names(covars) != "sg", with=FALSE]
+setkey(covars, sample)
 
-# Coefficients
-my_cont_ggpairs_upperFn <- function(data, mapping, info="corr", ...) {
-  x <- sub('~', '', as.character(mapping["x"]))
-  y <- sub('~', '', as.character(mapping["y"]))
-  bingo <- NA
-  if (info == "corr"){
-    cm <- cor(data)
-    bingo <- round(cm[y, x], 2)
-  } else if (info == "lmrsq") {
-    l <- lm(data[[y]] ~ data[[x]])
-    bingo <- round(summary(l)$adj.r.square, 2)
-  } else {
-    stop()
-  }
-  cpal <- colorRampPalette(c("darkred", "darkorange", "gold", "steelblue", "darkblue"))(201)
-  p <- ggplot() +
-    annotate("text", x=0.5, y=0.5, label=bingo, colour=cpal[bingo * 100 + 101], ...) +
-    coord_cartesian(xlim=c(0,1), ylim=c(0,1)) +
-    theme(panel.background = element_rect(fill="white"),
-          panel.grid.minor = element_blank(), 
-          panel.grid.major = element_blank())
-  return(p)
-}
+xref <- fread("/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/M9179_quantseq/aux/xref_mm_genes.txt")
+setkey(xref, ensembl_gene_id)
 
-# Scatters
-# *trans are normal ggplot2 transformation strings like "log10"
-my_cont_ggpairs_lowerFn <- function(data, mapping, method = "lm", xtrans=NULL, ytrans=NULL, ...) {
-  p <- ggplot(data = data, mapping = mapping) +
-    geom_abline(intercept = 0, slope=1) +
-    geom_point(colour = "blue", shape=16, size=rel(0.8), alpha=0.2) +
-    geom_smooth(method = method, color = "red", ...) +
-    theme(panel.background = element_rect(fill="white"))
-  if (!is.null(xtrans)) {
-    p <- p + scale_x_continuous(trans=xtrans)
-  }
-  if (!is.null(ytrans)) {
-    p <- p + scale_y_continuous(trans=ytrans)
-  }
-  return(p)
-}
+counts <- fread('/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/M9179_quantseq/process/counts/all_counts_named.tsv')
+# g <- data.table(eid = counts$Geneid,
+#                 name = xref[counts$Geneid, external_gene_name] )
+# g[is.na(name), name := eid]
+# counts[, Geneid := g$name]
+setkey(counts, Geneid)
 
-# Distributions
-my_cont_ggpairs_diagFn <- function(data, mapping, xtrans=NULL, ...) {
-  x <- sub('~', '', as.character(mapping["x"]))
-  # v <- data[, x, with=FALSE]
-  # names(v) <- 'x'
-  p <- ggplot(data, mapping) +
-    geom_density(...) +
-    theme(panel.background = element_rect(fill="grey95"),
-          panel.grid.minor = element_blank(), 
-          panel.grid.major = element_blank())
-  if (!is.null(xtrans)) {
-    p <- p + scale_x_continuous(trans=xtrans)
-  }
-  return(p)
-}
+# fwrite(counts, file='/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/M9179_quantseq/process/counts/all_counts_renamed.tsv', sep="\t")
+```
 
-# Put it all together (because I'll forget the syntax)
-my_cont_ggpairs <- function(df, method="lm", info="lmrsq", xtrans=NULL, ytrans=NULL) {
-  p <- ggpairs(df,
-        lower = list(continuous = wrap(my_cont_ggpairs_lowerFn, method=method, xtrans=xtrans, ytrans=ytrans)),
-        # lower = list(continuous = "na"),
-        diag = list(continuous = wrap(my_cont_ggpairs_diagFn, xtrans=xtrans)),
-        # diag = list(continuous = "naDiag"),
-        upper = list(continuous = wrap(my_cont_ggpairs_upperFn, info=info, size=5))
-    ) +
-    theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5))
-  return(p)
-}
+# PCA all
+
+## Feature selection
+
+### Variances
+
+```{r}
+# Variance VS Mean
+res <- do_pca(counts, covars)
+print(res[["pvar1"]])
+ggplotly(res[["pvar2"]])
+```
+
+### Selected features
+
+```{r}
+# Top variance genes
+print(res[["genevar"]]$name)
+```
+
+## Correlations
+
+### among samples
+
+```{r fig.width=15, fig.height=15}
+print(res[["pcor1"]])
+```
+
+### among selected features
+
+```{r fig.width=10, fig.height=10}
+print(res[["pcor2"]])
+```
+
+## PCA
+
+```{r}
+# Scree
+cat(paste(res[["nPC"]], "principal componenets."))
+print(res[["pimp"]])
+```
+
+### PC1 + PC2
+
+```{r}
+htmltools::tagList(lapply(res[["pc_1_2"]], function(x) { ggplotly(x) }))
+```
+
+### PC1 + PC3
+
+```{r}
+htmltools::tagList(lapply(res[["pc_1_3"]], function(x) { ggplotly(x) }))
+```
+
+### PC2 + PC3
+
+```{r}
+htmltools::tagList(lapply(res[["pc_2_3"]], function(x) { ggplotly(x) }))
+```
+
