@@ -13,7 +13,7 @@ spec = matrix(c(
   'control'      , 'x', 1, "character", "Comma separated value for each variable to use as reference for all comparisons, in the order variables are listed in samplesfile",
   'designFormula', 'd', 1, "character", "Design formula",
   'reducedFormula','R', 1, "character", "Reduced formula for LR test",
-  'minCount',      'M', 1, "character", "Minimum number of reads across all samples combined for a gene to be considered (30)."
+  'minCount'     , 'M', 1, "character", "Minimum number of reads across all samples combined for a gene to be considered (30)."
 ), byrow=TRUE, ncol=5)
 opt = getopt(spec)
 #opt <- list(baseDir='/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/M9179_quantseq', countsFile='process/counts/all_counts_named.tsv', resultsDir='./process/DE', RDSoutdir='./process/DE', samplesFile='./aux/CMcontrols.txt', control='post', designFormula='~ time', reducedFormula='~1')
@@ -35,6 +35,7 @@ if ( is.null(opt$minCount ) ) {
 }
 
 dir.create(file.path(opt$baseDir, opt$RDSoutdir))
+
 if ( !is.null(opt$resultsDir ) ) { 
   dir.create(file.path(opt$baseDir, opt$resultsDir))
 }
@@ -93,20 +94,22 @@ if (!is.null(opt$reducedFormula)){
 
 saveRDS(dds, file=file.path(opt$baseDir, opt$RDSoutdir, paste0(autoname, '_deseq2.RDS')))
 
-# Plain results
-# res_e5 <- results(dds, contrast=c('condition', 'N1', 'E5'))
-# res_e7 <- results(dds, contrast=c('condition', 'N1', 'E7'))
-# res_m1 <- results(dds, contrast=c('condition', 'N1', 'M1'))
-
-# Shrunk LFC supposedly better for plotting and ranking
+coefficients <- resultsNames(dds)
 if( !is.null(opt$resultsDir) ) {
-  coefficients <- resultsNames(dds)
+  # Plain results
+  for (name in coefficients[2:length(coefficients)]) {
+    res <- results(dds, name=name)
+    res$mlog10p <- -log10(res$padj)
+    write.table(data.frame(row_ID=rownames(res), res), file=file.path(opt$baseDir, opt$resultsDir, paste0(autoname, '_', name, '.lfc.tsv')),
+                sep="\t", quote=FALSE, row.names=FALSE, col.names=TRUE)
+  }
+  # Shrunk LFC supposedly better for plotting and ranking
   for (name in coefficients[2:length(coefficients)]) {
     res <- lfcShrink(dds, coef=name, type='apeglm')       # apeglm is the type recommended by DESeq2
-    
+
                                                           # Significance and counts are kept the same, but lfc is shrunk.
     res$mlog10p <- -log10(res$padj)
-    write.table(data.frame(row_ID=rownames(res), res), file=file.path(opt$baseDir, opt$resultsDir, paste0(autoname, '_', name, '.tsv')),
+    write.table(data.frame(row_ID=rownames(res), res), file=file.path(opt$baseDir, opt$resultsDir, paste0(autoname, '_', name, '.shrunken.tsv')),
               sep="\t", quote=FALSE, row.names=FALSE, col.names=TRUE)
   }
 }
