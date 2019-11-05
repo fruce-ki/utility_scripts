@@ -2,13 +2,13 @@
 ########
 
 library(data.table)
-library(ggplot2)
-library(plotly)
 library(matrixStats)
+library(ggplot2)
 library(ggExtra)
+library(plotly)
 library(htmltools)
-library(cluster)
-do_pca <- function(counts, covars, ntop=50L, center=TRUE, scale=TRUE){
+# Calculate PCA and plots
+do_pca <- function(counts, covars, center=TRUE, scale=TRUE, loadthresh = 0.75){
   # Convert table to matrix
   countsmat <- as.matrix(counts[, 2:length(counts)])
   rownames(countsmat) <- counts$Geneid
@@ -18,31 +18,88 @@ do_pca <- function(counts, covars, ntop=50L, center=TRUE, scale=TRUE){
                         Mean = rowMeans(countsmat),
                         StDev = rowVars(countsmat) )
   
-  genevar[, istop := name %in% head(genevar[order(genevar$StDev, decreasing = TRUE), name], n=ntop)]
+  # Rotate counts so genes are variables and samples are observations
+  countsmat <- t(countsmat)
+  
+  # Add covariates info
+  counts <- cbind(covars, as.data.table(countsmat))
+  rownames(counts) <- rownames(countsmat)
+  
+  # Calculate principal components (after getting rid of zero-variance genes that can't be standardized).
+  
+  nonconstant <- which(apply(countsmat, 2, var)!=0)
+  countsmat <- countsmat[, nonconstant]
+  nvars <- dim(countsmat)[2]
+  
+  pca <- prcomp(countsmat, center = center, scale. = scale)
+  srn <- sqrt(nrow(countsmat) - 1)
+  pc <- sweep(pca$x, 2, 1 / (pca$sdev * srn), FUN = '*')
+  pc <- cbind(pc, data.frame(name = rownames(pc)))
+  pc <- merge(pc, covars, by.x = "name", by.y="sample", all = TRUE)
+  npc <- sum(pca$sdev > 1)
+  
+  # Screeplot.
+  
+  pcaimp <- as.data.table(cbind(as.data.frame(t(summary(pca)$importance)), 
+                                data.frame(PC = 1:length(colnames(pca$x)))))
+  pcaimp <- melt(pcaimp, variable.name = "type", value.name = "Proportion", id.vars = c("PC", "Standard deviation"))
+  
+  pcmax=15
+  pimp <- ggplot(pcaimp[(PC<pcmax),], aes(x=PC, y=Proportion)) +
+    facet_grid(type ~ ., scales="free_y") +
+    geom_bar(aes(fill=type), stat="identity", width=0.6) +
+    geom_line(aes(colour=type)) +
+    scale_fill_manual(values = c("grey50", "transparent")) +
+    scale_colour_manual(values = c("transparent", "grey25")) +
+    scale_x_continuous(breaks = seq(1, pcmax, 2)) +
+    labs(title = "PCA Screeplot", subtitle=paste0(nvars, " features, ", npc, " PCs"), x = "Principal Component") +
+    theme(axis.title.y = element_blank(),
+          legend.position = "none")
+  
+  # Top loadings for the first 3 PCs.
+  
+  loads <- as.data.table(t(t(pca$rotation) * pca$sdev))
+  loads[, rowID := rownames(pca$rotation)]
+  loads <- melt(loads, value.name = "Loading", id.vars="rowID", variable.name="PC")
+  loads[, absload := abs(Loading)]
+  lhigh <- loads$absload > loadthresh     # keep only high loadings
+  setorder(loads, PC, -absload)
+  sel1 <- loads[lhigh > loadthresh & PC=="PC1", rowID]
+  sel2 <- loads[lhigh > loadthresh & PC=="PC2", rowID]
+  sel3 <- loads[lhigh > loadthresh & PC=="PC3", rowID]
+  sel <- unique(loads[lhigh, rowID])
+  
+  # Coefficient names.
+  
+  ig <- names(covars)
+  ig <- ig[! ig %in% c('sample', 'Sample', 'name', 'Name', 'sizeFactor')]
+  
+  # Means and Variances of the top loads in the first 3 PCs.
+  
+  genevar = data.table(rowID = colnames(countsmat),
+                       Mean = colMeans(countsmat), 
+                       StDev = colSds(countsmat) )
+  genevar[, istop:= rowID %in% sel]
   
   pvar1 <- ggMarginal(ggplot(genevar) +
-                        geom_point(aes(x=Mean, y=StDev, label=name, colour=istop), shape=16, size=0.8, alpha=0.5) +
-                        labs(x="Mean", y="Standard Deviation") +
+                        geom_point(aes(x=Mean, y=StDev, label=rowID, colour=istop), shape=16, size=0.8, alpha=0.5) +
                         scale_x_log10() +
-                        scale_colour_manual(values=c("black", "purple")) +
+                        scale_colour_manual(values=c("black", "violetred")) +
                         scale_y_log10() +
-                        ggtitle("All features across all observations") +
+                        labs(x="Mean", y="Standard Deviation", title="All features") +
                         theme(legend.position = "none"),
                       type = "histogram")
   
-  genevar <- genevar[(istop),]
-  setorder(genevar, -StDev)
-  
-  pvar2 <- ggplot(genevar) +
-    geom_point(aes(x=Mean, y=StDev, label=name), shape=16, size=0.8, alpha=0.5, colour="purple") +
-    labs(x="Mean", y="Standard Deviation") +
+  pvar2 <- ggplot(genevar[(istop),]) +
+    geom_point(aes(x=Mean, y=StDev, label=rowid), shape=16, size=0.8, alpha=0.5, colour="purple") +
+    labs(x="Mean", y="Standard Deviation", 
+         title="Top-loading features", subtitle = "in the first 3 PCs") +
     scale_x_log10() +
-    scale_y_log10() +
-    ggtitle(paste("Top", ntop, "features"))
+    scale_y_log10()
   
-  # Correlation of the samples for the selected features only
-  sel <- rownames(countsmat) %in% genevar$name
-  genec <- cor(countsmat[sel, ])
+  # Correlation of the samples for the selected features only.
+  
+  genec <- cor(t(countsmat[, sel]))
   hcfit <- hclust(dist(t(genec)))
   rn <- rownames(genec)
   genec <- as.data.table(genec)
@@ -57,75 +114,39 @@ do_pca <- function(counts, covars, ntop=50L, center=TRUE, scale=TRUE){
     geom_tile() +
     # geom_text(colour="white") +
     # scale_x_discrete(position="top") +
-    scale_fill_gradientn(limits=c(-1, 1), colors=c("steelblue2", "blue", "darkblue", "black", "darkred", "red", "orange") ) +
-    labs(x='', y='') +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("steelblue2", "blue", "darkblue", "black", "darkred", "red", "orange", "yellow") ) +
+    labs(x='', y='', title="Correlation of samples", subtitle="(top loading in first 3PCs)") +
     theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5))
   
-  # Rotate counts so genes are variables and samples are observations
-  countsmat <- t(countsmat)
-  
-  # Correlation of the selected features
-  genec <- cor(countsmat[, sel])
-  hcfit <- hclust(dist(t(genec)))
-  rn <- rownames(genec)
-  genec <- as.data.table(genec)
-  genec[, observation1 := rn]
-  genec <- melt(genec, id.vars = "observation1", value.name = "correlation", variable.name = "observation2")
-  genec[, observation1 := factor(observation1, ordered=TRUE, 
-                                 levels=rn[hcfit$order]) ]
-  genec[, observation2 := factor(observation2, ordered=TRUE, 
-                                 levels=rn[hcfit$order]) ]
-  
-  pcor2 <- ggplot(genec, aes(x=observation1, y=observation2, fill=correlation, label=correlation)) +
-    geom_tile() +
-    # geom_text(colour="white") +
-    # scale_x_discrete(position="top") +
-    scale_fill_gradientn(limits=c(-1, 1), colors=c("steelblue2", "blue", "darkblue", "black", "darkred", "red", "orange") ) +
-    labs(x='', y='') +
-    theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5))
-  if (ntop >50) {
-    pcor2 <- pcor2 + theme(axis.text.x = element_blank(), axis.text.y = element_blank())
-  }
-  
-  # Add covariates info
-  counts <- cbind(covars, as.data.frame(countsmat))
-  rownames(counts) <- rownames(countsmat)
-  
-  # Calculate principal components (after getting rid of zero-variance genes that can't be standardized)
-  countsmat <- countsmat[, genevar$name]
-  nonconstant <- which(apply(countsmat, 2, var)!=0)
-  countsmat <- countsmat[, nonconstant]
-  
-  pca <- prcomp(countsmat, center = center, scale. = scale)
-  srn <- sqrt(nrow(countsmat) - 1)
-  pc <- sweep(pca$x, 2, 1 / (pca$sdev * srn), FUN = '*')
-  pc <- cbind(pc, data.frame(name = rownames(pc)))
-  pc <- merge(pc, covars, by.x = "name", by.y="sample", all = TRUE)
-  
-  # Coefficient names
-  ig <- names(covars)
-  ig <- ig[! ig %in% c('sample', 'Sample', 'name', 'Name', 'sizeFactor')]
-  
-  
-  pcaimp <- as.data.table(cbind(as.data.frame(t(summary(pca)$importance)), 
-                                data.frame(PC = 1:length(colnames(pca$x)))))
-  pcaimp <- melt(pcaimp, variable.name = "type", value.name = "Proportion", id.vars = c("PC", "Standard deviation"))
-  
-  pcmax=15
-  pimp <- ggplot(pcaimp[(PC<pcmax),], aes(x=PC, y=Proportion)) +
-    facet_grid(type ~ ., scales="free_y") +
-    geom_bar(aes(fill=type), stat="identity", width=0.6) +
-    geom_line(aes(colour=type)) +
-    scale_fill_manual(values = c("grey50", "transparent")) +
-    scale_colour_manual(values = c("transparent", "grey25")) +
-    scale_x_continuous(breaks = seq(1, pcmax, 2)) +
-    labs(title = "PCA Screeplot", x = "Principal Component") +
-    theme(axis.title.y = element_blank(),
-          legend.position = "none")
+  # # Correlation of the selected features.
+  # 
+  # genec <- cor(countsmat[, sel])
+  # hcfit <- hclust(dist(t(genec)))
+  # rn <- rownames(genec)
+  # genec <- as.data.table(genec)
+  # genec[, observation1 := rn]
+  # genec <- melt(genec, id.vars = "observation1", value.name = "correlation", variable.name = "observation2")
+  # genec[, observation1 := factor(observation1, ordered=TRUE, 
+  #                                levels=rn[hcfit$order]) ]
+  # genec[, observation2 := factor(observation2, ordered=TRUE, 
+  #                                levels=rn[hcfit$order]) ]
+  # 
+  # pcor2 <- ggplot(genec, aes(x=observation1, y=observation2, fill=correlation, label=correlation)) +
+  #   geom_tile() +
+  #   # geom_text(colour="white") +
+  #   # scale_x_discrete(position="top") +
+  #   scale_fill_gradientn(limits=c(-1, 1), colors=c("steelblue2", "blue", "darkblue", "black", "darkred", "red", "orange") ) +
+  #   labs(x='', y='', title="Correlation of top-loading features", subtitle="(in first 3 PCs)") +
+  #   theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5))
+  # if (sqrt(dim(genec)[1]) >50) {
+  #   pcor2 <- pcor2 + theme(axis.text.x = element_blank(), 
+  #                          axis.text.y = element_blank(),
+  #                          axis.ticks = element_blank() )
+  # }
   
   # Plot first 3 PCs in 2D pairs.
   # Highlight one variable at a time.
-  l1 <- lapply(ig, function(varname) { 
+  pc12 <- lapply(ig, function(varname) { 
     return( 
       ggplot(pc, aes_string(x="PC1", y="PC2", label="name", colour=varname)) +
         geom_point(shape=16) +
@@ -133,7 +154,7 @@ do_pca <- function(counts, covars, ntop=50L, center=TRUE, scale=TRUE){
     )})
   # do.call(grid.arrange, c(l1, ncol=2))
   
-  l2 <- lapply(ig, function(varname) { 
+  pc13 <- lapply(ig, function(varname) { 
     return( 
       ggplot(pc, aes_string(x="PC1", y="PC3", label="name", colour=varname)) +
         geom_point(shape=16) +
@@ -141,7 +162,7 @@ do_pca <- function(counts, covars, ntop=50L, center=TRUE, scale=TRUE){
     )})
   # do.call(grid.arrange, c(l2, ncol=2))
   
-  l3 <- lapply(ig, function(varname) { 
+  pc23 <- lapply(ig, function(varname) { 
     return( 
       ggplot(pc, aes_string(x="PC2", y="PC3", label="name", colour=varname)) +
         geom_point(shape=16) +
@@ -149,7 +170,15 @@ do_pca <- function(counts, covars, ntop=50L, center=TRUE, scale=TRUE){
     )})
   # do.call(grid.arrange, c(l3, ncol=2))
   
-  return(list(pvar1=pvar1, pvar2=pvar2, genevar=genevar, pcor1=pcor1, pcor2=pcor2, nPC=sum(grepl("PC\\d+", names(pc), perl=TRUE)), pimp=pimp, pc_1_2=l1, pc_1_3=l2, pc_2_3=l3))
+  return(list(pca=pca, 
+              nvars=nvars, 
+              nPC=npc, 
+              pimp=pimp, 
+              load1=sel1, load2=sel2, load3=sel3,
+              pc_1_2=pc12, pc_1_3=pc13, pc_2_3=pc23,
+              pvar1=pvar1, pvar2=pvar2, 
+              pcor1=pcor1 #, pcor2=pcor2
+  ))
 }
 
 ### Correlations within the dataframe.
@@ -161,27 +190,35 @@ do_pca <- function(counts, covars, ntop=50L, center=TRUE, scale=TRUE){
 # colanes and rownames yes, non-numeric columns no.
 my_pairwise_internal_coords <- function(df, method="pearson") {
   # Correlations
-  cm <- cor(df[complete.cases(df)], method=method)
+  cormat <- cor(df[complete.cases(df)], method=method)
   
   # Cluster
-  hcfit <- hclust(dist(t(cm)))
-  rn <- rownames(cm)
-  cm <- as.data.table(cm)
-  cm[, observation1 := rn]
-  cm <- melt(genec, id.vars = "observation1", value.name = "correlation", variable.name = "observation2")
-  cm[, observation1 := factor(observation1, ordered=TRUE, levels=rn[hcfit$order]) ]
-  cm[, observation2 := factor(observation2, ordered=TRUE, levels=rn[hcfit$order]) ]
+  hcfit <- hclust(dist(cormat))
+  cormat <- cormat[hcfit$order, hcfit$order]
+  rn <- rownames(cormat)
   
-  # Plot
-  p <- ggplot(cm, aes(x=ibservation1, y=observation2, fill=correlation, label=round(correlation, 2))) +
+  # Delete diagonal half.
+  for (r in 1:nrow(cormat)) {
+    for (c in 1:ncol(cormat)) {
+      if (c < r) {
+        cormat[r, c] <- NA_real_
+      }
+    }
+  }
+  
+  cormat <- as.data.table(t(cormat))
+  cormat[, observation1 := factor(rn, ordered=TRUE, levels=rn)]
+  cormat <- melt(cormat, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
+  cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rn)]
+  
+  p <- ggplot(cormat, aes(x=observation1, y=observation2, fill=Correlation, label=round(Correlation, 2))) +
     geom_tile() +
-    geom_text(aes(colour=correlation)) +
-    scale_x_discrete(position="right") +
-    scale_fill_gradientn(limits=c(-1, 1), colors=c("steelblue2", "blue", "darkblue", "black", "darkred", "red", "orange") ) +
-    scale_colour_gradientn(limits=c(-1, 1), colors=c("black", "white", "white", "white", "black") ) +
+    geom_text(aes(colour=Correlation)) +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue", "blue", "blue", "darkblue", "black", "darkred", "red", "orange", "yellow"), na.value = "transparent" ) +
+    scale_colour_gradientn(limits=c(-1, 1), colors=c("black", "black", "white", "white", "white", "white", "white", "white", "white","black",  "black"), guide="none") +
     labs(x='', y='') +
     theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
-          panel.background = element_rect(fill="white"))
+          panel.grid.major.x = element_blank() )
   return(p)
 }
   
