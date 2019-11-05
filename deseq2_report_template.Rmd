@@ -1,0 +1,215 @@
+---
+title: "DE Report"
+author: "Kimon"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE)
+```
+
+# Setup
+
+```{r libraries}
+library(DESeq2)
+library(data.table)
+library(ggplot2)
+library(plotly)
+library(htmltools)
+```
+
+```{r parameters}
+theme_set(theme_bw())
+
+ntop = 50
+pcutoff <- 0.001
+lfcthreshold <- 1
+
+dds <- readRDS('/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/M9179_quantseq/process/DE_wald/CMat/gene_deseq2.RDS')
+
+# xref <- NULL
+xref <- fread('/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/M9179_quantseq/aux/xref_mm_genes.txt')
+```
+
+```{r preprocess}
+cat(paste("P cut-off:", pcutoff))
+cat(paste("L2FC threshold:", lfcthreshold))
+cat(paste("max N hits to highlight and list:", ntop))
+
+# Assume first column of xref is key
+if (!is.null(xref)){
+  setkeyv(xref, cols=names(xref)[1])
+}
+
+# Contrasts.
+coefficients <- resultsNames(dds)[resultsNames(dds) != "Intercept"]
+
+# Variance stabisized counts
+vstmat <- assay(vst(dds, blind=FALSE))
+```
+
+```{r}
+# DE
+do_de_plots <- function(dds, contrast, ntop){
+  # Get DE for given contrast
+  lfc <- results(dds, name=contrast)
+  lfc <- cbind(data.table(name=rownames(lfc)), as.data.table(lfc))
+  lfc[, mltp := -log10(padj)] [, type := "raw LFC"]
+  shrink <- lfcShrink(dds, coef=contrast, type='apeglm')
+  shrink <- cbind(data.table(name=rownames(shrink)), as.data.table(shrink))
+  shrink[, mltp := -log10(padj)] [, type := "shrunken LFC"] [, absl2fc := abs(log2FoldChange)]
+  shrink[, meetthresh := abs(log2FoldChange) >= lfcthreshold & padj < pcutoff]
+  shrink[, dist := sqrt((mltp * (max(shrink$absl2fc) / max(shrink$mltp, na.rm = TRUE)) * 2)^2 + log2FoldChange^2)]
+  setorder(shrink, -dist, -absl2fc,-mltp)
+  
+  # Filter out the uninteresting points, to make it lightweight and ggplotly-friendly
+  subfc <- shrink[(meetthresh), ]
+  # Handle freak cases.
+  if (nrow(subfc) < ntop) {
+    subfc <- shrink[abs(log2FoldChange) >= 0.5 & padj < 0.1, ] 
+    # So there's something to display in the interactive volcano
+  }
+  
+  subfc[, istop := FALSE]
+  if (any(subfc$meetthresh)) {
+    subfc[1:min(ntop, nrow(subfc)), istop := c(TRUE)]
+    subfc[(!meetthresh), istop := FALSE]
+  }
+  
+  # Volcanos
+  
+  pv1 <- ggplot(rbind(lfc, shrink, fill=TRUE), 
+                aes(x=log2FoldChange, y=mltp, 
+                    shape= name %in% subfc[(istop), name], 
+                    colour=name %in% subfc[(istop), name])) + 
+            facet_grid( . ~ type, scales="free") +
+            geom_point(size=0.8, alpha=0.5) +
+            scale_colour_manual(values=c("black", "magenta")) +
+            scale_shape_manual(values=c(16, 17)) +
+            labs(x='log2( FC )', y='-log10( Padj )', title=contrast) +
+            theme(legend.position = "none")
+  pv2 <- ggplot(subfc, 
+                aes(x=log2FoldChange, y=mltp, label=name, shape= istop, colour=istop)) + 
+            geom_point(size=0.8, alpha=0.5) +
+            scale_colour_manual(values=c("black", "magenta")) +
+            scale_shape_manual(values=c(16, 17)) +
+            labs(x='log2( FC )', y='-log10( Padj )', title=contrast) +
+            theme(legend.position = "none",
+                  panel.grid = element_blank())
+  
+  # Expression of ntop genes that meet thresholds
+  
+  # Get the counts for the relevant samples only
+  mM <- attr(dds, "modelMatrix")
+  refs <- rownames(mM[apply(mM, 1, sum) == 1, ])
+  treats <- rownames(mM)[mM[, contrast] == 1]
+  selcnt <- assay(vst(dds, blind=FALSE))[head(subfc$name, n=ntop), ]
+  if (is.null(dim(selcnt))){ # if there is only one hit
+    selcnt <- as.data.frame( c(as.list(selcnt[c(refs, treats)]), list(name=subfc$name)) )
+    selcnt <- melt(selcnt, id.vars="name", variable.name="sample", value.name="VST_count")
+    rn <- subfc$name
+  } else {
+    selcnt <- selcnt[, c(refs, treats)]
+    # Custer row and columns
+    cfit <- hclust(dist(scale(t(selcnt), center=TRUE)))
+    rfit <- hclust(dist(selcnt))
+    selcnt <- selcnt[rfit$order, cfit$order]
+    cn <- colnames(selcnt)
+    rn <- rownames(selcnt)
+    # Tidy
+    selcnt <- as.data.table(cbind(data.table(name=rownames(selcnt)), as.data.frame(selcnt)))
+    selcnt[, name := factor(name, ordered=TRUE, levels=rn)]
+    selcnt <- melt(selcnt, id.vars="name", variable.name="sample", value.name="VST_count")
+    selcnt[, sample := factor(sample, ordered=TRUE, levels=cn)]
+  }
+    
+  pe1 <- ggplot(selcnt, aes(x=sample, y=name, fill=VST_count)) +
+            geom_tile() +
+            scale_fill_gradient(low="transparent", high="darkgreen", limits=c(0,max(selcnt$VST_count))) +
+            labs(title=contrast) +
+            theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5))
+  
+  return(list(pv1=pv1, pv2=pv2, pe1=pe1, tophits=rn))
+}
+
+# Correlations
+my_pairwise_internal_coords <- function(mat, method="pearson") {
+  # Correlations
+  cormat <- cor(mat, method=method)
+  
+  # Cluster
+  hcfit <- hclust(dist(scale(cormat, center=TRUE)))
+  cormat <- cormat[hcfit$order, hcfit$order]
+  rn <- rownames(cormat)
+  
+  # Delete diagonal half.
+  for (r in 1:nrow(cormat)) {
+    for (c in 1:ncol(cormat)) {
+      if (c < r) {
+        cormat[r, c] <- NA_real_
+      }
+    }
+  }
+  
+  cormat <- as.data.table(t(cormat))
+  cormat[, observation1 := factor(rn, ordered=TRUE, levels=rn)]
+  cormat <- melt(cormat, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
+  cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rn)]
+  
+  p <- ggplot(cormat, aes(x=observation1, y=observation2, fill=Correlation, label=round(Correlation, 2))) +
+    geom_tile() +
+    geom_text(aes(colour=Correlation)) +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue", "blue", "darkblue", "black", "darkred", "red", "orange", "yellow"), na.value = "transparent" ) +
+    scale_colour_gradientn(limits=c(-1, 1), colors=c("black", "black", "white", "white", "white", "white", "white", "white", "white","black",  "black"), guide="none") +
+    labs(x='', y='') +
+    theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
+          panel.grid.major.x = element_blank() )
+  return(p)
+}
+```
+
+# Correlations
+
+```{r correlations, fig.heigh=8, fig.width=8}
+# Correlation of raw counts
+print(my_pairwise_internal_coords(counts(dds)) + labs(title="Sample correlations (raw counts)"))
+
+# Variance stabilised counts
+print(my_pairwise_internal_coords(vstmat) + labs(title="Sample correlations (VST counts)"))
+```
+
+# DE
+
+```{r DE, fig.heigh=8, fig.width=8}
+ly <- htmltools::tagList()
+
+for (i in 1:length(coefficients)){
+  res <- do_de_plots(dds, coefficients[i], ntop)
+  
+  # Volcanoes
+  print(res[["pv1"]])
+  ly[[i]] <- as_widget(subplot( ggplotly(res[["pv2"]]) ))
+  
+  # Hit list
+  if (is.null(xref)){
+    print(res[["tophits"]])
+  } else {
+    print(xref[res[["tophits"]],])
+  }
+  
+  # Hit expression
+  print(res[["pe1"]])
+}
+```
+
+## Interactive filtered volcanos
+
+```{r interactive}
+ly
+```
+
+
