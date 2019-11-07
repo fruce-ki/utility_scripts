@@ -184,24 +184,35 @@ do_pca <- function(counts, covars, center=TRUE, scale=TRUE, loadthresh = 0.75){
 ### Correlations within the dataframe.
 ######################################
 
-# library(cluster)
 # library(ggplot2)
 # library(data.table)
 # colanes and rownames yes, non-numeric columns no.
-my_pairwise_internal_coords <- function(df, method="pearson") {
+my_pairwise_internal_coords <- function(mat, method="pearson", triangular=FALSE) {
   # Correlations
-  cormat <- cor(df[complete.cases(df)], method=method)
+  cormat <- cor(mat, method=method)
   
   # Cluster
-  hcfit <- hclust(dist(cormat))
+  hcfit <- hclust(dist(scale(cormat, center=TRUE)))
   cormat <- cormat[hcfit$order, hcfit$order]
   rn <- rownames(cormat)
+  cormat2 <- cormat # Duplicate,
   
-  # Delete diagonal half.
+  
+  # Delete diagonal half for the numeric labels. But keep the heatmap square, because pretty.
   for (r in 1:nrow(cormat)) {
     for (c in 1:ncol(cormat)) {
       if (c < r) {
         cormat[r, c] <- NA_real_
+      }
+    }
+  }
+  # Unless I want it to be all triangular
+  if (triangular) {
+    for (r in 1:nrow(cormat2)) {
+      for (c in 1:ncol(cormat2)) {
+        if (c < r) {
+          cormat2[r, c] <- NA_real_
+        }
       }
     }
   }
@@ -210,15 +221,21 @@ my_pairwise_internal_coords <- function(df, method="pearson") {
   cormat[, observation1 := factor(rn, ordered=TRUE, levels=rn)]
   cormat <- melt(cormat, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
   cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rn)]
+  cormat2 <- as.data.table(t(cormat2))
+  cormat2[, observation1 := factor(rn, ordered=TRUE, levels=rn)]
+  cormat2 <- melt(cormat2, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
+  cormat2[, observation2 := factor(observation2, ordered=TRUE, levels=rn)]
   
-  p <- ggplot(cormat, aes(x=observation1, y=observation2, fill=Correlation, label=round(Correlation, 2))) +
-    geom_tile() +
-    geom_text(aes(colour=Correlation)) +
-    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue", "blue", "blue", "darkblue", "black", "darkred", "red", "orange", "yellow"), na.value = "transparent" ) +
-    scale_colour_gradientn(limits=c(-1, 1), colors=c("black", "black", "white", "white", "white", "white", "white", "white", "white","black",  "black"), guide="none") +
+  p <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(data=cormat, aes(label=round(Correlation, 2), colour=Correlation)) +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue", "blue", "darkblue", "black", "darkred", "red", "orange", "yellow"), na.value = "transparent" ) +
+    scale_colour_gradientn(limits=c(-1, 1), colors=rep(c("black", "white", "white", "black"), each=3), guide="none") +
     labs(x='', y='') +
-    theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
-          panel.grid.major.x = element_blank() )
+    theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5))
+  if (!triangular) {
+    p <- p + theme(panel.grid.major = element_blank())
+  }
   return(p)
 }
   
