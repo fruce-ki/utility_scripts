@@ -121,10 +121,10 @@ if [ $do_pre -eq 1 ]; then
     echo "Demultiplexing BAM using anchor sequence."
 #   # module load python-levenshtein/0.12.0-foss-2017a-python-2.7.13
 #   # module load pysam/0.14.1-foss-2017a-python-2.7.13
-    # fileutilities.py T ${indir}/*.bam --loop srun ,--mem=50000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q \&
+    fileutilities.py T ${indir}/*.bam --loop srun ,--mem=50000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q \&
 #   # # module unload python-levenshtein/0.12.0-foss-2017a-python-2.7.13
 #   # module unload pysam/0.14.1-foss-2017a-python-2.7.13
-    # wait_for_jobs demultip
+    wait_for_jobs demultip
 
     echo ''
     echo "FastQC (in the background)." # and don't wait for it. I don't need its output for a while.
