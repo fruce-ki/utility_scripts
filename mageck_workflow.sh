@@ -202,7 +202,7 @@ if [ $do_comparison -eq 1 ]; then
   echo ''
   echo "Group control guides into genes."
   if ! [ -z "$ctrlguides" ]; then
-    srun mageck_nonTargetGuides2controlGenes.R -c $ctrlguides -f $counts -o ${counts/.txt/_ctrls-grouped.txt} -n $guidespergene -g group -t id -m $countthresh -z $refSamps
+    # srun --ntasks=1 mageck_nonTargetGuides2controlGenes.R -c $ctrlguides -f $counts -o ${counts/.txt/_ctrls-grouped.txt} -n $guidespergene -g group -t id -m $countthresh -z $refSamps
     counts="${counts/.txt/_ctrls-grouped.txt}"
   else
     ctrlguides="hakunamatata_dummy" # dummy value that will not match patterns later on
@@ -210,12 +210,12 @@ if [ $do_comparison -eq 1 ]; then
 
   echo ''
   echo "MAGECK."
-  nextflow run zuberlab/crispr-mageck-nf --contrasts $contrasts --counts $counts --outputDir $mageckdir --min_count $countthresh -profile ii2 $legacy $mageck_branch
+  # nextflow run zuberlab/crispr-mageck-nf --contrasts $contrasts --counts $counts --outputDir $mageckdir --min_count $countthresh -profile ii2 $legacy $mageck_branch
 
   echo ''
   echo "Rename columns."
   renamed="renamed"
-  srun fileutilities.py T $mageckdir --dir | fileutilities.py P --loop sh ~/utility_scripts/mageck_rename_columns.sh {abs} {abs}/${renamed}
+  # srun  --ntasks=1 fileutilities.py T $mageckdir --dir | fileutilities.py P --loop sh ~/utility_scripts/mageck_rename_columns.sh {abs} {abs}/${renamed}
 
   ## WARNING:
   ## If appending throws ValueError about the shape not matching the index, it means that there are repeated row keys (probably in the xref files).
@@ -227,80 +227,80 @@ if [ $do_comparison -eq 1 ]; then
   if [ -f "$genes" ]; then
     rm $genes # clean up previous run, otherwise weird things happen
   fi
-  srun --mem=10000 fileutilities.py T ${mageckdir}/*/${renamed}/genes_pos_stats.txt ${mageckdir}/*/${renamed}/genes_neg_stats.txt -r -i --appnd outer > $genes
+  srun --mem=10000 --ntasks=1 fileutilities.py T ${mageckdir}/*/${renamed}/genes_pos_stats.txt ${mageckdir}/*/${renamed}/genes_neg_stats.txt -r -i --appnd > $genes
 
   echo ''
   echo "Merge all guide-level outputs."
-  guides="${mageckdir}/guides_all.tsv"
-  if [ -f "$guides" ]; then
-    rm $guides # clean up previous run, otherwise weird things happen
-  fi
-  srun --mem=10000 fileutilities.py T ${mageckdir}/*/${renamed}/guides_stats.txt -r -i --appnd outer > $guides
+  # guides="${mageckdir}/guides_all.tsv"
+  # if [ -f "$guides" ]; then
+  #   rm $guides # clean up previous run, otherwise weird things happen
+  # fi
+  # srun --mem=10000 --ntasks=1 fileutilities.py T ${mageckdir}/*/${renamed}/guides_stats.txt -r -i --appnd > $guides
 
   if [ ! -z "$guidexref" ]; then
     echo ''
     echo "Add other cross-referencing ID fields to guides"
-    srun --mem=10000 fileutilities.py T $guidexref $guides -r -i --appnd outer > ${guides/.tsv/_xref.tsv}
+    # srun --mem=10000 --ntasks=1 fileutilities.py T $guidexref $guides -r -i --appnd > ${guides/.tsv/_xref.tsv}
     guides="${guides/.tsv/_xref.tsv}"
   fi
 
   if [ ! -z "$genexref" ]; then
     echo ''
     echo "Add other cross-referencing ID fields to genes"
-    srun --mem=10000 fileutilities.py T $genexref $genes -r -i --appnd outer > ${genes/.tsv/_xref.tsv}
+    srun --mem=10000 --ntasks=1 fileutilities.py T $genexref $genes -r -i --appnd > ${genes/.tsv/_xref.tsv}
     genes="${genes/.tsv/_xref.tsv}"
   fi
 
   echo ''
   echo "Deduplicate group columns."
   dups=$(head -n1 $genes | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++} print "\n";')
-  srun --mem=10000 fileutilities.py T $genes -r --mrgdups $dups > ${genes/.tsv/_dedup.tsv}
+  srun --mem=10000 --ntasks=1 fileutilities.py T $genes -r --mrgdups $dups > ${genes/.tsv/_dedup.tsv}
   genes="${genes/.tsv/_dedup.tsv}"
   nc=$(perl -e '$ARGV[0] =~/^(\d+)/; print $1' $(fileutilities.py T $genes --cntcols))
-  srun --mem=10000 fileutilities.py T $genes -r --cols 0 $(expr $nc - 1) 1:$(expr $nc - 2) > ${genes/.tsv/_reord.tsv}
+  srun --mem=10000 --ntasks=1 fileutilities.py T $genes -r --cols 0 $(expr $nc - 1) 1:$(expr $nc - 2) > ${genes/.tsv/_reord.tsv}
   genes="${genes/.tsv/_reord.tsv}"
 
-  dups=$(head -n1 $guides | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++} print "\n";')
-  srun --mem=10000 fileutilities.py T $guides -r --mrgdups $dups > ${guides/.tsv/_dedup.tsv}
+  # dups=$(head -n1 $guides | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++} print "\n";')
+  # srun --mem=10000 --ntasks=1 fileutilities.py T $guides -r --mrgdups $dups > ${guides/.tsv/_dedup.tsv}
   guides="${guides/.tsv/_dedup.tsv}"
-  nc=$(perl -e '$ARGV[0] =~/^(\d+)/; print $1' $(fileutilities.py T $guides --cntcols))
-  srun --mem=10000 fileutilities.py T $guides -r --cols 0 $(expr $nc - 1) 1:$(expr $nc - 2) > ${guides/.tsv/_reord.tsv}
+  # nc=$(perl -e '$ARGV[0] =~/^(\d+)/; print $1' $(fileutilities.py T $guides --cntcols))
+  # srun --mem=10000 --ntasks=1 fileutilities.py T $guides -r --cols 0 $(expr $nc - 1) 1:$(expr $nc - 2) > ${guides/.tsv/_reord.tsv}
   guides="${guides/.tsv/_reord.tsv}"
 
   echo ''
   echo "Add -log10(p)."
-  srun --mem=10000 mageck_add_log10p.R -i $genes -o ${genes/.tsv/_l10p.txt} -r group
-  srun --mem=10000 mageck_add_log10p.R -i $guides -o ${guides/.tsv/_l10p.txt}
-  genes="${genes/.tsv/_l10p.txt}"
+  srun --mem=10000 --ntasks=1 mageck_add_log10p.R -i $genes -o ${genes/.tsv/_l10p.txt} -r group
+  # srun --mem=10000 --ntasks=1 mageck_add_log10p.R -i $guides -o ${guides/.tsv/_l10p.txt}
+  genes="${genes/.tsv/_l10p.tsv}"
   guides="${guides/.tsv/_l10p.txt}"
 
   echo ''
   echo "Add good guides ratio to genes."
-  srun --mem=10000 mageck_add_ggratio.R -i $genes -o ${genes/.txt/_gg.txt} -f $counts -m $countthresh -z $refSamps
-  genes="${genes/.txt/_ggratio.txt}"
+  srun --mem=10000 --ntasks=1 mageck_add_ggratio.R -i $genes -o ${genes/.tsv/_gg.txt} -f $counts -m $countthresh -z $refSamps
+  genes="${genes/.txt/_gg.txt}"
 
   echo ''
   echo "Cleaning up intermediate files."
-  rm ${mageckdir}/genes_all.tsv
-  rm ${mageckdir}/genes_all_xref.tsv
-  rm ${mageckdir}/genes_all_xref_dedup.tsv
-  rm ${mageckdir}/genes_all_xref_dedup_reord.tsv
-  rm ${mageckdir}/genes_all_xref_dedup_reord_l10p.txt
-  rm ${mageckdir}/guides_all.tsv
-  rm ${mageckdir}/guides_all_xref.tsv
-  rm ${mageckdir}/guides_all_xref_dedup.tsv
-  rm ${mageckdir}/guides_all_xref_dedup_reord.tsv
-  rm -r ${mageckdir}/*/${renamed}
+  # rm ${mageckdir}/genes_all.tsv
+  # rm ${mageckdir}/genes_all_xref.tsv
+  # rm ${mageckdir}/genes_all_xref_dedup.tsv
+  # rm ${mageckdir}/genes_all_xref_dedup_reord.tsv
+  # rm ${mageckdir}/genes_all_xref_dedup_reord_l10p.tsv
+  # rm ${mageckdir}/guides_all.tsv
+  # rm ${mageckdir}/guides_all_xref.tsv
+  # rm ${mageckdir}/guides_all_xref_dedup.tsv
+  # rm ${mageckdir}/guides_all_xref_dedup_reord.tsv
+  # rm -r ${mageckdir}/*/${renamed}
 
   echo ''
   echo "Comparisons finished!"
 fi
 
-if [ -d "./work" ]; then
-	rm -r ./work/
-	rm -r ./.nextflow*
-	rm timeline*
-fi
+# if [ -d "./work" ]; then
+# 	rm -r ./work/
+# 	rm -r ./.nextflow*
+# 	rm timeline*
+# fi
 
 echo ''
 echo "All done!"
