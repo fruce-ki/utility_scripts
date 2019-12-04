@@ -186,8 +186,8 @@ do_pca <- function(counts, covars, center=TRUE, scale=TRUE, loadthresh = 0.75){
 
 # library(ggplot2)
 # library(data.table)
-# colanes and rownames yes, non-numeric columns no.
-my_pairwise_internal_coords <- function(mat, method="pearson", triangular=FALSE) {
+# colnames and rownames yes, non-numeric columns no.
+my_pairwise_internal_correls <- function(mat, method="pearson", triangular=FALSE) {
   # Correlations
   cormat <- cor(mat, method=method)
   
