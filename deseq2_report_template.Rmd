@@ -270,7 +270,7 @@ ly <- htmltools::tagList()
 for (i in 1:length(resall)){
   # Volcanoes
   print(resall[[i]][["pv1"]])
-  ly[[i]] <- as_widget(subplot( ggplotly(resall[[i]][["pv2"]]) %>% 
+  ly[[i]] <- as_widget(subplot( ggplotly(resall[[i]][["pv2"]], dynamicTicks = TRUE) %>% 
                                   layout(xaxis = list(title="-log10( Padj )"), 
                                          yaxis = list(title="log2( FC )")) ))
 }
