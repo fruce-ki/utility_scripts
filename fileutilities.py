@@ -412,7 +412,7 @@ def count_columns(flist=[None], colSep=["\t"]):
 
 
 def get_valuesSet(flist=[None], axis='r', index=0, filter='a', colSep=["\t"]):
-    """"List the set of different values in the column(s)/row(s).
+    """List the set of different values in the column(s)/row(s).
 
     Args:
         flist: A list of FilesList of files.
@@ -497,7 +497,8 @@ def get_columns(flist=[None], cols=[0], colSep=["\t"], header=False, index=None,
         merge(bool): Concatenate results from all files into a single
                     dataframe. If False, a list of dataframes is returned
                     instead. (Default True).
-        index(int): Column to be used as row index for merging. (Default None)
+        index[int]: Column(s) to be used as row index.
+                    If multiple values, must match number of files. (Default None)
     Returns:
         [pandas.DataFrame]: List of DataFrames. If merge=True, only the
                     first element will be populated.
@@ -522,8 +523,9 @@ def get_columns(flist=[None], cols=[0], colSep=["\t"], header=False, index=None,
         # for problematic cases. As flexibility requirements increased, using the
         # pandas parser became too opaque and difficult to maintain,
         # so now all cases are delegated to mine.
+
         df = get_columns_manual(myfile, cols=cols, colSep=colSep, header=header,
-                                        alias=myalias, index=index)
+                                        alias=myalias, index=None if not index else index[min(f, len(index) - 1)]) # accommodate None or one value for all files or one value per file
         if not keyhead:
             keyhead = df.index.name
         result.append(df)
@@ -532,7 +534,6 @@ def get_columns(flist=[None], cols=[0], colSep=["\t"], header=False, index=None,
         result = [pd.concat(result, axis=1, join='outer', ignore_index=False, sort=False), ]
         result[0].index.name = keyhead
     return result
-
 
 # Helper function
 def get_columns_manual(file=None, cols=[0], colSep=["\t"], header=False, index=None, alias=None):
@@ -650,7 +651,8 @@ def get_random_columns(flist, colSep=["\t"], k=1, header=False, index=None, merg
         colSep[str]: A list of characters used as field separators.
                     (Default ["\t"])
         header(bool): Strip column headers. (Default False)
-        index(int): Column to use as row index for merging. (Default None)
+        index[int]: Column(s) to be used as row index for merging.
+                    If multiple values, must match number of files. (Default None)
         merge(bool): Concatenate results from all files into a single
                     dataframe. If False, a list of dataframes is returned
                     instead. (Default True).
@@ -691,7 +693,7 @@ def get_random_columns(flist, colSep=["\t"], k=1, header=False, index=None, merg
         if (not keyhead) and header and (index is not None):
             keyhead = str(df.iloc[0,index])
         # Adjust row and column labels.
-        df = prepare_df(df, myalias=myalias, keyCol=index, header=header, keyhead=keyhead,
+        df = prepare_df(df, myalias=myalias, keyCol=None if not index else index[min(f, len(index) - 1)], header=header, keyhead=keyhead,
                         appendNum=True if k>1 else False)
         # Slice the part I need.
         df = df.iloc[:,cols]
@@ -714,8 +716,8 @@ def append_columns(flist, colSep=["\t"], header=False, index=None, merge=True, t
         colSep[str]: A list of characters used as field delimiters.
                     (Default ["\t"])
         header(bool): First non-comment line are column labels to be discasrded. (Default False)
-        index(int): Column to use as row index (same in all files).
-                    (Default None)
+        index[int]: Column(s) to be used as row index for merging.
+                    If multiple values, must match number of files. (Default None)
                     If None, the number of rows can differ between files and will be
                     padded (outer) or truncated (inner), otherwise the row number must
                     be the same in all files.
@@ -752,7 +754,7 @@ def append_columns(flist, colSep=["\t"], header=False, index=None, merge=True, t
     return result
 
 
-def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='outer', saveHeader=False, dedup=True):
+def merge_tables(flist, colSep=["\t"], header=False, index=[0], merge=True, type='outer', saveHeader=False, dedup=True):
     """Incrementally merge tables.
 
 	Join the first two files and then join the third file to the merged first two, etc.
@@ -762,8 +764,8 @@ def merge_tables(flist, colSep=["\t"], header=False, index=0, merge=True, type='
         colSep[str]: A list of characters used as field delimiters.
                      (Default ["\t"])
         header(bool): Crop first non-comment line as column labels. (Default False)
-        index(int): Column to use as row index (same in all files).
-                    (Default 0)
+        index[int]: Column(s) to be used as row index for merging.
+                    If multiple values, must match number of files. (Default [0]])
         type(str): 'left', 'right', 'outer' or 'inner' merge. (Default outer)
         saveHeader(bool): Exclude the first row from sorting upon merging. (False)
                           Necessary when the header is not to be cropped.
@@ -904,7 +906,8 @@ def get_crosspoints(flist, cols=[0], rows=[0], colSep=["\t"], header=False, inde
         cols[int]: List of columns.
         rows[int]: List of rows.
         header(bool): Whether there is a header line (False).
-        index(int): Which column has the row labels (None).
+        index[int]: Column(s) to be used as row index for merging.
+                    If multiple values, must match number of files. (Default None)
         merge(bool): Merge results into single table (True).
     Returns:
         [pandas.DataFrame]:
@@ -1236,102 +1239,62 @@ def main(args):
 
     """
     # Organize arguments and usage help:
-    parser = argparse.ArgumentParser(description="Provide INPUTTYPE and TARGETs \
-     *before* providing any of the other parameters. This is due to many \
-    parameters accepting an indefinite number of values. Only one task at a time.")
+    parser = argparse.ArgumentParser(description="Provide INPUTTYPE and TARGETs *before* providing any of the other parameters. This is due to many parameters accepting an indefinite number of values. Only one task at a time.")
 
     # Input/Output.
     parser.add_argument('INPUTTYPE', type=str, choices=['L','T','D','P'],
-                                help=" Specify the type of the TARGETs: \
-                                'T' = The actual input filess. \
-                                'L' = Text file(s) listing the input files. \
-                                'P' = Get list of input files from STDIN pipe. \
-                                'D' = Input data directly from STDIN pipe. \
-                                ('D' is compatible with only some of the functions)")
+                                help=" Specify the type of the TARGETs: 'T' = The actual input filess. 'L' = Text file(s) listing the input files. 'P' = Get list of input files from STDIN pipe. 'D' = Input data directly from STDIN pipe. ('D' is compatible with only some of the functions)")
     parser.add_argument('TARGET', type=str, nargs='*',
-                                help=" The targets, space- or comma-separated. Usually files. \
-                                Look into the specific task details below for special uses. \
-                                Do not specify with INPUTTYPE 'P' or 'D'.")
+                                help=" The targets, space- or comma-separated. Usually files. Look into the specific task details below for special uses. Do not specify with INPUTTYPE 'P' or 'D'.")
     parser.add_argument('-O','--out', type=str, nargs=3,
-                                help=" Send individual outputs to individual files instead of \
-                                merging them to STDOUT. Output files will be like \
-                                <out[0]>/<out[1]>target<out[2]>, where target is stripped of \
-                                any directory path and its outermost file extension.")
+                                help=" Send individual outputs to individual files instead of merging them to STDOUT. Output files will be like <out[0]>/<out[1]>target<out[2]>, where target is stripped of any directory path and its outermost file extension.")
     # Parameters.
     parser.add_argument('-L','--log', action='store_true',
                                 help=" Log subcommands to ./commands.log.")
     parser.add_argument('-C','--STDERRcomments', action="store_false",
                                 help=" Do NOT show info in STDERR. (Default show)")
     parser.add_argument('-s','--sep', type=str, default=["\t"], nargs='+',
-                                help=" A list of input field separators. The first value \
-                                will be used for all output. (Default \\t, bash syntax for tab: $'\\t').")
+                                help=" A list of input field separators. The first value will be used for all output. (Default \\t, bash syntax for tab: $'\\t').")
     parser.add_argument('-l','--labels', action='store_true',
                                 help=" Discard column headers (first content line) in input files. (Default do not discard)")
     parser.add_argument('-r','--relabel', action='store_false',
                                 help=" Do not create new column headers that reflect the origin of the columns. (Default create)")
     parser.add_argument('-i','--index', action='store_true',
-                                help=" Use column 0 as row index. The index will always be included in the output. (Default no index)")
+                                help=" Use --idxCol as row index. The index will always be included in the output. (Default no index)")
+    parser.add_argument('-I', '--idxCol', type=int, nargs='+', default=[0],
+                                help=" If --index, the column(s) specified here will be used as the index. Either one value to be used for all the files, or exactly one value per file. (Default 0)")
     parser.add_argument('-M','--metadata', type=int, default=0,
-                                help=" Number of metadata lines at the \
-                                beginning of input data (Default 0). Metadate will be read separately \
-                                and re-added verbatim into the output.")
+                                help=" Number of metadata lines at the beginning of input data (Default 0). Metadata will be read separately and re-added verbatim into the output.")
     parser.add_argument('-R','--expand_ranges', action='store_true',
-                                help=" If numeric ranges exist among the targets expand them as individual vlaues. \
-                                Ranges must be in from:to format, inclusive of both end values. (Default False)")
+                                help=" If numeric ranges exist among the targets expand them as individual vlaues. Ranges must be in from:to format, inclusive of both end values. (Default False)")
     parser.add_argument('-V','--verbatim', action='store_true',
                                 help=" Preserve the target values from a list file, do not try to expand them into absolute paths. (Default impute absolute paths)")
     # General tasks.
     parser.add_argument('--dir', type=str, nargs='*',
-                                help=" List the contents of the target paths. \
-                                Full absolute file paths are returned. Each file is also given an alias. \
-                                Supplying an optional list of regex patterns enables filtering of the result.")
+                                help=" List the contents of the target paths. Full absolute file paths are returned. Each file is also given an alias. Supplying an optional list of regex patterns enables filtering of the result.")
     parser.add_argument('--link', type=str, nargs='+',
-                                help=" Create symbolic links for the targets into the specified directory. \
-                                Any additional values are used as respective names for the links, one for one, \
-                                otherwise the aliases or basenames will be used, enumerated when necessary.")
+                                help=" Create symbolic links for the targets into the specified directory. Any additional values are used as respective names for the links, one for one, otherwise the aliases or basenames will be used, enumerated when necessary.")
     parser.add_argument('--loop', type=str, nargs='+',
-                                help=" Repeat the specified shell command for each target value. \
-                                Available PLACEHOLDERS to insert the targets into the commands: \
-                                {abs} full path, {dir} path of directory portion, {val} target value such as filename, \
-                                {bas} basename (filename minus outermost extension), {ali} file alias. \
-                                Flags intended for the nested command should be preceded \
-                                by a ',' sign like this: ',-v'. Recursive calls to fileutilities.py are possible by \
-                                nesting the placeholders and escapes: i.e. {{abs}}, ,,-v. One layer is peeled off \
-                                with each call to fileutilities loop. The placeholders will take the values \
-                                of the targets of the respectively nested call.")
+                                help=" Repeat the specified shell command for each target value. Available PLACEHOLDERS to insert the targets into the commands: {abs} full path, {dir} path of directory portion, {val} target value such as filename, {bas} basename (filename minus outermost extension), {ali} file alias. Flags intended for the nested command should be preceded by a ',' sign like this: ',-v'. Recursive calls to fileutilities.py are possible by nesting the placeholders and escapes: i.e. {{abs}}, ,,-v. One layer is peeled off with each call to fileutilities loop. The placeholders will take the values of the targets of the respectively nested call.")
     # Delimited file tasks.
     parser.add_argument('--concat', type=str,
-                                help="Create an X-separated list out of the target values, where X is the string specified as argument here. \
-                                Useful for creating comma-separated lists of files.")
+                                help="Create an X-separated list out of the target values, where X is the string specified as argument here. Useful for creating comma-separated lists of files.")
     parser.add_argument('--swap', type=str,
-                                help=" Replace all occurrences of the --sep values with the value supplied here.\
-                                ** Bash syntax for tab: $'\\t'. Compatible with 'D' as INPUTTYPE.")
+                                help=" Replace all occurrences of the --sep values with the value supplied here. ** Bash syntax for tab: $'\\t'. Compatible with 'D' as INPUTTYPE.")
     parser.add_argument('--cntcols', action='store_true',
                                 help=" Count the number of fields in the first row of each target file.")
     parser.add_argument('--cols', nargs='+',
-                                help=" Extract the specified columns (named or 0-indexed) from each target. \
-                                Column ranges in x:y format closed at both ends. \
-                                Negative indices must be escaped first: \-1. Compatible with 'D' as INPUTTYPE.")
+                                help=" Extract the specified columns (named or 0-indexed) from each target. Column ranges in x:y format closed at both ends. Negative indices must be escaped first: \-1. Compatible with 'D' as INPUTTYPE.")
     parser.add_argument('--rndcols', type=int,
-                                help="Randomly select this many columns from the target files. \
-                                With --index, the index column will not be part of the random selection.")
+                                help="Randomly select this many columns from the target files. With --index, the index column will not be part of the random selection.")
     parser.add_argument('--appnd', action='store_true',
-                                help="Add all the columns from the target files into a single table (via outer join). \
-                                If index is used, the values must be unique within each file.")
+                                help="Add all the columns from the target files into a single table (via outer join). If index is used, the values must be unique within each file.")
     parser.add_argument('--merge', nargs=3, type=str,
-                                help="Merge table files. \
-                                The first column of each file will be used as row index regardless of -i flag status. \
-                                First argument is join type: 'left', 'right', 'inner', 'outer'. \
-								Second argument is preserve first header row: 'yes', 'no' (because merge sorts rows). \
-                                Third argument is detect and drop additional duplicated columns: 'yes', 'no'.")
+                                help="Merge table files. The first column of each file will be used as row index regardless of -i flag status. First argument is join type: 'left', 'right', 'inner', 'outer'. Second argument is preserve first header row: 'yes', 'no' (because merge sorts rows). Third argument is detect and drop additional duplicated columns: 'yes', 'no'.")
     parser.add_argument('--mrgdups', type=int, nargs='+',
-    							help="Combine gappy duplicate columns into a single column with all the values.\
-    							Columns are specified by their 0-based positional index given as arguments here.")
+    							help="Combine gappy duplicate columns into a single column with all the values. Columns are specified by their 0-based positional index given as arguments here.")
     parser.add_argument('--valset', nargs=3,
-                                help="Get the non-redundant set of values in the given row/column. \
-                                Takes three arguments: (i) orientation 'r' for row or 'c' for column, \
-                                (ii) position index of the row/column, (iii) repetition filter: \
-                                'a' all values, 'u' unique values only, 'r' only values with two or more instances.")
+                                help="Get the non-redundant set of values in the given row/column. Takes three arguments: (i) orientation 'r' for row or 'c' for column, (ii) position index of the row/column, (iii) repetition filter: 'a' all values, 'u' unique values only, 'r' only values with two or more instances.")
     params = parser.parse_args(args)
 
     # INPUT ###################################################################
@@ -1367,6 +1330,10 @@ def main(args):
         flist = FilesList(verbatim=params.verbatim)
     else:
         sys.exit(ml.errstring("Unknown INPUTTYPE."))
+
+    if params.index:
+        if len(params.idxCol) != 1 and len(params.idxCol) != len(flist):
+            sys.exit(ml.errstring("Invalid number of index columns."))
 
     if params.expand_ranges:
         # Generate the range.
@@ -1424,7 +1391,7 @@ def main(args):
 
 
     # CONCATENATE strings. --------------------------------------------------------
-    if params.concat:
+    elif params.concat:
         sys.stdout.write(params.concat.join(flist))
         if params.STDERRcomments:
             sys.stderr.write(ml.donestring("concatenating values"))
@@ -1461,9 +1428,7 @@ def main(args):
         # Determine if using index, and assign appropriate value.
         idx = None
         if params.index:
-            idx = 0
-        else:
-            idx = None
+            idx = params.idxCol
         # Extract data.
         result = None
         if params.cols:
@@ -1502,13 +1467,10 @@ def main(args):
 
     # APPEND columns or MERGE table. ---------------------------------------------------------
     elif params.appnd or params.merge:
-        idx = None
         if params.appnd:
-            if params.index:
-                idx = 0
-            df = append_columns(flist, colSep=params.sep, header=params.labels, index=idx, type="outer")
+            df = append_columns(flist, colSep=params.sep, header=params.labels, index=params.index if params.index else None, type="outer")
         else:
-            df = merge_tables(flist, colSep=params.sep, header=params.labels, index=0, type=params.merge[0],
+            df = merge_tables(flist, colSep=params.sep, header=params.labels, index=params.index, type=params.merge[0],
                               saveHeader=(params.merge[1]=="yes"), dedup=(params.merge[2]=="yes"))
         if params.metadata:
             # Dump all the metadata from all the merged input sources.
