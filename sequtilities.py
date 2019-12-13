@@ -541,10 +541,11 @@ def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=3
 
     Args:
         bam :           Input BAM file. Single-end reads.
-        outputdir :     Output directory where demultiplexed fastq files will be saved.
+        barcodes:       Tabbed text file: lane, sample_name, barcode.
+        outputdir :     Output directory where demultiplexed BAM files will be saved.
         tally :         File to write a tally of the reads assigned to each sample. (Default STDOUT)
         qualOffset :    Base-call quality offset for conversion from pysam to fastq.
-        unmatched :     Create a FASTQ file for all the reads that did not match the anchor or barcode within the given tolerances.
+        unmatched :     Create a BAM file for all the reads that did not match the anchor or barcode within the given tolerances.
                         Otherwise they will simply be ignored.
 
     Returns:
@@ -570,25 +571,26 @@ def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=3
                 demuxS[ row['barcode'] ] = row['sample_name']
     # Maybe the lane specifications did not match?
     if len(demuxS) == 0:
-        raise Exception("It looks like no info was parsed from the barcodes table. The 'lane' column of the barcodes table include " + lane + ' or ' + lane + '.bam ?')
+        raise Exception("It looks like no info was parsed from the barcodes table. Does the 'lane' column of the barcodes table include " + lane + ' or ' + lane + '.bam ?')
+
+    # Open input. Need it as template for the output files.
+    samin = pysam.AlignmentFile(bam, "rb", check_sq=False)
     # Open output files
-    fqOut = dict()
+    samOut = dict()
     for barcode in demuxS.keys():
         try:
             os.makedirs(outputdir)
         except OSError:   # path already exists. Hopefully you have permission to write where you want to, so that won't be the cause.
             pass
-        file = lane + '_' + demuxS[barcode] + '.fq'
-        fqOut[demuxS[barcode]] = open(os.path.join(outputdir, file), "w", buffering=10000000) # 10MB
+        file = demuxS[barcode] + '_' + barcode + '_' + lane + '.bam'
+        samOut[demuxS[barcode]] = pysam.AlignmentFile(os.path.join(outputdir, file), "wb", template=samin)
     unknown = None
     if unmatched:
-        unknown = open(os.path.join(outputdir, lane + '_unmatched.fq'), "w", buffering=10000000) # 10MB
+        unknown = pysam.AlignmentFile(os.path.join(outputdir, lane + '_unmatched.bam'), "wb", template=samin)
 
-    # Statistics
+    # Parse SAM
     counter = Counter()
     k = demuxS.keys()
-    # Parse SAM
-    samin = pysam.AlignmentFile(bam, "rb", check_sq=False)
     for r in samin:
         counter.update(['total'])
         if counter['total'] % 10000000 == 0:
@@ -598,22 +600,20 @@ def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=3
         seq = r.query_sequence
         quals = r.query_qualities
         bc = r.get_tag('BC')
-        # Convert qualities to ASCII Phred
-        qual = encodeQuals(quals, qualOffset)
-        # Print FASTQ entry
+        # Print BAM entry
         for b in k:     # Allow for the annotated barcode in the table to be truncated relative to the actual barcode recorded in the BAM. No mismatches.
-            if bc in b:
-                fqOut[demuxS[bc]].write('@' + name + "\n" + seq + "\n+\n" + qual + "\n")
+            if b in bc:
+                samOut[demuxS[b]].write(r)
                 # Keep count
-                counter.update(['assigned', demuxS[bc]])
+                counter.update(['assigned', demuxS[b]])
                 break
             else:
                 if unmatched:
-                    unknown.write('@' + name + "\n" + seq + "\n+\n" + qual + "\n")
+                    unknown.write(r)
                     counter.update(['Barcode unmatched'])
     samin.close()
     # Close output files
-    for file in fqOut.values():
+    for file in samOut.values():
         file.close()
     if unmatched:
         unknown.close()
@@ -628,6 +628,35 @@ def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=3
             sys.stdout.write( "\t".join([lane, k, str(v)]) + "\n")
     return(True)
 
+
+def bed_from_regex(flist, rx, rc=False, name='match'):
+    """Create a bedfile for the matches of a regular expression.
+
+    The whole sequence will be loaded to memory, twice if reverse complement is required.
+    Case-sensitive. Uses standard python re module, no support for nucleotide/aminoacid wildcards.
+
+    Args:
+        flist(FilesList):   FASTA files.
+        rx(str):            A regular expression.
+        rc(bool):           Also search in the reverse complement? (Default False)
+        name(str):          What to label the features in the track.
+
+    Returns:
+        [str]:          List of BED-like rows.
+    """
+    res = []
+    p = re.compile(rx)
+    for f, (myfile, myalias) in flist.enum():
+        with open (myfile, "rU") as fasta:
+            for record in SeqIO.parse(fasta, "fasta"):
+                for m in p.finditer( str(record.seq) ):
+                    res.append( '%s\t%d\t%d\t%s\t%d\t%c\t%d\t%d' % (record.id, m.start(), m.end(), m.group(0), 0, '+', m.start(), m.end()) )
+                if rc:
+                    rcseq = str(record.seq.reverse_complement())
+                    lenrc = len(rcseq)
+                    for m in p.finditer(rcseq):
+                        res.append( "%s\t%d\t%d\t%s\t%d\t%c\t%d\t%d" % (record.id, lenrc - m.end(), lenrc - m.start(), m.group(0), 0, '-' if not rc else '-', m.start(), m.end()) )
+    return(res)
 
 def main(args):
     # Organize arguments and usage help:
@@ -701,8 +730,9 @@ def main(args):
                                 [6] (int) number of bases from read start beyond which to give up looking for the anchor,\
                                 [7] base quality encoding offset.")
     parser.add_argument('--demuxBC', type=str, nargs=2,
-                                help="Demultiplex a BAM using the BC: tag field and a look-up table that matches these barcode values to sample names.\
-                                Arguments: [1] (str) barcodes file, [2] base quality encoding offset.")
+                                help="Demultiplex a BAM using the BC: tag field and a look-up table that matches these barcode values to sample names. Arguments: [1] (str) barcodes file, [2] (int) base quality encoding offset (probably 33). One output subdirectory per input bam. Use -O to specify the output destination.")
+    parser.add_argument('--regex2bed', type=str, nargs=3,
+                                help="Create a bed track annotating the occurences of the specified regex in each strand of the TARGET sequences (FASTA files). [1] regex string, [2] also look in reverse complement yes/no, [3] feature name to display.")
     params = parser.parse_args(args)
 
 
@@ -908,6 +938,16 @@ def main(args):
                     sys.stderr.write(ml.donestring("tagged demultiplexing of " + f))
         if params.STDERRcomments:
             sys.stderr.write(ml.donestring("demultiplexing of all BAMs"))
+
+
+    # BED file of REGEX matches in FASTA sequences
+    elif params.regex2bed:
+        name = re.sub('\W', '_', params.regex2bed[2])
+        res = bed_from_regex(flist, rx = params.regex2bed[0], rc = params.regex2bed[1]=="yes", name = name)
+        print('track name=' + name + ' description="' + params.regex2bed[0] + '" useScore=0')
+        for line in res:
+            print(line)
+
 
 
 #     # All done.
