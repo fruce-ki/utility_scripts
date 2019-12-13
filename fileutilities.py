@@ -741,12 +741,9 @@ def append_columns(flist, colSep=["\t"], header=False, index=None, merge=True, t
             cols = [i for i in range(0, numofcols[f]) if i != index[f]]
         else:
             cols = [i for i in range(0, numofcols[f])]
-        print(f)
-        print(index[f])
-        print(myalias)
         # Delegate fetching all the columns.
         df = get_columns(FilesList(files=[myfile], aliases=[myalias]), cols=cols,
-                     colSep=colSep, header=header, merge=False, index=[index[min(f, len(index) - 1)]])[0]
+                     colSep=colSep, header=header, merge=False, index=index)[0]
         if index is not None:
             # Then the first value of the row index is the name of the index column and its value may differ across the tables.
             # This messes up merging. So ensure they all have the same value.
