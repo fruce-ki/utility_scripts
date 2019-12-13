@@ -736,10 +736,17 @@ def append_columns(flist, colSep=["\t"], header=False, index=None, merge=True, t
     keyhead = None
     for f, (myfile, myalias) in flist.enum():
         # List the columns and remove the index one from among them.
-        cols = [i for i in range(0,numofcols[f]) if i != index]
+        cols = None
+        if index:
+            cols = [i for i in range(0, numofcols[f]) if i != index[f]]
+        else:
+            cols = [i for i in range(0, numofcols[f])]
+        print(f)
+        print(index[f])
+        print(myalias)
         # Delegate fetching all the columns.
         df = get_columns(FilesList(files=[myfile], aliases=[myalias]), cols=cols,
-                     colSep=colSep, header=header, merge=False, index=index)[0]
+                     colSep=colSep, header=header, merge=False, index=[index[min(f, len(index) - 1)]])[0]
         if index is not None:
             # Then the first value of the row index is the name of the index column and its value may differ across the tables.
             # This messes up merging. So ensure they all have the same value.
@@ -787,7 +794,7 @@ def merge_tables(flist, colSep=["\t"], header=False, index=[0], merge=True, type
         # List the columns and remove the index one from among them.
         cols = [i for i in range(0,numofcols[f])]
         df = get_columns(FilesList(files=[myfile], aliases=[myalias]), cols=cols,
-                        colSep=colSep, header=header, merge=False, index=index)[0]
+                        colSep=colSep, header=header, merge=False, index=[index[min(f, len(index) - 1)]])[0]
         if index is not None:
             # Then the first value of the row index is the name of the index column and its value may differ across the tables.
             # This messes up merging. So ensure they all have the same value.
@@ -1467,10 +1474,13 @@ def main(args):
 
     # APPEND columns or MERGE table. ---------------------------------------------------------
     elif params.appnd or params.merge:
+        idx = None
+        if params.index:
+            idx = params.idxCol
         if params.appnd:
-            df = append_columns(flist, colSep=params.sep, header=params.labels, index=params.index if params.index else None, type="outer")
+            df = append_columns(flist, colSep=params.sep, header=params.labels, index=idx, type="outer")
         else:
-            df = merge_tables(flist, colSep=params.sep, header=params.labels, index=params.index, type=params.merge[0],
+            df = merge_tables(flist, colSep=params.sep, header=params.labels, index=idx, type=params.merge[0],
                               saveHeader=(params.merge[1]=="yes"), dedup=(params.merge[2]=="yes"))
         if params.metadata:
             # Dump all the metadata from all the merged input sources.
