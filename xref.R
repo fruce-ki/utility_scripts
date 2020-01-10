@@ -6,13 +6,19 @@ library(data.table)
 
 args <- commandArgs(trailingOnly = TRUE)
 mydir <- args[1]
-xref <- args[2]
-didx <- args[3]
-xidx <- args[4]
-suffix <- args[5]
+suffix <- args[2]
+xref <- args[3]
+didx <- as.integer(args[4])
+xidx <- as.integer(args[5])
 
-if (is.na(didx)) didx <- 0
-if (is.na(xidx)) xidx <- 0
+# mydir <- "/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/M9262_slamseq/process/quant/"
+# suffix <- "all_counts.txt"
+# xref <- "/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/M9262_slamseq/aux/GRCm38/xref.tsv"
+# didx <- 1
+# xidx <- 1
+
+if (is.na(didx)) didx <- 1
+if (is.na(xidx)) xidx <- 1
 
 FF <- dir(mydir, full.names = TRUE)
 FF <- FF[grep(suffix, FF)]
