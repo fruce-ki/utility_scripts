@@ -228,9 +228,9 @@ my_pairwise_internal_correls <- function(mat, method="pearson", triangular=FALSE
   
   p <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
-    geom_text(data=cormat, aes(label=round(Correlation, 2), colour=Correlation)) +
+    geom_text(data=cormat, aes(label=round(Correlation, 2), colour=abs(Correlation)>=0.5), size=2) +
     scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue", "blue", "darkblue", "black", "darkred", "red", "orange", "yellow"), na.value = "transparent" ) +
-    scale_colour_gradientn(limits=c(-1, 1), colors=rep(c("black", "white", "white", "black"), each=3), guide="none") +
+    scale_colour_manual(values=c("white", "black"), guide="none") +
     labs(x='', y='') +
     theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5))
   if (!triangular) {
