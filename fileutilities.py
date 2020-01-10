@@ -738,7 +738,7 @@ def append_columns(flist, colSep=["\t"], header=False, index=None, merge=True, t
         # List the columns and remove the index one from among them.
         cols = None
         if index:
-            cols = [i for i in range(0, numofcols[f]) if i != index[f]]
+            cols = [i for i in range(0, numofcols[f]) if i != index[min(f, len(index) - 1)]]
         else:
             cols = [i for i in range(0, numofcols[f])]
         # Delegate fetching all the columns.
