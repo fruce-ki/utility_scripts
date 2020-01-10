@@ -8,19 +8,21 @@
 #SBATCH --mem=20000
 #SBATCH --output=qntSeq.out
 #SBATCH --error=qntSeq.err
+#SBATCH --qos=medium
+#SBATCH --time=1-0:00:00       # one day
 
 set -e
 
 ## Parameters ##
 function usage() {
     echo "Usage:"
-    echo "      $0 -i BAM -r REF_FASTA -b UTR_BED -a GTF -o OUT_DIR"
+    echo "      $0 -i BAM -r REF_FASTA -b UTR_BED -a GTF -o OUT_DIR -q MINBQ -H HARD_CLIP"
     exit 1
 }
 # Parse options.
 minq=10
-adaptor='AGATCGGAAGAGCACACGTCTGAACTCCAGTCA'  # read 1, single end
-while getopts 'i:r:b:a:o:q:' flag; do
+adaptor='AGATCGGAAGAGCACACGTCTGAACTCCAGTCA'  # read 1, single end 5'adaptor
+while getopts 'i:r:b:a:o:q:H:' flag; do
   case "${flag}" in
     i) bam="${OPTARG}" ;;			# unaligned bam (one file)
     r) ref="${OPTARG}" ;;			# whole reference fasta for alignment
@@ -28,9 +30,14 @@ while getopts 'i:r:b:a:o:q:' flag; do
     a) annot="${OPTARG}" ;;			# GTF annotation (for counting)
     o) outdir="${OPTARG}" ;;		# output directory
     q) minq="${OPTARG}" ;;			# minimum alignement quality (10)
+    H) trim3="${OPTARG}" ;;         # trim this many bases from end of reads
     *) usage ;;
   esac
 done
+
+if [ ! -z "$trim3" ]; then
+    trim3="-u -${trim3}"
+fi
 
 prefix=$(basename $bam)
 prefix=${prefix/.bam/}
@@ -50,7 +57,7 @@ echo "$bam - QC"
 fastqc -o ${outdir}/fastqc_pre ${outdir}/fastq/${prefix}.fastq.gz
 
 echo "$bam - trim reads and filter remaining lengths"
-cutadapt -j 4 -a A{18} -a T{18} -g $adaptor -u +12 -q 20 -m 20 -o ${outdir}/fastq_trimmed/${prefix}.fastq.gz ${outdir}/fastq/${prefix}.fastq.gz > ${outdir}/fastq_trimmed/${prefix}.cutadapt.log
+cutadapt -j 4 -a A{18} -a T{18} -g $adaptor -u +12 ${trim3} -q 20 -m 20 -o ${outdir}/fastq_trimmed/${prefix}.fastq.gz ${outdir}/fastq/${prefix}.fastq.gz > ${outdir}/fastq_trimmed/${prefix}.cutadapt.log
 
 echo "$bam - QC"
 fastqc -o ${outdir}/fastqc_post ${outdir}/fastq_trimmed/${prefix}.fastq.gz
@@ -83,4 +90,4 @@ featureCounts -T 4 -M --primary -Q $minq -a $annot -o ${outdir}/counts/${prefix}
 # srun multiqc -f -o ${outdir}/multiqc ${outdir}/fastq ${outdir}/fastq_trimmed ${outdir}/fastqc_pre ${outdir}/fastqc_post ${outdir}/mapped ${outdir}/mapped_filtered ${outdir}/counts
 
 # Extract and collate the counts, lose the commented command.
-# fileutilities.py T ${outdir}/counts/*txt -i -l --cols 6 | perl -e 'while(<>){~s/_\|6//g;print}' > ${outdir}/counts/all_counts.tsv 
+# fileutilities.py T ${outdir}/counts/*txt -i -l --cols 6 | perl -e 'while(<>){~s/_\|6//g;print}' > ${outdir}/counts/all_counts.tsv
