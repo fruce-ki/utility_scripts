@@ -289,3 +289,8 @@ print(res[["pcor1"]])
 <!-- print(res[["pcor2"]]) -->
 <!-- ``` -->
 
+# Session Info
+
+```{r}
+sessionInfo()
+```
