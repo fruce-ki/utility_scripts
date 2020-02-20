@@ -3,8 +3,7 @@
 """fileutilities.py
 
 Author: Kimon Froussios
-Compatibility tested: python 3.5.2
-Last reviewed: 10/05/2019
+Last reviewed: 20/02/2020
 
 This module is a solution for Frequently Performed Generic Tasks that involve
 multiple files:
@@ -233,6 +232,7 @@ def do_foreach(flist, comm, progress=True, out=(None,None,None), log=False):
                     {dir} : absolute path of the file's directory.
                     {val} : the actual value specified as target
                     {bas} : the basename of the file, without the last extension.
+                    {cor} : the basename of the file, without any extensions.
                     {alias}: the alias for the file, if iterating through a FilesList.
                     Placeholders can be nested, to allow nested calls of fileutilities:
                     i.e. {{abs}}. A layer of nesting is peeled off each time the function is called,
@@ -254,16 +254,18 @@ def do_foreach(flist, comm, progress=True, out=(None,None,None), log=False):
         for c in comm:
             # Evaluate placeholders, if they are not nested.
             (mypath, mybase) = os.path.split(str(myfile))
-            c = re.sub(r"(?<!\{){abs}(?!\})", str(myfile), c)
-            c = re.sub(r"(?<!\{){dir}(?!\})", mypath, c)
-            c = re.sub(r"(?<!\{){val}(?!\})", mybase, c)
-            c = re.sub(r"(?<!\{){bas}(?!\})", os.path.splitext(mybase)[0], c)
-            c = re.sub(r"(?<!\{){ali}(?!\})", str(myalias), c)
+            c = re.sub(r"(?<!\{){abs}(?!\})", str(myfile), c)                   # absoplute full path to file
+            c = re.sub(r"(?<!\{){dir}(?!\})", mypath, c)                        # absolute path of directory
+            c = re.sub(r"(?<!\{){val}(?!\})", mybase, c)                        # filename
+            c = re.sub(r"(?<!\{){bas}(?!\})", os.path.splitext(mybase)[0], c)   # filename minus last extension
+            c = re.sub(r"(?<!\{){cor}(?!\})", mybase.split('.')[0], c)          # filename minus all extensions
+            c = re.sub(r"(?<!\{){ali}(?!\})", str(myalias), c)                  # custom or automatic alias
             # Peel off a layer of nesting for the remaining placeholders and flags.
             c = c.replace('{{abs}}', '{abs}')
             c = c.replace('{{dir}}', '{dir}')
             c = c.replace('{{val}}', '{val}')
             c = c.replace('{{bas}}', '{bas}')
+            c = c.replace('{{cor}}', '{cor}')
             c = c.replace('{{ali}}', '{ali}')
             c = c.replace(',-', '-')
             # This argument is ready to go now.
@@ -1279,7 +1281,7 @@ def main(args):
     parser.add_argument('--link', type=str, nargs='+',
                                 help=" Create symbolic links for the targets into the specified directory. Any additional values are used as respective names for the links, one for one, otherwise the aliases or basenames will be used, enumerated when necessary.")
     parser.add_argument('--loop', type=str, nargs='+',
-                                help=" Repeat the specified shell command for each target value. Available PLACEHOLDERS to insert the targets into the commands: {abs} full path, {dir} path of directory portion, {val} target value such as filename, {bas} basename (filename minus outermost extension), {ali} file alias. Flags intended for the nested command should be preceded by a ',' sign like this: ',-v'. Recursive calls to fileutilities.py are possible by nesting the placeholders and escapes: i.e. {{abs}}, ,,-v. One layer is peeled off with each call to fileutilities loop. The placeholders will take the values of the targets of the respectively nested call.")
+                                help=" Repeat the specified shell command for each target value. Available PLACEHOLDERS to insert the targets into the commands: {abs} full path, {dir} path of directory portion, {val} target value such as filename, {bas} basename (filename minus outermost extension), {cor} filename core (all extensions removed), {ali} file alias. Flags intended for the nested command should be preceded by a ',' like this: ',-v'. Recursive calls to fileutilities.py are possible by nesting the placeholders and escapes: i.e. {{abs}}, ,,-v. One layer is peeled off with each call to fileutilities loop. The placeholders will take the values of the targets of the respectively nested call.")
     # Delimited file tasks.
     parser.add_argument('--concat', type=str,
                                 help="Create an X-separated list out of the target values, where X is the string specified as argument here. Useful for creating comma-separated lists of files.")
