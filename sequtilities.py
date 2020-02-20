@@ -3,7 +3,7 @@
 """sequtilities.py
 
 Author: Kimon Froussios
-Date last revised: 04/06/2019
+Date last revised: 17/02/2020
 
 Library of utility functions relevant to sequencing tasks.
 """
@@ -534,10 +534,11 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, anchorS
     return(True)
 
 
-def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=33, unmatched=False, paired=False):
+def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=33, unmatched=False):
     """Demultiplexing BAM file according to BC tag field.
 
     No trimming is performed.
+    Keeping an index of all readname-barcode pairs currently takes up a lot of memory, try 10x the GB size of the BAM.
 
     Args:
         bam :           Input BAM file. Single-end reads.
@@ -547,8 +548,7 @@ def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=3
         qualOffset :    Base-call quality offset for conversion from pysam to fastq.
         unmatched :     Create a BAM file for all the reads that did not match the anchor or barcode within the given tolerances.
                         Otherwise they will simply be ignored.
-        paired :        Paired-end reads. (The BC tag may be available only for the first read.)
-
+    
     Returns:
         True    on completion
     Raises:
@@ -591,7 +591,7 @@ def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=3
 
     # Parse SAM
     seen = dict()           # Keep track of seen fragment names (for paired-end, where only the first read may have a BC tag)
-    counter = Counter()
+    counter = Counter()     # Report the numbers of reads
     k = demuxS.keys()
     for r in samin:
         counter.update(['total'])
@@ -602,11 +602,11 @@ def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=3
         seq = r.query_sequence
         quals = r.query_qualities
         bc = None
-        if r.has_tag('BC'):         # probably first segment or first read of the fragment. Consider pre-sorting BAM by fragment name.
+        if r.has_tag('BC'):         # probably first read of the fragment. Consider pre-sorting BAM by fragment name.
             bc = r.get_tag('BC')
             seen[name] = bc
         else:
-            bc = seen[name]        # second read or later/last segment. Use BC from first read.
+            bc = seen[name]        # second/later read. Use BC from first read.
         # Print BAM entry
         for b in k:     # Allow for the annotated barcode in the table to be truncated relative to the actual barcode recorded in the BAM. No mismatches.
             if b in bc:
