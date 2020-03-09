@@ -1,0 +1,244 @@
+---
+title: "practice"
+author: "Kimon"
+date: "2/7/2020"
+output: 
+	html_document:
+		toc: yes
+		toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(data.table)
+
+DT <- as.data.table(mtcars)
+DT[, am := as.character(am)]
+DT[am == '1', am := 'manual']
+DT[am == '0', am := 'automatic']
+DT[, vs := as.character(vs)]
+DT[vs == '1', vs := 'V']
+DT[vs == '0', vs := 'straight']
+DT[, am := as.factor(am)]
+DT[, vs := as.factor(vs)]
+
+head(DT)
+```
+
+# Descriptive
+
+```{r}
+summary(DT)
+```
+
+## Centre
+
+```{r}
+# Ignore outter-most values,
+print(c( 'median' = median(DT$mpg),
+				 'mean' = mean(DT$mpg), 
+				 '5% trimmed' = mean(DT$mpg, trim=0.025),
+				 'weighted' = weighted.mean(DT$mpg, rnorm(nrow(DT))), # random weights, dataset doesn't have any
+				 'geometric' = exp(mean(log(DT$mpg))),
+				 'harmonic' = 1/(mean(1/DT$mpg))
+				 ))
+```
+
+## Spread
+
+```{r}
+print(c( 'min' = min(DT$mpg),
+				 'max' = max(DT$mpg),
+				 'range' = range(DT$mpg),
+				 'quantiles' = quantile(DT$mpg, c(0.25, 0.5, 0.75)),
+				 'variance' = var(DT$mpg),
+				 'stdev' = sd(DT$mpg),
+				 'sterr' = sd(DT$mpg) / sqrt(length(DT$mpg)),
+				 'coeffvar' = sd(DT$mpg) / mean(DT$mpg), # ... * 100
+				 '95% ci' = c( mean(DT$mpg) - 1.96 * sd(DT$mpg) / sqrt(length(DT$mpg)),  # mean +- Tstat * sterr
+				 							 mean(DT$mpg) + 1.96 * sd(DT$mpg) / sqrt(length(DT$mpg)) ),  # 99% 2.58,  normal-ish only
+				 '95% boot ci' = quantile(vapply(1:1000, 
+				 																function(i){ 
+				 																	mean(sample(DT$mpg, nrow(DT), replace=TRUE))
+				 																}, numeric(1)),
+				 												 c(0.025, 0.975))
+))
+```
+
+## Viz
+
+### One var
+
+```{r}
+library(ggplot2)
+
+ggplot(DT, aes(x=1:nrow(DT), y=mpg)) + 
+	geom_point() + 
+	geom_line() + 
+	geom_smooth(method='lm')
+```
+
+```{r}
+ggplot(DT, aes(x="", y=mpg)) + 
+	geom_boxplot()
+```
+
+```{r}
+ggplot(DT, aes(x="", y=mpg)) + 
+	geom_violin(draw_quantiles = c(0.25, 0.5, 0.75))
+```
+
+```{r}
+ggplot(DT, aes(x=mpg)) + 
+	geom_histogram()
+```
+
+```{r}
+ggplot(DT, aes(x=am, fill=am)) + 
+	geom_bar()
+```
+
+```{r}
+ggplot(DT, aes(x=am, fill=am)) + 
+	geom_bar() +
+	coord_polar(theta='y')
+```
+
+```{r}
+ggplot(DT, aes(x=factor(""), fill=am)) + 
+	geom_bar() +
+	coord_polar(theta='y')
+```
+
+### Two vars
+
+```{r}
+ggplot(DT, aes(x=hp, y=mpg)) + 
+	geom_point() + 
+	geom_line() + 
+	geom_smooth(method='lm')
+```
+
+```{r}
+ggplot(DT, aes(x=hp, y=mpg)) + 
+	geom_point() + 
+	geom_density_2d()
+```
+
+### More vars
+
+```{r}
+ggplot(DT, aes(x=hp, y=mpg)) + 
+	facet_wrap(~ cyl, scales="free") +
+	geom_point() + 
+	geom_smooth(method='lm')
+```
+
+```{r}
+ggplot(DT, aes(x=hp, y=mpg, size=cyl)) + 
+	geom_point(alpha=0.4)
+```
+
+### All the vars, pairwise
+
+```{r, fig.height=10, fig.width=10}
+library(GGally)
+
+ggpairs(DT)
+```
+
+# Check for normality
+
+```{r}
+ggplot(DT, aes(x=qsec)) + 
+	geom_density()
+```
+
+```{r}
+qqline(DT$qsec, lty=2)
+```
+
+### Shapiro-Wilkinson test
+
+N < 10 won't detect almost anything
+N > 30 will detect almost everything
+
+```{r}
+print( shapiro.test(DT$qsec) )
+```
+
+### Kolmogorov-Smirnov (K-S)
+
+Continuous distribution, does not like repeated values.
+
+Compares against a specific distribution. Do NOT use for testing normality.
+
+```{r}
+print( ks.test(DT$hp, pnorm) )    # pnorm() : normal distribution
+```
+
+### More in package `nortest`
+
+`nortest` package:
+
+- Lilliefors test, based on K-S
+- Anderson-Darling test, more accurate than lillie.
+
+
+# Hypothesis testing - Continuous variables
+
+## T-test - Mean of a normal distribution
+
+```{r}
+t.test(DT$qsec, mu=0)	# Test if mean is sig different from 0.
+```
+
+## Difference between means of two normal distributions - T-test
+
+### Different variances in unpaired data (Student's)
+
+"Welch 2-sample t-test", DOF ~< n-2
+
+```{r}
+# Different variances
+t.test(DT$drat, DT$wt)	# Test if difference of means is sig different from 0.
+```
+
+### Equal variances in unpaired data
+
+(Check variance equality using F-test or Levene's test)
+
+"2-sample t-test", DOF == n-2
+
+```{r}
+t.test(DT$wt, DT$drat, var.equal = TRUE)	# Test if means sig different from each other.
+```
+
+### Matched value pairs
+
+```{r}
+t.test(DT$wt, DT$drat, paired=TRUE)	# # Test if means sig different from each other.
+```
+
+Or as a 1-sample test:
+
+```{r}
+t.test(DT$wt - DT$drat, mu=0)	 # Test if difference of means is sig different from 0.
+```
+
+## Difference between means of two non-normal distributions
+
+Transform data to normal?
+
+### Mann-Whitney / unpaired Wilcoxon rank sum
+
+
+
+
+
+
+
+
