@@ -548,7 +548,7 @@ def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=3
         qualOffset :    Base-call quality offset for conversion from pysam to fastq.
         unmatched :     Create a BAM file for all the reads that did not match the anchor or barcode within the given tolerances.
                         Otherwise they will simply be ignored.
-    
+
     Returns:
         True    on completion
     Raises:
@@ -657,6 +657,7 @@ def bed_from_regex(flist, rx, rc=False, name='match'):
         with open (myfile, "rU") as fasta:
             for record in SeqIO.parse(fasta, "fasta"):
                 for m in p.finditer( str(record.seq) ):
+                    # Match coordinates are 0-based and endd-non-inclusive, and BED wants them like that too.
                     res.append( '%s\t%d\t%d\t%s\t%d\t%c\t%d\t%d' % (record.id, m.start(), m.end(), m.group(0), 0, '+', m.start(), m.end()) )
                 if rc:
                     rcseq = str(record.seq.reverse_complement())
@@ -664,6 +665,35 @@ def bed_from_regex(flist, rx, rc=False, name='match'):
                     for m in p.finditer(rcseq):
                         res.append( "%s\t%d\t%d\t%s\t%d\t%c\t%d\t%d" % (record.id, lenrc - m.end(), lenrc - m.start(), m.group(0), 0, '-' if not rc else '-', m.start(), m.end()) )
     return(res)
+
+
+def filter_bam_by_region(flist, regions, outfiles):
+    """Select alignments that overlap the regions.
+
+    Whole alignments, not trimmed to the region (unlike samtools view)
+
+    Args:
+        flist(FilesList): BAM files.
+        regions[tuple(str,int,int)]: chr, start (inclusive), end (inclusive), 1-based.
+        outfiles[str]: Respective output files for the input files in flist.
+    """
+    for i, (myfile, myalias) in flist.enum():
+        samin = pysam.AlignmentFile(myfile, 'rb')
+        samout = pysam.AlignmentFile(outfiles[i], 'wb', template=samin)
+        for record in samin:
+            if r[0] == record.reference_name:
+                for r in regions:
+                    ##query_alignment_start   0-based exclusive
+                    ##query_alignment_end  0-based inclusive
+                    # if alignment starts or ends in the region, or contains the whole region
+                    if (r[1] < record.query_alignment_start and r[1] >= record.query_alignment_end) or (r[2] < record.query_alignment_start and r[2] >= record.query_alignment_end) or (r[1] > record.query_alignment_start and r[2] < record.query_alignment_end):
+                        samout.write(record)
+            else:
+                print("Did not match reference")
+                break
+        samin.close()
+        samout.close()
+
 
 def main(args):
     # Organize arguments and usage help:
@@ -740,6 +770,8 @@ def main(args):
                                 help="Demultiplex a BAM using the BC: tag field and a look-up table that matches these barcode values to sample names. Arguments: [1] (str) barcodes file, [2] (int) base quality encoding offset (probably 33). One output subdirectory per input bam. Use -O to specify the output destination.")
     parser.add_argument('--regex2bed', type=str, nargs=3,
                                 help="Create a bed track annotating the occurences of the specified regex in each strand of the TARGET sequences (FASTA files). [1] regex string, [2] also look in reverse complement yes/no, [3] feature name to display.")
+    parser.add_argument('--fltrBamReg', type=str, nargs='+',
+                                help="Extract all alignments that overlap the given region. Unlike samtools view, the whole alignments will be returned, not the just the portions that overlap the regions. Regions given in chr:from-to format, inclusive of both ends, 1-based. Use -O to control output files.")
     params = parser.parse_args(args)
 
 
@@ -956,6 +988,18 @@ def main(args):
             print(line)
 
 
+    # FILTER BAM by overlap to give REGIONS
+    elif params.fltrBamReg:
+        regions = list()
+        p = re.compile('(\w+):(\d+)[^0-9](\d+)')
+        for r in params.fltrBamReg:
+            m = p.search(r)
+            if m:
+                regions.append(( str(m.group(1)), int(m.group(2)), int(m.group(3)) ))
+            else:
+                sys.stderr.write(r + ' is not a valid region format\n')
+                exit(1)
+        filter_bam_by_region(flist, regions, outfiles)
 
 #     # All done.
 #     if params.STDERRcomments:
