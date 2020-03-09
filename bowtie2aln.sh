@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 
-module load bowtie2/2.2.9-foss-2017a
-module load samtools/1.9-foss-2017a
+# module load bowtie2/2.2.9-foss-2017a
+# module load samtools/1.9-foss-2017a
 
 idx=$1 ; shift
 indir=$1 ; shift
