@@ -1,16 +1,34 @@
 ---
-title: "DE Report : EFpost"
+title: "DE Report"
 author: "Kimon"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: 
   html_document:
     code_folding: hide
-    toc: yes
+    toc: true
+    toc_float: true
+    collapsed: false
+params:
+  derds: "null.RDS"     # MUST be specified, DESeq2 Dataset object file (before model creation)
+  rmrds: "null.RDS"     # MUST be specified, RPM matrix object
+  prefix: ""
+  resultsDir: "."
+  baseDir: "."
+  pcutoff: 0.05
+  lfcthreshold: 1
+  ntop: 50              # maximum number of hits to list
+  ppen: 5               # Weight factor for -log10p vs l2fc, when selecting hits by distance from the origin of the axes of the DE volcanoes.
+  minL: 0.75            # Minimum component loading, for selection of features to report in PCA
+  minCount: 10          # Minimum sum of counts across samples per gene (already applied, just here for parameter documentation in the report)
+  filterBaseMean: True  # DESeq2 independent filtering
+  reducedFormula: 'NULL'
+  roundrobin: True      # do all-vs-all comparisons (for single-factor comparisons only). Otherwise only vs assigned reference condition.
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, message=FALSE)
 ```
+
 
 # Setup
 
@@ -20,55 +38,60 @@ library(data.table)
 library(ggplot2)
 library(plotly)
 library(htmltools)
-library(topGO)
-library(org.Mm.eg.db)
-```
+# library(topGO)
+# library(org.Mm.eg.db)
+library(patchwork)
+library(ggExtra)
+library(ggrepel)
 
-```{r parameters}
+# ggplot2 base theme
 theme_set(theme_bw())
 
-ntop = 50
-pcutoff <- 0.001
-lfcthreshold <- 1
-ppen = 5           # Scale-down factor for -log10p when calculating point distances from the origin.
+data.table::setDTthreads(1L)
 
-dds <- readRDS('/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/M9179_quantseq/process/DE_wald/EFpost/gene_deseq2.RDS')
+options(scipen=2)
 
-# xref <- NULL
-xref <- fread('/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/M9179_quantseq/aux/xref_mm_genes.txt')
+# params <- list(derds = ddsrds, rmrds = rpmrds, ntop = opt$ntop, pcutoff = opt$pcutoff, lfcthreshold = opt$lfcthreshold, baseDir = opt$baseDir, resultsDir = opt$resultsDir, prefix = autoname, ppen = 5, minL=0.75, minCount=opt$minCount, filterBaseMean=opt$bmF, reducedFormula = opt$reducedFormula, roundrobin = opt$all)
+
+
+if (!is.null(params$reducedFormula)){
+  if (params$reducedFormula == 'NULL') {
+    params$reducedFormula <- NULL
+  }
+}
 ```
 
 ```{r preprocess}
-cat(paste("P cut-off:", pcutoff))
-cat(paste("log2FC threshold:", lfcthreshold))
-cat(paste("max N hits to highlight and list:", ntop))
+deobj <- readRDS(params$derds)
+rpm <- readRDS(params$rmrds)
+# ctsmat <- counts(deobj)
+vstmat <- assay(vst(deobj, blind=FALSE))     # Variance stabisized counts
+cD <- colData(deobj)[, 1:length(colData(deobj)), drop=FALSE]  # before model building, there in no size factor as last column
 
-# Assume first column of xref is key
-if (!is.null(xref)){
-  setkeyv(xref, cols=names(xref)[1])
-}
-# Mash together the alternative IDs
-xref[, mashed := apply(xref, 1, function(x){paste(rev(x), collapse=':')})]
-
-# Contrasts.
-coeffs <- resultsNames(dds)[resultsNames(dds) != "Intercept"]
-
-# Variance stabisized counts
-vstmat <- assay(vst(dds, blind=FALSE))
+cat(paste("min allowed sum of raw counts across relevant samples:", params$minCount))
+cat(paste("Significance level:", params$pcutoff))
+cat(paste("independent filtering:", params$filterBaseMean))
+cat(paste("log2FC threshold:", params$lfcthreshold, ", (i.e.", 2 ^ params$lfcthreshold, "-fold change)"))
+cat(paste("max # of top hits to highlight:", params$ntop))
+cat(paste("Expand contrasts to include pairs without the assigned reference:", params$roundrobin))
 ```
 
-```{r functions}
+```{r functionDE}
 # DE
-do_de_plots <- function(dds, contrast, xref, ntop, pcutoff=0.001, lfcthreshold=1){
+do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, ppen = params$ppen, 
+                        pcutoff = params$pcutoff, lfcthreshold = params$lfcthreshold, filterBM=params$filterBaseMean){
+  # contrast <- coeffs[1]
+  
   # Get DE for given contrast
-  lfc <- results(dds, name=contrast)
-  lfc <- cbind(data.table(name=rownames(lfc)), as.data.table(lfc))
-  lfc[, mlog10p := -log10(padj)] [, type := "raw LFC"]
+  lfc <- results(dds, name=contrast, independentFiltering = filterBM, alpha=pcutoff)
   shrink <- lfcShrink(dds, coef=contrast, type='apeglm')
+  
+  lfc <- cbind(data.table(name=rownames(lfc)), as.data.table(lfc))
+  lfc[, mlog10p := -log10(padj)] [, type := "raw_L2FC"]
   shrink <- cbind(data.table(name=rownames(shrink)), as.data.table(shrink))
-  shrink[, comboID := xref[shrink$name, mashed]]
-  shrink[, mlog10p := -log10(padj)] [, type := "shrunken LFC"] [, absl2fc := abs(log2FoldChange)]
-  shrink[, meetthresh := abs(log2FoldChange) >= lfcthreshold & padj < pcutoff]
+  shrink[, mlog10p := -log10(padj)] [, type := "shrunken_L2FC"] [, absl2fc := abs(log2FoldChange)]
+  
+  shrink[, meetthresh := absl2fc >= lfcthreshold & padj < pcutoff]
   shrink[complete.cases(shrink), dist := sqrt((mlog10p/ppen)^2 + log2FoldChange^2)]  # logp is usually much bigger than logfc, so down-weight it a little
   setorder(shrink, -dist, -mlog10p, -absl2fc, na.last = TRUE)
   shrink[, istop := FALSE]
@@ -95,49 +118,124 @@ do_de_plots <- function(dds, contrast, xref, ntop, pcutoff=0.001, lfcthreshold=1
     # It's too much hassle to code alternatives for all the places subfc is used.
   }
   
+  
+  outtab <- rbind(lfc, shrink, fill=TRUE)
+  
   # Volcanos
   
-  pv1 <- ggplot(rbind(lfc, shrink, fill=TRUE), 
+  # Static image.
+  pv1 <- ggplot(outtab, 
                 aes(x=log2FoldChange, y=mlog10p, 
                     shape= name %in% subfc[(istop), name], 
                     colour=name %in% subfc[(istop), name])) + 
             facet_grid( . ~ type) +
-            geom_point(size=0.8, alpha=0.5) +
-            geom_vline(xintercept = lfcthreshold, linetype="dotted",  colour="steelblue") + 
-            geom_vline(xintercept = -lfcthreshold, linetype="dotted",  colour="steelblue") + 
-            geom_hline(yintercept = -log10(pcutoff), linetype="dotted",  colour="steelblue") + 
-            scale_colour_manual(values=c("black", "magenta")) +
+            geom_point(size=rel(0.8), alpha=0.5) +
+            geom_vline(xintercept = lfcthreshold, linetype="dotted",  colour="steelblue1") + 
+            geom_vline(xintercept = -lfcthreshold, linetype="dotted",  colour="steelblue1") + 
+            geom_hline(yintercept = -log10(pcutoff), linetype="dotted",  colour="steelblue1") + 
+            scale_colour_manual(values=c("black", "red")) +
             scale_shape_manual(values=c(16, 17)) +
             labs(x='log2( FC )', y='-log10( Padj )', title=contrast) +
             theme(legend.position = "none", panel.grid = element_blank())
-  pv2 <- ggplot(subfc, 
-                aes(x=log2FoldChange, y=mlog10p, label=comboID)) + 
-            geom_vline(xintercept = lfcthreshold, linetype="dotted",  colour="steelblue") + 
-            geom_vline(xintercept = -lfcthreshold, linetype="dotted",  colour="steelblue") + 
-            geom_hline(yintercept = -log10(pcutoff), linetype="dotted",  colour="steelblue") + 
-            geom_point(size=0.8, alpha=0.5) +
-            labs(x='', y='', title=contrast) + # Re-add the axis titles with plotly later, because ggplotly() loses them anyway
-            theme(panel.grid = element_blank())
+  # pv1a <- ggplot(outtab, 
+  #               aes(x=log2FoldChange, y=mlog10p, 
+  #                   shape= name %in% subfc[(istop), name], 
+  #                   colour=name %in% subfc[(istop), name])) + 
+  #           facet_grid( type ~ . ) +
+  #           geom_point(size=0.8, alpha=0.5) +
+  #           geom_vline(xintercept = lfcthreshold, linetype="dotted",  colour="steelblue1") + 
+  #           geom_vline(xintercept = -lfcthreshold, linetype="dotted",  colour="steelblue1") + 
+  #           geom_hline(yintercept = -log10(pcutoff), linetype="dotted",  colour="steelblue1") + 
+  #           scale_colour_manual(values=c("black", "red")) +
+  #           scale_shape_manual(values=c(16, 17)) +
+  #           labs(x='log2( FC )', y='-log10( Padj )', title=contrast) +
+  #           theme(legend.position = "none", panel.grid = element_blank())
   
-  # Expression of ntop genes that meet thresholds
+  # Lighter image for interactive plotly. Only points that pass thresholds.
+  pv2 <- ggplot(subfc, 
+                aes(x=log2FoldChange, y=mlog10p, label=name,
+                    shape= name %in% subfc[(istop), name],
+                    colour=name %in% subfc[(istop), name])) + 
+            geom_vline(xintercept = lfcthreshold, linetype="dotted",  colour="steelblue1") + 
+            geom_vline(xintercept = -lfcthreshold, linetype="dotted",  colour="steelblue1") + 
+            geom_hline(yintercept = -log10(pcutoff), linetype="dotted",  colour="steelblue1") + 
+            geom_point(alpha=0.5) +
+            scale_colour_manual(values=c("black", "red")) +
+            scale_shape_manual(values=c(16, 17)) +
+            labs(x='log2( FC )', y='-log10( Padj )', title=contrast) +
+            theme(legend.position = "none", panel.grid = element_blank())
+  
+  # MA
+  
+  # Static image.
+  pma1 <- ggplot(outtab, 
+                aes(x=baseMean, y=log2FoldChange, alpha=padj < pcutoff, 
+                    shape= name %in% subfc[(istop), name],
+                    colour=name %in% subfc[(istop), name])) + 
+            facet_grid( . ~ type) +
+            geom_hline(yintercept = 0,  colour="grey50") + 
+            geom_point(size=rel(0.8)) +
+            geom_hline(yintercept = lfcthreshold, linetype="dotted",  colour="steelblue1") + 
+            geom_hline(yintercept = -lfcthreshold, linetype="dotted",  colour="steelblue1") + 
+            scale_x_log10() +
+            annotation_logticks(base=10, sides='b') +
+            scale_colour_manual(values=c("black", "red")) +
+            # scale_alpha_continuous(na.value=0.05) +
+            scale_alpha_manual(values=c(0.25, 0.8), na.value=0.05) +
+            labs(y='log2( FC )', y='baseMean', title=contrast) +
+            theme(legend.position = "none", panel.grid = element_blank())
+  # pma1a <- ggplot(outtab, 
+  #               aes(x=baseMean, y=log2FoldChange, alpha=padj < pcutoff, 
+  #                   shape= name %in% subfc[(istop), name],
+  #                   colour=name %in% subfc[(istop), name])) + 
+  #           facet_grid( type ~ . ) +
+  #           geom_hline(yintercept = 0,  colour="grey50") + 
+  #           geom_point(size=0.8) +
+  #           geom_hline(yintercept = lfcthreshold, linetype="dotted",  colour="steelblue1") + 
+  #           geom_hline(yintercept = -lfcthreshold, linetype="dotted",  colour="steelblue1") + 
+  #           scale_x_log10() +
+  #           annotation_logticks(base=10, sides='b') +
+  #           scale_colour_manual(values=c("black", "red")) +
+  #           # scale_alpha_continuous(na.value=0.05) +
+  #           scale_alpha_manual(values=c(0.25, 0.8), na.value=0.05) +
+  #           labs(y='log2( FC )', y='baseMean', title=contrast) +
+  #           theme(legend.position = "none", panel.grid = element_blank())
+  
+  # Lighter image for interactive plotly. Only points that pass thresholds.
+  pma2 <- ggplot(subfc, 
+                aes(x=log10(baseMean), y=log2FoldChange, label=name,
+                    shape= name %in% subfc[(istop), name],
+                    colour=name %in% subfc[(istop), name])) + 
+            geom_hline(yintercept = 0,  colour="grey50") + 
+            geom_point(alpha=0.5) +
+            geom_hline(yintercept = lfcthreshold, linetype="dotted",  colour="steelblue1") + 
+            geom_hline(yintercept = -lfcthreshold, linetype="dotted",  colour="steelblue1") + 
+            scale_colour_manual(values=c("black", "red")) +
+            labs(y='log2( FC )', y='log10( Mean )', title=contrast) +
+            theme(legend.position = "none", panel.grid = element_blank())
+  
+  # Expression heatmap of ntop genes that meet thresholds
   
   # Get the counts for the relevant samples only
   mM <- attr(dds, "modelMatrix")
   refs <- rownames(mM[apply(mM, 1, sum) == 1, , drop=FALSE])
   treats <- rownames(mM)[mM[, contrast] == 1]
   selvst <- assay(vst(dds, blind=FALSE))[head(subfc$name, n=ntop), ]
-  selcnt <- log10(counts(dds)[head(subfc$name, n=ntop), ]) # Range too broad, dominated by few silly-high expression
-  if (is.null(dim(selcnt))){ # if there is only one hit
+  selcnt <- rpms[head(subfc$name, n=ntop), ]
+  if (is.null(dim(selcnt))) {
+    # if there is only one hit
     selvst <- as.data.frame( c(as.list(selvst[c(refs, treats)]), list(name=subfc$name)) )
-    selcnt$type <- "log10(raw count)"
+    selvst$type <- "VST count"
     selcnt <- as.data.frame( c(as.list(selcnt[c(refs, treats)]), list(name=subfc$name)) )
-    selcnt$type <- "VST count"
-    selcnt <- rbind(selcnt, selvst)
-    selvst <- melt(selcnt, id.vars="name", variable.name="sample", value.name="count")
-    rn <- subfc$name
+    selcnt$type <- "RPM"
+    # selcnt <- rbind(selcnt, selvst)
+    selcnt <- melt(selcnt, id.vars="name", variable.name="sample", value.name="RPM")
+    selvst <- melt(selvst, id.vars="name", variable.name="sample", value.name="VST_count")
+    # rn <- subfc$name
   } else {
     selcnt <- selcnt[, c(refs, treats)]
     selvst <- selvst[, c(refs, treats)]
+    
     # Custer row and columns
     cfit <- hclust(dist(scale(t(selvst), center=TRUE))) # cluster columns
     rfit <- hclust(dist(scale(selvst, center=FALSE)))    # cluster rows
@@ -145,36 +243,75 @@ do_de_plots <- function(dds, contrast, xref, ntop, pcutoff=0.001, lfcthreshold=1
     selvst <- selvst[rfit$order, cfit$order]
     cn <- colnames(selvst)
     rn <- rownames(selvst)
-    # Scale log(raw) to VST, so they can share the fill gradient.
-    selcnt <- selcnt * (median(selvst) / median(selcnt))
+    
+    # Scale VST to log(RPM), so they can share the fill gradient.
+    # selvst <- selvst * (median(selcnt) / median(selvst))
+    
     # Tidy
     selcnt <- as.data.table(cbind(data.table(name=rownames(selcnt)), as.data.frame(selcnt)))
     selcnt[, name := factor(name, ordered=TRUE, levels=rn)]
-    selcnt[, type := "log10(raw count)"]
+    selcnt[, type := "RPM"]
     selvst <- as.data.table(cbind(data.table(name=rownames(selvst)), as.data.frame(selvst)))
     selvst[, name := factor(name, ordered=TRUE, levels=rn)]
     selvst[, type := "VST count"]
-    selcnt <- rbind(selcnt, selvst)
-    selcnt <- melt(selcnt, id.vars=c("name", "type"), variable.name="sample", value.name="VST_count") 
-    # I want the legend title to be VST even if scaled(log(raw)) are also included, because it makes sense as legend name since CST is the scaling reference
+    # selcnt <- rbind(selcnt, selvst)
+    selcnt <- melt(selcnt, id.vars=c("name", "type"), variable.name="sample", value.name="RPM")
     selcnt[, sample := factor(sample, ordered=TRUE, levels=cn)]
+    selvst <- melt(selvst, id.vars=c("name", "type"), variable.name="sample", value.name="VST_count")
+    selvst[, sample := factor(sample, ordered=TRUE, levels=cn)]
   }
-  selcnt$id <- xref[as.character(selcnt$name), mashed]
-  selcnt[, id := factor(id, ordered=TRUE, levels=unique(id))]
-  
-  pe1 <- ggplot(selcnt, aes(x=sample, y=id, fill=VST_count)) +
+
+  pe1 <- ggplot(selcnt, aes(x=sample, y=name, fill=log10(RPM))) +
             geom_tile() +
             facet_grid(. ~ type) +
-            scale_fill_gradient(low="transparent", high="darkgreen", limits=c(0, max(selcnt$VST_count)), na.value = "transparent") +
+            scale_fill_gradient(high="white", low="darkgreen", na.value = "black") +
             labs(title=contrast) +
             theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
-                  panel.grid.major = element_blank())
+                  panel.grid = element_blank())
   
-  return(list(contrast=contrast, pv1=pv1, pv2=pv2, pe1=pe1, tophits=rn, shrunkLFC=shrink))
+  pe2 <- ggplot(selvst, aes(x=sample, y=name, fill=VST_count)) +
+            geom_tile() +
+            facet_grid(. ~ type) +
+            scale_fill_gradient(high="white", low="darkgreen", na.value = "black") +
+            labs(title=contrast) +
+            theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
+                  panel.grid = element_blank())
+  
+  # Table
+  
+  # Add shrunken LFC column to normal LFC table. dcast is a glorified rename, but without changing the original (it made more sense when this block located earlier in the function)
+  outtab <- merge(dcast(lfc, ... ~ type, value.var = 'log2FoldChange'),
+                  dcast(shrink, ... ~ type, value.var = 'log2FoldChange')[, .(name, shrunken_L2FC)], 
+                  by='name')
+  outtab[, refStDev := sqrt(rowVars(counts(dds)[outtab$name, refs, drop=FALSE])) ]
+  outtab[, treatStDev := sqrt(rowVars(counts(dds)[outtab$name, treats, drop=FALSE])) ]
+  outtab[, refMean := rowMeans(counts(dds)[outtab$name, refs, drop=FALSE]) ]
+  outtab[, treatMean := rowMeans(counts(dds)[outtab$name, treats, drop=FALSE]) ]
+  outtab[, refMeanRPM := rowMeans(rpms[outtab$name, refs, drop=FALSE]) ]
+  outtab[, treatMeanRPM := rowMeans(rpms[outtab$name, treats, drop=FALSE]) ]
+  
+  # Prepare column names for merging the files later
+  setnames(outtab, 
+           c(names(outtab)[1],              # keep uniform name across tables for the joining key
+             paste(params$prefix, 
+                   paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(dds), perl=TRUE), collapse=''), 
+                   contrast, 
+                   names(outtab)[2:length(outtab)], sep='.') ) )       # make the other columns unique
+  
+  
+  return(list(contrast=contrast, 
+              pv1=pv1, pv2=ggplotly(pv2, dynamicTicks = TRUE), # pv1a=pv1a,
+              pma1=pma1, pma2=ggplotly(pma2, dynamicTicks = TRUE), # pma1a=pma1a,
+              pe1=pe1, pe2=pe2, 
+              tophits=rn, hashits=any(shrink$meetthresh, na.rm=TRUE),
+              outtab=outtab))
+  # resall <- list(list(contrast=contrast, pv1=pv1, pv2=ggplotly(pv2, dynamicTicks = TRUE), pma1=pma1, pma2=ggplotly(pma2, dynamicTicks = TRUE), pe1=pe1, pe2=pe2,tophits=rn, hashits=any(shrink$meetthresh), outtab=outtab))
 }
+```
 
+```{r functionC}
 # Correlations
-my_pairwise_internal_coords <- function(mat, method="pearson") {
+my_pairwise_internal_corels <- function(mat = counts(deobj), method = "pearson") {
   # Correlations
   cormat <- cor(mat, method=method)
   
@@ -182,149 +319,641 @@ my_pairwise_internal_coords <- function(mat, method="pearson") {
   hcfit <- hclust(dist(scale(cormat, center=TRUE)))
   cormat <- cormat[hcfit$order, hcfit$order]
   rn <- rownames(cormat)
-  cormat2 <- cormat # Duplicate,
   
-  # Delete diagonal half for the numeric labels. But keep the heatmap square, because pretty.
+  cormat2 <- cormat # Duplicate, for colour fills.
+  # Delete diagonal half for the numeric labels.
   for (r in 1:nrow(cormat)) {
     for (c in 1:ncol(cormat)) {
-      if (c < r) {
+      if (c <= r) {
         cormat[r, c] <- NA_real_
       }
     }
   }
   
+  # Restructure for plotting.
+  cormat <- t(cormat)
+  cormat2 <- t(cormat2)
   cormat <- as.data.table(t(cormat))
-  cormat[, observation1 := factor(rn, ordered=TRUE, levels=rn)]
-  cormat <- melt(cormat, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
-  cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rn)]
   cormat2 <- as.data.table(t(cormat2))
+  cormat[, observation1 := factor(rn, ordered=TRUE, levels=rn)]
   cormat2[, observation1 := factor(rn, ordered=TRUE, levels=rn)]
+  cormat <- melt(cormat, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
   cormat2 <- melt(cormat2, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
-  cormat2[, observation2 := factor(observation2, ordered=TRUE, levels=rn)]
+  cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rev(rn))]
+  cormat2[, observation2 := factor(observation2, ordered=TRUE, levels=rev(rn))]
   
-  p <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
+  # Relative to full range of values -1,1 (better context)
+  p1 <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
-    geom_text(data=cormat, aes(label=round(Correlation, 2), colour=Correlation)) +
-    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue", "blue", "darkblue", "black", "darkred", "red", "orange", "yellow"), na.value = "transparent" ) +
-    scale_colour_gradientn(limits=c(-1, 1), colors=rep(c("black", "white", "white", "black"), each=3), guide="none") +
-    labs(x='', y='') +
+    geom_text(data=cormat, aes(label=round(Correlation, 2), colour=Correlation >= -0.70 & Correlation <= 0.70 )) +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "blue", "darkblue", "black", "darkred", "red", "gold"), na.value = "transparent" ) +
+    scale_colour_manual(values=c("black", "white"), na.value="forestgreen", guide="none") +
+    labs(title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation"), 
+         x='', y='') +
     theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
-          panel.grid.major = element_blank() )
-  return(p)
+          panel.grid = element_blank() )
+  
+  # Relative to actual value range min,max (better contrast)
+  m <- min(cormat2$Correlation, na.rm=TRUE)
+  M <- max(cormat2$Correlation, na.rm=TRUE)
+  # colourswitch <- c( m + 0.16 * (M-m),  m + 0.85 * (M-m) ) # switch letter colour at 15% and 85% of the value range, to stay legible over the fill gradient
+  #                                                          # Quantiles not suitable for this, because the gradient is not affected by values inbetween max and min.
+  colourswitch <- c( m + 0.49 * (M-m),  m + 0.51 * (M-m) ) 
+  p2 <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    # geom_text(data=cormat, aes(label=round(Correlation, 2), colour=( Correlation >= colourswitch[1] & Correlation <= colourswitch[2] ))) +
+    geom_text(data=cormat, aes(label=round(Correlation, 2), colour=( Correlation <= colourswitch[2] ))) +
+    # scale_fill_gradientn(colors=c("lightskyblue", "blue", "darkblue", "black", "darkred", "red", "gold"), na.value = "transparent" ) +
+    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
+    scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
+    labs(title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation"), 
+         x='', y='') +
+    theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
+          panel.grid = element_blank() )
+  
+  return( list(full=p1, dyna=p2) )
 }
+```
 
-# GO enrichment
-do_go <- function(de, db, ntop, onto){
-  if (any(de$meetthresh)) {
-    geneList <- factor(as.integer(de$meetthresh & de$istop))
-    names(geneList) <- de$name
+```{r functionGO}
+# # GO enrichment
+# do_go <- function(de, db, ntop, onto){
+#   if (any(de$meetthresh)) {
+#     geneList <- factor(as.integer(de$meetthresh & de$istop))
+#     names(geneList) <- de$name
+#     
+#     GOdata <- new("topGOdata",
+#                   description = paste(onto, db), 
+#                   ontology = onto,
+#                   allGenes = geneList,
+#                   nodeSize = 10,
+#                   annot = annFUN.org,
+#                   mapping = db,
+#                   ID = "ensembl")
+#     resFish <- runTest(GOdata, algorithm = "classic", statistic = "fisher")
+#     allRes <- GenTable(GOdata, classicFisher = resFish, ranksOf = "classicFisher", topNodes = ntop)
+#     
+#     return(allRes[allRes$classicFisher < 0.05,])
+#   }
+# }
+```
+
+```{r functionsPCA}
+# PCA
+# (scaling and centering of genes to one another, NOT samples to one another)
+do_pca <- function(countsmat = rpm, covars = colData(deobj), center = TRUE, scale = TRUE, loadthresh = params$minL){
+  # Gene variances
+  genevar <- data.table(name = rownames(countsmat),
+                        Mean = rowMeans(countsmat),
+                        StDev = rowVars(countsmat) )
+  
+  # Rotate counts so genes are variables and samples are observations
+  countsmat <- t(countsmat)
+  
+  # Add covariates info
+  counts <- cbind(covars, as.data.table(countsmat))
+  
+  # Calculate principal components (after getting rid of zero-variance genes that can't be standardized).
+  
+  nonconstant <- which(apply(countsmat, 2, var)!=0)
+  countsmat <- countsmat[, nonconstant]
+  nvars <- dim(countsmat)[2]
+  
+  pca <- prcomp(countsmat, center = center, scale. = scale)
+  srn <- sqrt(nrow(countsmat) - 1)
+  pc <- sweep(pca$x, 2, 1 / (pca$sdev * srn), FUN = '*')
+  pc <- cbind(pc, data.frame(sample = rownames(pc)))
+  covars <- cbind(covars, data.frame(sample = rownames(covars)))
+  pc <- as.data.frame(merge(pc, covars, by="sample", all = TRUE))
+  npc <- sum(pca$sdev > 1)
     
-    GOdata <- new("topGOdata",
-                  description = paste(onto, db), 
-                  ontology = onto,
-                  allGenes = geneList,
-                  nodeSize = 10,
-                  annot = annFUN.org,
-                  mapping = db,
-                  ID = "ensembl")
-    resFish <- runTest(GOdata, algorithm = "classic", statistic = "fisher")
-    allRes <- GenTable(GOdata, classicFisher = resFish, ranksOf = "classicFisher", topNodes = ntop)
-    
-    return(allRes[allRes$classicFisher < 0.05,])
-  }
+  # Screeplot.
+  
+  pcaimp <- as.data.table(cbind(as.data.frame(t(summary(pca)$importance)), 
+                  data.frame(PC = 1:length(colnames(pca$x)))))
+  pcaimp <- melt(pcaimp, variable.name = "type", value.name = "Proportion", id.vars = c("PC", "Standard deviation"))
+  
+  pcmax=15
+  pimp <- ggplot(pcaimp[(PC<pcmax),], aes(x=PC, y=Proportion)) +
+    facet_grid(type ~ ., scales="free_y") +
+    geom_bar(aes(fill=type), stat="identity", width=0.6) +
+    geom_line(aes(colour=type)) +
+    scale_fill_manual(values = c("grey50", "transparent")) +
+    scale_colour_manual(values = c("transparent", "grey25")) +
+    scale_x_continuous(breaks = seq(1, pcmax, 2)) +
+    labs(title = "PCA Screeplot", subtitle=paste0(nvars, " features, ", npc, " PCs"), x = "Principal Component") +
+    theme(axis.title.y = element_blank(),
+          legend.position = "none")
+
+  # Top loadings for the first 3 PCs.
+  
+  loads <- as.data.table(t(t(pca$rotation) * pca$sdev))
+  loads[, rowID := rownames(pca$rotation)]
+  loads <- melt(loads, value.name = "Loading", id.vars="rowID", variable.name="PC")
+  loads[, absload := abs(Loading)]
+  lhigh <- loads$absload > loadthresh     # keep only high loadings
+  setorder(loads, PC, -absload)
+  sel1 <- loads[lhigh > loadthresh & PC=="PC1", rowID]
+  sel2 <- loads[lhigh > loadthresh & PC=="PC2", rowID]
+  sel3 <- loads[lhigh > loadthresh & PC=="PC3", rowID]
+  sel <- unique(loads[lhigh, rowID])
+  
+  # Coefficient names.
+  
+  ig <- names(covars)
+  ig <- ig[! ig %in% c('sample', 'Sample', 'name', 'Name', 'sizeFactor')]
+
+  # Means and Variances of the top loads in the first 3 PCs.
+  
+  genevar = data.table(rowID = colnames(countsmat),
+                       Mean = colMeans(countsmat), 
+                       StDev = colSds(countsmat) )
+  genevar[, istop:= rowID %in% sel]
+  
+  pvar1 <- ggMarginal(ggplot(genevar) +
+      geom_point(aes(x=Mean, y=StDev, label=rowID, colour=istop), shape=16, size=0.8, alpha=0.5) +
+      scale_x_log10() +
+      scale_colour_manual(values=c("black", "violetred")) +
+      scale_y_log10() +
+      labs(x="Mean", y="Standard Deviation", title="All features") +
+      theme(legend.position = "none"),
+    type = "histogram")
+  
+  pvar2 <- ggplot(genevar[(istop),]) +
+      geom_point(aes(x=Mean, y=StDev, label=rowid), shape=16, size=0.8, alpha=0.5, colour="purple") +
+      labs(x="Mean", y="Standard Deviation", 
+           title="Top-loading features", subtitle = "in the first 3 PCs") +
+      scale_x_log10() +
+      scale_y_log10()
+  
+  # Correlation of the samples for the selected features only.
+  
+  pcor <- my_pairwise_internal_corels(t(countsmat[, sel]))
+  
+  # Plot first 3 PCs in 2D pairs.
+  # Highlight one variable at a time.
+  pc12 <- lapply(ig, function(varname) { 
+    return( 
+      ggplot(pc, aes_string(x="PC1", y="PC2", label="sample", colour=varname)) +
+        geom_point(alpha=0.8, size=rel(1.5)) +
+        coord_fixed()
+    )})
+  
+  pc13 <- lapply(ig, function(varname) { 
+    return( 
+      ggplot(pc, aes_string(x="PC1", y="PC3", label="sample", colour=varname)) +
+        geom_point(alpha=0.8, size=rel(1.5)) +
+        coord_fixed()
+    )})
+  
+  pc32 <- lapply(ig, function(varname) { 
+    return( 
+      ggplot(pc, aes_string(x="PC3", y="PC2", label="sample", colour=varname)) +
+        geom_point(alpha=0.8, size=rel(1.5)) +
+        coord_fixed()
+    )})
+  
+  return(list(pca=pca, 
+              nvars=nvars, 
+              nPC=npc, 
+              pimp=pimp, 
+              load1=sel1, load2=sel2, load3=sel3,
+              pc_1_2=pc12, pc_1_3=pc13, pc_3_2=pc32,
+              pvar1=pvar1, pvar2=pvar2, 
+              pcor1=pcor[[1]] , pcor2=pcor[[2]]
+              ))
 }
 ```
 
 
 # Correlations
  
- Correlations of the samples, based on the raw and the Variance-Stabilisation-Transformed counts. In VST the counts are scaled such as to have the same amount of variance across all count magnitudes, effectively removing noise from the low counts.
- 
-```{r correlations, fig.height=7, fig.width=8}
-# Correlation of raw counts
-print(my_pairwise_internal_coords(counts(dds)) + labs(title="Sample correlations (raw counts)"))
+Correlations of the samples, based on the raw and the Variance-Stabilisation-Transformed counts. In VST the counts are scaled such as to have the same amount of variance across all count magnitudes, effectively removing noise from the low counts.
 
-# Variance stabilised counts
-print(my_pairwise_internal_coords(vstmat) + labs(title="Sample correlations (VST counts)"))
+## Raw counts
+
+```{r correlations, fig.height=7, fig.width=16}
+corels1 <- my_pairwise_internal_corels()
+print( corels1[[1]] + corels1[[2]])
+```
+
+## RPM counts
+
+```{r correlations2, fig.height=7, fig.width=16}
+corels2 <- my_pairwise_internal_corels(mat=rpm)
+print( corels2[[1]] + corels2[[2]])
+```
+
+
+## VST counts
+
+```{r correlations3, fig.height=7, fig.width=16}
+corels3 <- my_pairwise_internal_corels(mat = vstmat)
+print( corels3[[1]] + corels3[[2]])
+```
+
+
+# PCA
+
+Based on the RPM counts.
+
+## Plots
+
+```{r pca}
+all_pca <- do_pca()
+
+# print( paste("Num of Variables:", all_pca$nvars, ", Num of Principal Components:", all_pca$nPC) )
+
+# Scree
+print(all_pca$pimp)
+```
+
+### PC 1 + PC 2
+
+```{r pc12, fig.width=7, fig.height=7}
+htmltools::tagList(lapply(all_pca[["pc_1_2"]], function(x) { ggplotly(x) }))
+# lapply(all_pca[["pc_1_2"]], function(x) { x })
+```
+
+### PC 1 + PC 3
+
+```{r pc13, fig.width=7, fig.height=7}
+htmltools::tagList(lapply(all_pca[["pc_1_3"]], function(x) { ggplotly(x) }))
+# lapply(all_pca[["pc_1_3"]], function(x) { x })
+```
+
+### PC 3 + PC 2
+
+```{r pc32, fig.width=7, fig.height=7}
+htmltools::tagList(lapply(all_pca[["pc_3_2"]], function(x) { ggplotly(x) }))
+# lapply(all_pca[["pc_3_2"]], function(x) { x })
+```
+
+
+## Top high-loading features in the first 3 PCs
+
+Only the `r params$ntop` highest-loading features with loading >= `r params$minL` are listed here, in order of decreasing loading. 
+
+### PC1
+
+```{r pc1}
+head(all_pca[["load1"]], n=params$ntop)
+```
+
+### PC2
+
+```{r pc2}
+head(all_pca[["load2"]], n=params$ntop)
+```
+
+### PC3
+
+```{r pc3}
+head(all_pca[["load3"]], n=params$ntop)
+```
+
+## Filtered correlation
+
+Calculated using only the features with loading >= `r params$minL` in any of the first 3 PCs.
+
+```{r fig.width=16, fig.height=7}
+print( all_pca[["pcor1"]] + all_pca[["pcor2"]] )
 ```
 
 
 # DE
 
-The highlighted magenta triangles are the up to `r ntop` top hits out of all the points that meet the thresholds. This number limit is arbitrary. "Top-ness" of hits is ranked roughly based on their distance from the origin of the axes. Cross-referenced IDs, expression and GO term enrichment is provided for the top hits.
+The first subsection below contains static volcano and MA plots of *all the features*.
 
-The interactive volcano plots include *all* the points that meet the thresholds are shown in the next subsection. There you can hover over points to see their ID, zoom, etc.
+The second subsection contains interactive versions of these plots, filtered to show only the features that meet the thresholds. There you can hover over points to see their ID, zoom, etc.
 
-If a contrast does not have any hits that meet the thresholds defined at the beginning of this report, a warning message will indicate that there are no hits, there will be no highlighted points and no GO terms. The `r ntop` points farthest from the origin will still be listed in the table and shown in the interactive volcanoes to satisfy your curiosity.
+The highlighted red triangles are the up to `r params$ntop` top hits out of all the points that meet the thresholds. This number limit is arbitrary. "Top-ness" of hits is heuristicaly ranked roughly based on their "distance" from the origin of the axes in the volcano plots.
+
+If a contrast does not have any hits that meet the thresholds defined at the beginning of this report, a warning message will indicate that there are no hits, and there will be no highlighted points. The `r params$ntop` "top-est" points will still be listed in the table and shown in the interactive plots to satisfy your curiosity.
 
 ```{r DE}
-resall <- lapply(coeffs, function(contrast) {
-  do_de_plots(dds, contrast, xref[, c(1, ncol(xref)), with=FALSE], ntop, pcutoff, lfcthreshold)
-})
-```
+resall <- NULL
 
-## Volcanoes
+# Build model
+if (!is.null(params$reducedFormula)){
+  deobj <- DESeq(deobj, test='LRT', reduced = as.formula(params$reducedFormula))  # LR test
+} else {
+  deobj <- DESeq(deobj) # Wald test
+}
+coeffs <- resultsNames(deobj)[resultsNames(deobj) != "Intercept"]
+# Contrast against the assigned reference
+resall <- lapply(coeffs, function(contrast) { message(contrast); do_de_plots(contrast) })
+names(resall) <- vapply(resall, function(x) { x$contrast }, character(1))
 
-```{r volcano, fig.height=6, fig.width=12}
-ly <- htmltools::tagList()
-for (i in 1:length(resall)){
-  # Volcanoes
-  print(resall[[i]][["pv1"]])
-  ly[[i]] <- as_widget(subplot( ggplotly(resall[[i]][["pv2"]], dynamicTicks = TRUE) %>% 
-                                  layout(xaxis = list(title="-log10( Padj )"), 
-                                         yaxis = list(title="log2( FC )")) ))
+
+if (length(cD) == 1 && params$roundrobin) {
+  # Determine which was the reference and rotate each other level as reference.
+  isref <- vapply(levels(cD[[1]]),
+                   function(x) { all(grepl(x, coeffs[1]), grepl(x, coeffs[2])) },
+                   logical(1) )
+  ref <- levels(cD[[1]])[isref]
+  remaining <- levels(cD[[1]])[!isref]
+  for (lev in levels(cD[[1]])[!isref]) {
+    # lev <- levels(cD[[1]])[!isref][1]
+    deobj2 <- deobj
+    deobj2[[names(cD)[1]]] <- relevel(deobj2[[names(cD)[1]]], ref= lev)
+    if (!is.null(params$reducedFormula)){
+      deobj2 <- DESeq(deobj2, test='LRT', reduced = as.formula(params$reducedFormula))  # LR test
+    } else {
+      deobj2 <- DESeq(deobj2) # Wald test
+    }
+    coeffs <- resultsNames(deobj2)[resultsNames(deobj2) != "Intercept"]
+    resall2 <- lapply(coeffs, function(contrast) { message(contrast); do_de_plots(contrast, dds = deobj2) })
+    names(resall2) <- vapply(resall2, function(x) { x$contrast }, character(1))
+    resall <- c(resall, resall2)
+  }
+  
+  # The rotation is brute-force-y and creates duplicate results A vs B and B vs A. Get rid of redundant contrasts.
+  
+  allcoeffs <- vapply(resall, function(x) { x$contrast }, character(1))
+  # The reference condition shoud always be on the right-hand side of the VS.
+  keep <- allcoeffs[!grepl(paste0(ref, "_vs"), allcoeffs)]
+  # For the rest, either of each duplicate is fine. Let R create a vector of pairwise combinations.
+  uniqcoeffs <- vapply(as.data.frame(combn(levels(cD[[1]]), 2), stringsAsFactors=FALSE),
+                          function(x) { paste(names(cD)[1], x[2], "vs", x[1], sep="_") },
+                          character(1) )
+  uniqcoeffs <- uniqcoeffs[!grepl(ref, uniqcoeffs)] # already filtered the coefficients involving reference.
+  keep <- keep[! keep %in% uniqcoeffs]
+  resall <- resall[keep]
 }
 ```
 
-### Interactive filtered volcanoes
+## Expression overview
 
-```{r interactive, fig.height=6, fig.width=6}
-ly
+Values are all increased by 1/10th of the smallest non-zero expression value, thus allowing zero values to be represented on log-scale.
+
+When there are 2 or more replicates, the smaller plots on the right will show a 2D density of the mean-scaled StDev vs the mean expression. If there is only one replicate StDev cannot be calculated so, instead, the 1D density plot of the expression will be shown.
+
+```{r expov, fig.height=8, fig.width=12}
+pexp <- lapply (resall, function(res) {
+  # res <- resall[[1]]
+  DT <- res$outtab
+  names(DT) <- vapply(strsplit(names(DT), '.', fixed=TRUE), function(x) x[4], character(1))
+  DT[, colour := 'general']
+  DT[is.na(padj), colour :='pNA']
+  DT[name %in% res$tophits, colour := 'top']
+  
+  # Increment the 0z so they survive the log=transformation, but in a way they don;t mix with non-zero data.
+  zeros <- min(DT[refMeanRPM > 0, refMeanRPM], DT[treatMeanRPM > 0, treatMeanRPM]) / 10
+  cat(paste("zeros =", zeros))
+  
+  p1 <- ggplot(DT, aes(x=refMeanRPM + zeros, y=treatMeanRPM + zeros, colour=colour, label=name)) +
+      # geom_point(data=DT[colour=='general', ], shape=16, alpha=0.3, size=0.8) +
+      geom_hex(data=DT[colour=='general', ], size=0.5, colour='transparent', bins=100) +
+      geom_point(data=DT[colour=='pNA', ], shape=20, alpha=0.2, size=0.8) +
+      geom_abline(intercept = 0, slope = 1, colour='grey75', alpha=0.5) +
+      geom_point(data=DT[colour=='top', ], shape=17, size=1.8) +
+      geom_label_repel(data=DT[colour=='top', ], size=3, segment.size = 0.2,) +
+      scale_colour_manual(values=c(general='black', top='red', pNA='steelblue')) +  
+      scale_fill_gradient2(high='black') +
+      scale_x_log10() + 
+      scale_y_log10() +
+      annotation_logticks(base=10, sides='lrtb') +
+      labs(title=res$contrast) +
+      theme(panel.grid.minor = element_blank(),
+            legend.position='left') 
+  
+  # StDev is NA when there is only one replicate. So there are no values for Y-axis.
+  if (!all( is.na(DT$refStDev) )) {
+    p2 <- ggplot(DT, aes(x=refMeanRPM + zeros, y=(refStDev / refMeanRPM) + zeros, colour=colour)) +
+        # geom_point(data=DT[colour=='black', ], shape=16, alpha=0.2, size=0.8) +
+        geom_hex(data=DT[colour=='general', ], bins=50, size=0.5, colour='transparent') +
+        geom_point(data=DT[colour=='pNA', ], shape=20, alpha=0.2, size=0.8) +
+        geom_point(data=DT[colour=='top', ], shape=17, size=1.8) +
+        scale_colour_manual(values=c(general='black', top='red', pNA='steelblue')) +  
+        scale_fill_gradient2(high='black') +
+        scale_x_log10() + 
+        scale_y_log10() + 
+        annotation_logticks(base=10, sides='lrtb') +
+        # labs(title=res$contrast) +
+        theme(panel.grid.minor = element_blank()) 
+  } else {
+    # Token blank plot, to maintain format.
+    p2 <- ggplot(DT, aes(x=refMeanRPM + zeros, colour=colour)) +
+      geom_density() +
+      scale_colour_manual(values=c(general='black', top='red', pNA='steelblue')) +  
+      scale_x_log10() + 
+      annotation_logticks(base=10, sides='tb') +
+      # labs(title=res$contrast) +
+      theme(panel.grid.minor = element_blank()) 
+  }
+  
+  # Again, StDev is NA when there is only one replicate.
+  if (!all( is.na(DT$treatStDev) )) {
+    p3 <- ggplot(DT, aes(x=treatMeanRPM + zeros, y=(treatStDev / treatMeanRPM) + zeros, colour=colour)) +
+      # geom_point(data=DT[colour=='black', ], shape=16, alpha=0.2, size=0.8) +
+      geom_hex(data=DT[colour=='general', ], bins=50, size=0.5, colour='transparent') +
+      geom_point(data=DT[colour=='pNA', ], shape=20, alpha=0.2, size=0.8) +
+      geom_point(data=DT[colour=='top', ], shape=17, size=1.8) +
+      scale_colour_manual(values=c(general='black', top='red', pNA='steelblue')) +  
+      scale_fill_gradient2(high='black') +
+      scale_x_log10() + 
+      scale_y_log10() + 
+      annotation_logticks(base=10, sides='lrtb') +
+      # labs(title=res$contrast) +
+      theme(panel.grid.minor = element_blank())
+  } else {
+    # Token blank plot, to maintain format.
+    p3 <- ggplot(DT, aes(x=treatMeanRPM + zeros, colour=colour)) +
+      geom_density() +
+      scale_colour_manual(values=c(general='black', top='red', pNA='steelblue')) +  
+      scale_x_log10() + 
+      annotation_logticks(base=10, sides='tb') +
+      # labs(title=res$contrast) +
+      theme(panel.grid.minor = element_blank()) 
+  }
+  
+  print (p1 + (p2 / p3))
+  return(p1 + (p2 / p3))
+})
+```
+
+## Static Volcanos and MAs
+
+```{r volcanos, fig.height=6, fig.width=12, warning=FALSE}
+# These plots have two side-by-side facets and need more width to display nicely
+
+for (res in resall){
+  cat(res[["contrast"]])
+  cat("\n")  
+  print(res[["pv1"]])
+  print(res[["pma1"]])
+  cat("\n\n")  
+}
+```
+
+## Interactive filtered Volcanos and MAs
+
+```{r mas, fig.height=6, fig.width=7, warning=FALSE}
+# These plots are not faceted, so need less width.
+
+ly <- lapply(resall, function(res) {
+  list(res[["pv2"]], res[["pma2"]])
+})
+
+htmltools::tagList(ly)
 ```
 
 ## Top hits
 
-```{r hits, fig.height=10, fig.width=8}
-ly <- htmltools::tagList()
+```{r hits, fig.height=10, fig.width=8, warning=FALSE}
+allhits <- list()
 
 for (res  in resall){
-  cat(res[["contrast"]])
-  
   # Are there any hits?
-  de <- res[['shrunkLFC']]
-  if (!any(de$meetthresh)) {
-    warning(paste("No hits meeting criteria in ", coeffs[i],"! Listing outermost points instead."))
+  # message(paste(res$contrast, res$hashits))
+  if (res$hashits) {
+    warning(paste("No hits meeting criteria in ", res$contrast,"! Listing outermost points instead."))
   }
-  
+
   # Hit expression
   print(res[["pe1"]])
-  
+
   # Hit list
-  if (is.null(xref)){
-    print(res[["tophits"]])
-  } else {
-    print(xref[res[["tophits"]], -ncol(xref), with=FALSE])
-  }
-  
+  cat(res[["contrast"]])
+  print(res[["tophits"]])
+  allhits <- c(allhits, res[["tophits"]])
+
+  cat("\n\n")
 }
 ```
 
-## Ontology term enrichment
+## Expression of all top hits
 
-```{r go}
-for (res  in resall){
-  # GO term enrichment
-  print(paste(res[["contrast"]], "-- GO Biological Process"))
-  go1 <- do_go(res[["shrunkLFC"]], 'org.Mm.eg', ntop, 'BP')
-  print(go1)
-  print(paste(res[["contrast"]], "-- GO Molecular Function"))
-  go2 <- do_go(res[["shrunkLFC"]], 'org.Mm.eg', ntop, 'MF')
-  print(go2)
-  print(paste(res[["contrast"]], "-- GO Cellular Component"))
-  go3 <- do_go(res[["shrunkLFC"]], 'org.Mm.eg', ntop, 'CC')
-  print(go3)
+Top hits from all the individual comparisons.
+
+```{r dexp, fig.height=15, fig.width=7}
+allhits <- unique(unlist(allhits))
+
+# Counts
+mat1 <- vstmat[allhits, ]
+mat2 <- rpm[allhits, ]
+
+# Custer row and columns
+cfit <- hclust(dist(scale(t(mat1), center=TRUE))) # cluster columns
+rfit <- hclust(dist(scale(mat1, center=FALSE)))    # cluster rows
+cn <- colnames(mat1)[cfit$order]
+rn <- rownames(mat1)[rfit$order]
+
+allhitdf <- as.data.table(mat2)
+allhitdf[, Feature := rownames(mat2)]
+allhitdf <- melt(allhitdf, value.name = "RPM", variable.name = "Sample", id.vars = "Feature")
+allhitdf[, Feature := ordered(Feature, levels=rn)]
+allhitdf[, Sample := ordered(Sample, levels=cn)]
+
+pallexp <- ggplot(allhitdf, aes(y=Feature, x=Sample, fill=log10(RPM))) +
+  geom_tile() +
+  scale_fill_gradient(na.value='black') +
+  labs(y='', x='') +
+  theme(axis.text.x = element_text(angle=90, hjust = 1, vjust = 0.5),
+        panel.grid = element_blank())
+
+allhitdf <- as.data.table(mat1)
+allhitdf[, Feature := rownames(mat1)]
+allhitdf <- melt(allhitdf, value.name = "VSTcounts", variable.name = "Sample", id.vars = "Feature")
+allhitdf[, Feature := ordered(Feature, levels=rn)]
+allhitdf[, Sample := ordered(Sample, levels=cn)]
+
+pallvst <- ggplot(allhitdf, aes(y=Feature, x=Sample, fill=VSTcounts)) +
+  geom_tile() +
+  scale_fill_gradient(na.value='black') +
+  labs(y='', x='') +
+  theme(axis.text.x = element_text(angle=90, hjust = 1, vjust = 0.5),
+        panel.grid = element_blank())
+
+print(pallexp)
+print(pallvst)
+```
+
+
+# Files out
+
+## Tables
+
+```{r csv}
+for (res in resall) {
+fwrite(res$outtab,
+         file = file.path(params$baseDir,
+                          params$resultsDir,
+                          paste(params$prefix, 
+                                paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(deobj), perl=TRUE), 
+                                      collapse=''), 
+                                res$contrast, 
+                                'deseq2.tsv', 
+                                sep='.')),
+         sep = "\t", quote = FALSE, row.names = FALSE, col.names = TRUE)
 }
 ```
+
+## Plots to PDF
+
+```{r pdf}
+pdf(file.path(params$baseDir, 
+              params$resultsDir, 
+              paste(params$prefix, paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(deobj), perl=TRUE), collapse=''), 'deseq2.pdf', sep='.')),
+    title=paste(params$prefix, paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(deobj), perl=TRUE), collapse=''), 'deseq2', sep='.'),
+    width=15, height=15)
+
+# Correlation plots
+print(corels1[[1]] + labs(substitle='raw count'))
+print(corels1[[2]] + labs(substitle='raw count'))
+print(corels2[[1]] + labs(substitle='RPM'))
+print(corels2[[2]] + labs(substitle='RPM'))
+print(corels3[[1]] + labs(substitle='VST count'))
+print(corels3[[2]] + labs(substitle='VST count'))
+
+# PCA plots
+print(all_pca$pimp)
+for (x in all_pca[["pc_1_2"]]) {
+  print(x)
+}
+for (x in all_pca[["pc_1_3"]]) {
+  print(x)
+}
+for (x in all_pca[["pc_3_2"]]) {
+  print(x)
+}
+print(all_pca[["pcor1"]])
+print(all_pca[["pcor2"]])
+
+# DE plots
+for (x in pexp) {
+  print(x)
+}
+for (res in resall){
+  # Static plots
+  print(res[["pv1"]])
+  print(res[["pma1"]])
+  print(res[["pe1"]])
+  print(res[["pe2"]])
+}
+print(pallexp)
+print(pallvst)
+
+dev.off()
+```
+
+<!-- ## Ontology term enrichment -->
+
+<!-- ```{r go} -->
+<!-- for (res  in resall){ -->
+<!--   # GO term enrichment -->
+<!--   print(paste(res[["contrast"]], "-- GO Biological Process")) -->
+<!--   go1 <- do_go(res[["shrunkLFC"]], 'org.Mm.eg', ntop, 'BP') -->
+<!--   print(go1) -->
+<!--   print(paste(res[["contrast"]], "-- GO Molecular Function")) -->
+<!--   go2 <- do_go(res[["shrunkLFC"]], 'org.Mm.eg', ntop, 'MF') -->
+<!--   print(go2) -->
+<!--   print(paste(res[["contrast"]], "-- GO Cellular Component")) -->
+<!--   go3 <- do_go(res[["shrunkLFC"]], 'org.Mm.eg', ntop, 'CC') -->
+<!--   print(go3) -->
+<!-- } -->
+<!-- ``` -->
 
 # Session info
 
