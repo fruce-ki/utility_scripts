@@ -51,7 +51,7 @@ while getopts 'i:l:b:B:n:c:m:r:C:G:z:Z:p:s:u:d:O:g:M:A:E:e:Vr12L' flag; do
     g) guideLen="${OPTARG}" ;;        # Guide length (20). For clipping.
     M) bcmm="${OPTARG}" ;;            # Barcode mismatch allowance (0)
     A) smm="${OPTARG}" ;;             # Anchor mismatch allowance (2)
-    Z) refSamps="${OPTARG}" ;;        # Comma-separated sample-names to apply the counts threshold for control guide purposes
+    Z) refSamps="${OPTARG}" ;;        # Comma-separated sample-names. Needed for Ctrl guide filtering and good guide ratio assignment.
     C) ctrlguides="${OPTARG}" ;;      # Comma-separated list of control guide group names.
     G) guidespergene="${OPTARG}" ;;   # Guides per gene.
     V) variable=1 ;;                  # Demultiplex manually, for staggered libraries (no).
@@ -67,7 +67,7 @@ while getopts 'i:l:b:B:n:c:m:r:C:G:z:Z:p:s:u:d:O:g:M:A:E:e:Vr12L' flag; do
 done
 
 # Check we got the minimum set
-if [ -z "$indir" ] || [ -z "$library" ] || [ -z "$barcodes" ] || [ -z "$contrasts" ] || [ -z "$countsdir" ] || [ -z "$mageckdir" ]; then
+if [ -z "$indir" ] || [ -z "$library" ] || [ -z "$barcodes" ] || [ -z "$contrasts" ] || [ -z "$countsdir" ] || [ -z "$mageckdir" ] || [ -z "$refSamps" ]; then
   echo "-i $indir -l $library -b $barodes -c $contrasts -n $countsdir -m $mageckdir"
   usage
   exit 1
@@ -119,11 +119,7 @@ if [ $do_pre -eq 1 ]; then
 
     echo ''
     echo "Demultiplexing BAM using anchor sequence."
-#   # module load python-levenshtein/0.12.0-foss-2017a-python-2.7.13
-#   # module load pysam/0.14.1-foss-2017a-python-2.7.13
     fileutilities.py T ${indir}/*.bam --loop srun ,--mem=50000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q \&
-#   # # module unload python-levenshtein/0.12.0-foss-2017a-python-2.7.13
-#   # module unload pysam/0.14.1-foss-2017a-python-2.7.13
     wait_for_jobs demultip
 
     echo ''
@@ -145,7 +141,6 @@ if [ $do_pre -eq 1 ]; then
 
     echo ''
     echo "Bowtie2 indexing."
-#   # module load bowtie2/2.2.9-foss-2017a
     srun bowtie2-build ${library/.txt/.fasta} ${library/.txt/}
 
     echo ''
@@ -155,14 +150,11 @@ if [ $do_pre -eq 1 ]; then
     echo ''
     echo "Bowtie2 aligning."
     fileutilities.py T ${countsdir}/fastq/*/*.fq.gz --loop srun ,--mem=10000 ,--cpus-per-task=4 bowtie2 ,-x ${library/.txt/}  ,-U {abs} ,--threads 4 ,-L 20 ,--score-min 'C,0,-1' ,-N 0 ,--seed 42 '2>' ${countsdir}/aligned/${libname}/{bas}.log \> ${countsdir}/aligned/${libname}/{bas}.sam \&
-#   # module unload bowtie2/2.2.9-foss-2017a
     wait_for_jobs bowtie2
 
     echo ''
     echo "Quantifying with featureCounts."
-#   # module load subread/1.6.4-foss-2017a
     fileutilities.py T ${countsdir}/aligned/${libname}/*.sam --loop srun ,--mem-per-cpu=5000 ,--cpus-per-task=4 featureCounts ,-T 4 ,-a ${library/.txt/.saf} ,-F SAF ,-o ${countsdir}/counts/${libname}/{bas}.txt {abs} \&
-#   # module unload subread/1.6.4-foss-2017a
     wait_for_jobs featureC
 
     echo ''
@@ -176,9 +168,7 @@ if [ $do_pre -eq 1 ]; then
     echo ''
     echo "MultiQC"
     wait_for_jobs fastqc  # It should be long finished by now, but better ask.
-#   # module load multiqc/1.3-foss-2017a-python-2.7.13
     srun multiqc -f -x *.run -o ${countsdir}/multiqc ${countsdir}/fastqc ${countsdir}/aligned/${libname} ${countsdir}/counts/${libname}
-#   # module unload multiqc/1.3-foss-2017a-python-2.7.13
 
     echo ''
     echo "Cleaning up intermediate files"
@@ -202,7 +192,7 @@ if [ $do_comparison -eq 1 ]; then
   echo ''
   echo "Group control guides into genes."
   if ! [ -z "$ctrlguides" ]; then
-    # srun --ntasks=1 mageck_nonTargetGuides2controlGenes.R -c $ctrlguides -f $counts -o ${counts/.txt/_ctrls-grouped.txt} -n $guidespergene -g group -t id -m $countthresh -z $refSamps
+    srun --ntasks=1 mageck_nonTargetGuides2controlGenes.R -c $ctrlguides -f $counts -o ${counts/.txt/_ctrls-grouped.txt} -n $guidespergene -g group -t id -m $countthresh -z $refSamps
     counts="${counts/.txt/_ctrls-grouped.txt}"
   else
     ctrlguides="hakunamatata_dummy" # dummy value that will not match patterns later on
@@ -210,12 +200,12 @@ if [ $do_comparison -eq 1 ]; then
 
   echo ''
   echo "MAGECK."
-  # nextflow run zuberlab/crispr-mageck-nf --contrasts $contrasts --counts $counts --outputDir $mageckdir --min_count $countthresh -profile ii2 $legacy $mageck_branch
+  nextflow run zuberlab/crispr-mageck-nf --contrasts $contrasts --counts $counts --outputDir $mageckdir --min_count $countthresh -profile ii2 $legacy $mageck_branch
 
   echo ''
   echo "Rename columns."
   renamed="renamed"
-  # srun  --ntasks=1 fileutilities.py T $mageckdir --dir | fileutilities.py P --loop sh ~/utility_scripts/mageck_rename_columns.sh {abs} {abs}/${renamed}
+  srun  --ntasks=1 fileutilities.py T $mageckdir --dir | fileutilities.py P --loop sh ~/utility_scripts/mageck_rename_columns.sh {abs} {abs}/${renamed}
 
   ## WARNING:
   ## If appending throws ValueError about the shape not matching the index, it means that there are repeated row keys (probably in the xref files).
@@ -231,16 +221,16 @@ if [ $do_comparison -eq 1 ]; then
 
   echo ''
   echo "Merge all guide-level outputs."
-  # guides="${mageckdir}/guides_all.tsv"
-  # if [ -f "$guides" ]; then
-  #   rm $guides # clean up previous run, otherwise weird things happen
-  # fi
-  # srun --mem=10000 --ntasks=1 fileutilities.py T ${mageckdir}/*/${renamed}/guides_stats.txt -r -i --appnd > $guides
+  guides="${mageckdir}/guides_all.tsv"
+  if [ -f "$guides" ]; then
+    rm $guides # clean up previous run, otherwise weird things happen
+  fi
+  srun --mem=10000 --ntasks=1 fileutilities.py T ${mageckdir}/*/${renamed}/guides_stats.txt -r -i --appnd > $guides
 
   if [ ! -z "$guidexref" ]; then
     echo ''
     echo "Add other cross-referencing ID fields to guides"
-    # srun --mem=10000 --ntasks=1 fileutilities.py T $guidexref $guides -r -i --appnd > ${guides/.tsv/_xref.tsv}
+    srun --mem=10000 --ntasks=1 fileutilities.py T $guidexref $guides -r -i --appnd > ${guides/.tsv/_xref.tsv}
     guides="${guides/.tsv/_xref.tsv}"
   fi
 
@@ -260,23 +250,23 @@ if [ $do_comparison -eq 1 ]; then
   srun --mem=10000 --ntasks=1 fileutilities.py T $genes -r --cols 0 $(expr $nc - 1) 1:$(expr $nc - 2) > ${genes/.tsv/_reord.tsv}
   genes="${genes/.tsv/_reord.tsv}"
 
-  # dups=$(head -n1 $guides | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++} print "\n";')
-  # srun --mem=10000 --ntasks=1 fileutilities.py T $guides -r --mrgdups $dups > ${guides/.tsv/_dedup.tsv}
+  dups=$(head -n1 $guides | fileutilities.py D --swap "\n" | perl -e '$i=0; while($field = <STDIN>){print "$i " if $field=~/group/; $i++} print "\n";')
+  srun --mem=10000 --ntasks=1 fileutilities.py T $guides -r --mrgdups $dups > ${guides/.tsv/_dedup.tsv}
   guides="${guides/.tsv/_dedup.tsv}"
-  # nc=$(perl -e '$ARGV[0] =~/^(\d+)/; print $1' $(fileutilities.py T $guides --cntcols))
-  # srun --mem=10000 --ntasks=1 fileutilities.py T $guides -r --cols 0 $(expr $nc - 1) 1:$(expr $nc - 2) > ${guides/.tsv/_reord.tsv}
+  nc=$(perl -e '$ARGV[0] =~/^(\d+)/; print $1' $(fileutilities.py T $guides --cntcols))
+  srun --mem=10000 --ntasks=1 fileutilities.py T $guides -r --cols 0 $(expr $nc - 1) 1:$(expr $nc - 2) > ${guides/.tsv/_reord.tsv}
   guides="${guides/.tsv/_reord.tsv}"
 
   echo ''
   echo "Add -log10(p)."
   srun --mem=10000 --ntasks=1 mageck_add_log10p.R -i $genes -o ${genes/.tsv/_l10p.txt} -r group
-  # srun --mem=10000 --ntasks=1 mageck_add_log10p.R -i $guides -o ${guides/.tsv/_l10p.txt}
-  genes="${genes/.tsv/_l10p.tsv}"
+  srun --mem=10000 --ntasks=1 mageck_add_log10p.R -i $guides -o ${guides/.tsv/_l10p.txt}
+  genes="${genes/.tsv/_l10p.txt}"
   guides="${guides/.tsv/_l10p.txt}"
 
   echo ''
   echo "Add good guides ratio to genes."
-  srun --mem=10000 --ntasks=1 mageck_add_ggratio.R -i $genes -o ${genes/.tsv/_gg.txt} -f $counts -m $countthresh -z $refSamps
+  srun --mem=10000 --ntasks=1 mageck_add_ggratio.R -i $genes -o ${genes/.txt/_gg.txt} -f $counts -m $countthresh -z $refSamps
   genes="${genes/.txt/_gg.txt}"
 
   echo ''
