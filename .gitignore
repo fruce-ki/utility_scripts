@@ -3,3 +3,8 @@
 .Rhistory
 *.pyc
 __pycache__/*
+ foobar.RDS
+.ipynb_checkpoints/quantseq_workflow-checkpoint.sh
+.ipynb_checkpoints/slamseq_workflow-checkpoint.sh
+conda.env.py27.txt
+vbcf_download.sh
