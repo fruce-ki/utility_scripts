@@ -6,15 +6,15 @@ library(data.table)
 spec <- matrix(c(
   'controlGroups' , 'c', 1, "character", "Comma-separated list (no space) of group names for non-targeting sgRNAs.",
   'countsFile'    , 'f', 1, "character", "Tab-separated table of counts.",
-  'groupCol'      , 'g', 2, "character", "Name of the column containing the group names ('group').",
+  'groupCol'      , 'g', 1, "character", "Name of the column containing the group names ('group').",
   'help'          , 'h', 0, "logical"  , "Help.",
-  'mincount'      , 'm', 2, "numeric"  , "Minimum count to separate control guides into detected and non (1).",
-  'guidesPerGene' , 'n', 2, "numeric"  , "Desired number of guides per control \"gene\" (6).",
-  'outFile'       , 'o', 2, "character", "Output file (overwrite input file).",
+  'mincount'      , 'm', 1, "numeric"  , "Minimum count to separate control guides into detected and non (1).",
+  'guidesPerGene' , 'n', 1, "numeric"  , "Desired number of guides per control \"gene\" (6).",
+  'outFile'       , 'o', 1, "character", "Output file (overwrite input file).",
   'nonrandom'     , 'r', 0, "logical"  , "Assign guides to groups in order of abundance instead of randomly (FALSE).",
-  'seed'          , 's', 2, "numeric"  , "Seed for reproducible pseudo-randomisation.",
-  'targetCol'     , 't', 2, "character", "Name of the column containing the guide names ('id').",
-  'reference'     , 'z', 2, "character", "Comma separated column names across which to apply mincount for the controls. (if NULL, then all)"
+  'seed'          , 's', 1, "numeric"  , "Seed for reproducible pseudo-randomisation.",
+  'targetCol'     , 't', 1, "character", "Name of the column containing the guide names ('id').",
+  'reference'     , 'z', 1, "character", "Comma separated column names across which to apply mincount for the controls. (if NULL, then all)"
 ), byrow=TRUE, ncol=5)
 opt <- getopt(spec)
 # opt <- list(controlGroups='CTRLHS,CTRLMM', countsFile='/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/HLA1_staggered/process/crispr-processed/counts/library/counts_mageck.txt', guidesPerGene=6, mincount=50, reference='NoIFNG_d0,imc_surface_plasmid')
