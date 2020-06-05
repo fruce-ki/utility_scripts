@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
 """fileutilities.py
 
@@ -31,8 +31,9 @@ Execute with -h in a shell to obtain syntax and help.
 # solely for custom use. When appropriate these custom labels will be included in
 # the output.
 
+from __future__ import print_function, division
 
-import os, sys, string, re, subprocess, random, argparse
+import os, sys, string, re, subprocess, random, argparse, copy
 import pandas as pd
 from builtins import list
 from collections import Counter
@@ -1018,7 +1019,8 @@ class FilesList(list):
             # If still empty, it was an empty call to the constructor.
             files = []
         # Create the basic list.
-        super().__init__(files)
+        super(FilesList, self).__init__()
+        self.extend(files)
         # Add a plain list attribute for the aliases with default values.
         self.aliases = autonumerate(aliases)
 
@@ -1091,7 +1093,7 @@ class FilesList(list):
         if myfile is not None:
             if not verbatim:
                 myfile = expand_fpaths([myfile])[0]
-        super().append(myfile)
+        super(FilesList, self).append(myfile)
         if not myalias:
             myalias = self.autoalias(myfile)
         self.aliases.append(myalias)
