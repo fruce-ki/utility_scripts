@@ -13,9 +13,10 @@ import pysam
 #
 # 22/06/2020 Created
 #
-# This just scans through the BAM, and reports the number of unique IDs for mapped reads. Unpapped reads will be ignored.
+# This just scans through the BAM, and reports the number of unique IDs for mapped reads. Unpapped reads will be ignored. 
+# Multimapping is always counted through the whole file, but the reads included in the report can be restricted to those with at least one alignment overlapping the region.
 #
-# Last revised: 26/jun/2020   by: kimon.froussios@imp.ac.at
+# Last revised: 29/jun/2020   by: kimon.froussios@imp.ac.at
 
 #################
 ## Parameters ##
@@ -35,13 +36,17 @@ args = parser.parse_args()
 # Collect read names
 ##########
 
+# Count multimappers in the whole file, then fish out the ones that overlap the relevant region.
 for f in args.allSamFile:
     readID = Counter()
+    relevant = set()
 
     inSam = pysam.AlignmentFile(f, "rb")
     # Multiple alignments of a read are reported individually.
     for read in inSam:
         if not read.is_unmapped:
+            readID.update([read.query_name])
+
             flag = True   # keeping track of if all conditions are individually met, allowing for any combination of conditions to be specified
             if args.chromosome is not None and read.reference_name != args.chromosome:  # reference sequence outside specification
                 flag = False
@@ -49,14 +54,13 @@ for f in args.allSamFile:
                 flag = False
             if args.coordend is not None and read.reference_start > args.coordend:      # read mapped after specified location
                 flag = False        
-            
             if flag:
-                readID.update([read.query_name])
+                relevant.add(read.query_name)
     inSam.close()
 
     i = 0
-    for k in readID.items():
-        if k[1] > 1:
+    for k in relevant:
+        if readID[k] > 1:
             i += 1 
 
-    sys.stdout.write(f + '\tReads:\t' + str(len(readID)) + '\tof which multimappers:\t' + str(i) + '\n')
+    sys.stdout.write(f + '\tReads in region:\t' + str(len(relevant)) + '\tof which multimappers:\t' + str(i) + '\n')
