@@ -350,9 +350,13 @@ print( all_pca[["pcor4"]] )
 ggplotly( all_pca[["pcor3"]] )
 ```
 
-# Plots to PDF
+
+
 
 ```{r pdf}
+## Plots to PDF ##
+
+
 pdf(params$pdf,
     width=max(6, ceiling(nrow(covars) / 3)), height=max(6, ceiling(nrow(covars) / 3))) # Scale up when many samples, but don't scale down when few.
 
