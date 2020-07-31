@@ -1,300 +1,202 @@
-#!/usr/bin/env python2.7
+#!/usr/bin/env python3
 
 # Demultiplex samples and count the semi-random barcode occurrences in each.
 
 # Date located in: -
-from __future__ import print_function
+
+# from __future__ import print_function
+
 import sys, os, re
-
-import subprocess
-
+# import subprocess
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
+from collections import Counter
 
-import os.path
-
-from Bio import SeqIO
+import pysam
 from Bio.Seq import Seq
-from string import upper
-import Levenshtein
 
 usage = "Barcoding"
 parser = ArgumentParser(description=usage, formatter_class=RawDescriptionHelpFormatter)
-parser.add_argument("-f", "--fastq", type=str, required=True, dest="fastqFile", help="Fastq file")
-parser.add_argument("-b", "--barcodes", type=str, required=True, dest="barcodesFile", help="Demultiplexing 4nt-barcodes table (tab delimited: Barcode \\t Sample, with header line)")
-parser.add_argument("-6", "--6bpbarcodes", type=str, required=False, dest="barcodes6bpFile", help="Demultiplexing 6nt-barcodes table (same format as above)")
-parser.add_argument('-r', "--revcomp", action='store_true', dest="revcomp", help="Reverse complement barcodes (default: false)")
-parser.add_argument('-i', "--spikein", action='store_true', dest="spikein", help="Barcode was spiked-in (default: false)")
-parser.add_argument('-s', "--stringent", action='store_true', dest="stringent", help="Stringent barcode matching (default: false)")
-parser.add_argument('-o', "--outdir", type=str, required=False, dest="outdir", default="./process", help="Output directory for counts (./process/)")
+parser.add_argument("-f", "--file", type=str, required=True, dest="bamFile", help="BAM file")
+parser.add_argument("-b", "--barcodes", type=str, required=False, dest="barcodesFile", help="Demultiplexing tags table, regardless of tag length. (tab delimited: Barcode \\t Sample, with header line). Omit if data already demultiplexed.")
+parser.add_argument('-r', "--revcomp", action='store_true', help="Reverse complement barcodes (default: false)")
+parser.add_argument('-i', "--spikein", action='store_true', help="Barcode was spiked-in (default: false)")
+parser.add_argument('-s', "--stringent", action='store_true', help="Stringent barcode matching (default: false)")
+parser.add_argument('-o', "--outdir", type=str, required=False, default="./process", help="Output directory for counts (./process/)")
+parser.add_argument('--bc_len', type=int, default=67, help="Length of the barcode (67).")
+parser.add_argument('--gt_len', type=int, default=20, help="Genotyping tag length (20).")
+parser.add_argument('--n_dark', type=int, default=0, help="Number of dark bases to consifer in the barcode pattern (0).")
 
 args = parser.parse_args()
 
-##############
-# Read bc
-##############
-
-bc = dict()
-bcStats = dict()
-
-with(open(args.barcodesFile, 'r')) as f:
-    # skip header
-    next(f)
-    for line in f:
-        barcode, sample = line.rstrip().split("\t")
-        bc[barcode] = sample
-        bcStats[barcode] = 0
-
-bc["unmatched"] = "unmatched"
-bcStats["unmatched"] = 0
+prefix = os.path.basename(args.bamFile).replace('.bam', '')
 
 ##############
-# Read 6bp barcodes
+# Read demultiplexing tags
 ##############
 
-if args.barcodes6bpFile:
-
-    with(open(args.barcodes6bpFile, 'r')) as f:
-    # skip header
+bc = dict()       # dictionary of sample tags
+tagLens = None     # set of sample tag lengths
+if args.barcodesFile:
+    with(open(args.barcodesFile, 'r')) as f:
+        # skip header
         next(f)
         for line in f:
-            barcode, sample = line.rstrip().split("\t")
-            bc[barcode] = sample
-            bcStats[barcode] = 0
+            multiplex, sample = line.rstrip().split("\t")
+            if args.revcomp:
+                multiplex = str(Seq(multiplex).reverse_complement())
+            bc[multiplex] = sample
+    tagLens = {len(x) for x in bc}
+else:
+    bc["demuxed"] = prefix
 
-if args.revcomp:
+##############
+# Barcode designs
+##############
 
-    bcRevCompStats = {}
-    bcRevComp = {}
+    #    20nt                |short end       short start|               19nt
+    # <--GBNSNNNVDNVNVWVMWNNRCGGCGBNSNNNNDNGGCWVMWNNRCGGCGBNSNNNVDNVNVWVMWNNR--<      <- sequencing direction <-
+    #
+    # >--RNNWMVWVNVNDVNNNSNBCGCCGRNNWMVWGCCNDNNNNSNBCGCCGRNNWMVWVNVNDVNNNSNBG-->      strict pattern
+    #    19nt               CGCCGRNNWMVWGCCNDNNNNSNBCGCCG                20nt         short pattern and offsets
 
-    for barcode in bc:
-        if barcode != "unmatched":
-            bcRevComp[str(Seq(barcode).reverse_complement())] = bc[barcode]
-            bcRevCompStats[str(Seq(barcode).reverse_complement())] = 0
-        else :
-            bcRevComp["unmatched"] = "unmatched"
-            bcRevCompStats["unmatched"] = 0
+# Christian's design:
+    # P7adapter_template_BARCODE_GenotypeTag_SampleINDEX_NNNNNN_P5adapter       <--- read direction, unlikely to get past the template. Sample Index is contained in the read and can be used by this script.
+# Shona's design:
+    # P7adapter_SampleIndex_template_BARCODE_GenotypeTag_P5adapter              <--- read direction, unlikely to contain the SampleIndex, reads already demultiplexed by sequencing facility using mate pair.
 
-    bc = bcRevComp
-    bcStats = bcRevCompStats
+# Barcode pattern
+bc_pattern_full = re.compile('[TC]{1}[ATGC]{2}[AT]{1}[TG]{1}[TGC]{1}[AT]{1}[TGC]{1}[ATGC]{1}[TGC]{1}[ATGC]{1}[ATC]{1}[TGC]{1}[ATGC]{3}[CG]{1}[ATGC]{1}[CGA]{1}CGCCG[TC]{1}[AGTC]{2}[AT]{1}[TG]{1}[TCG]{1}[AT]{1}GCC[ATGC]{1}[ACT]{1}[ATGC]{4}[GC]{1}[AGTC]{1}[CGA]{1}CGCCG')
+bc_pattern_short = re.compile('CGCCG[ATGC]{7}GCC[ATGC]{9}CGCCG')
+bc_pattern_dark = re.compile('[CN][GN][CN][CN][GN][ATGCN]{7}[GN][CN][CN][ATGCN]{9}[CN][GN][CN][CN][G]')  # allow dark bases, based on the short pattern.
+                                                                                                         # should be ok for high quality sequencing with very few Ns.
+                                                                                                         # would be problematic if many Ns are present.
+bc_pattern = None
+offset = None
+if args.stringent:
+    bc_pattern = bc_pattern_full
+    offset = 0      # Pattern matches the whole length of the barcode.
+else:
+    bc_pattern = bc_pattern_short
+    offset = 19    # Compensate for the short pattern starting 20nt internally to the barcode.
+# Empty vector pattern
+empty_pattern = re.compile('AGAGACGGATATCACTAGTCGTCTCCGTTCGCTCTAGACAGGGTACCCAGCATATGATAGGGTCCCCT')
+# Spike-in barcode
+    #            CCTAAAGCTTCTCCTGCCG GTGTGTGGAACGAGCACAGCgccgAGAGACGGATATCACTAGTCgccgCCATTTGCGCGCGCTCGCC
+    # 4mer index     20nt genotyping GTGTGTGGAACGAGCACAGCgccgAGAGACGGATATCACTAGTCgccgCCATTTGCGCGCGCTCGCC
+spike_pattern = re.compile('GTGTGTGGAACGAGCACAGCgccgAGAGACGGATATCACTAGTCgccgCCATTTGCGCGCGCTCGCC'.upper())
 
-library = dict()
+##############
+# Initialize counters
+##############
 
-for multiplex in bc:
-    library[multiplex] = dict()
+# Global stats
+bcStats = Counter()  # Counter of total matches per sample.
 
-if args.barcodes6bpFile:
+# Initialize a counter for each sample
+library = dict()                    # dictionary of counters. One barcode counter per sample.
+for sample in bc.values():
+    library[sample] = Counter()
+bc["unknown"] = "SampleUnknown"       # unrecognized sample tags
+bc["unmatched"] = "BCUnmatched"       # barcode pattern didn't match
+bc["empty"] = "EmptyVector"           # Diagnostic 1
+bc["spike"] = "SpikeIn"               # Diagnostic 2
 
-    for multiplex in bc:
-        library[multiplex] = dict()
+##############
+# Count the barcodes
+##############
 
-fout = open(os.path.join(args.outdir, "unmatched.fastq"), "w")
+# Reduce repetitive code
+# This function directly updates the counters in the global scope.
+# Reads that don't match the pattern return False, 
+# reads that match the pattern but do not match the demultiplication codes go to fout and return True,
+# reads that match the pattern and a demux code go to the library dict and return True.
+# The diagnostic parameter is used to redirect reads that match special patterns, so they don't confuse things in the library.
+def recognize(mypattern, record, fout, samples=bc, bcl = args.bc_len, gtl = args.gt_len, sampleTagLens = tagLens, extra = 0, diagnostic = None, dark = 0):
+    myread = record.query_sequence.upper()
+    match = mypattern.search(myread)
+    if match:
+        start = match.start(0) - extra               # The pattern is internal to the barcode.
+        barcode = myread[start:(start + bcl)]        
+        if barcode.count('N') > dark:
+            return False
+        
+        genotyping = myread[(start - gtl):start]     # The genotyping tag is immediately before the barcode.
+        if sampleTagLens:
+            found = False       # flag to report whether any of the tag lengths resulted in a match
+            sampleTag=None
+            for k in sampleTagLens:                   # Flexible length.
+                sampleTag = myread[(start - gtl - k):(start - gtl)].upper()  # The sample tag is either immediately before the gentype tag, or not present.
+                if sampleTag in bc:
+                    found = True
+                    bcStats.update([bc[sampleTag]])             # total hits for the sample
+                    if not diagnostic:
+                        library[bc[sampleTag]].update([barcode])    # hits of the barode in the sample
+                    else:
+                        library[bc[sampleTag]].update([diagnostic]) # hits of the diagnostic pattern in the sample
+                    break
+            if not found and not diagnostic:
+                fout.write(record)
+                bcStats.update([bc["unknown"]])
+                ##library[bc["unknown"]].update([barcode])
+        elif not diagnostic:
+            bcStats.update([bc["demuxed"]])           # Dummy sample to maintain the code and output format
+            library[bc["demuxed"]].update([barcode])
+        return True
+    else:
+        return False
 
-for record in SeqIO.parse(args.fastqFile, "fastq"):
-
-    # GBNSNNNVDNVNVWVMWNNRCGGCGBNSNNNNDNGGCWVMWNNRCGGCGBNSNNNVDNVNVWVMWNNR <- sequencing direction
-    # RNNWMVWVNVNDVNNNSNB CGCCG RNNWMVW GCC NDNNNNSNB CGCCG
-
-    if args.stringent:
-
-        match = re.search('[TC]{1}[ATGC]{2}[AT]{1}[TG]{1}[TGC]{1}[AT]{1}[TGC]{1}[ATGC]{1}[TGC]{1}[ATGC]{1}[ATC]{1}[TGC]{1}[ATGC]{3}[CG]{1}[ATGC]{1}[CGA]{1}CGCCG[TC]{1}[AGTC]{2}[AT]{1}[TG]{1}[TCG]{1}[AT]{1}GCC[ATGC]{1}[ACT]{1}[ATGC]{4}[GC]{1}[AGTC]{1}[CGA]{1}CGCCG', str(record.seq))
-
-        if match:
-            barcode = str(record.seq[match.start(0):match.start(0) + 67])
-            genotyping = str(record.seq[match.start(0) - 20:match.start(0)])
-            multiplex = str(record.seq[match.start(0) - 24:match.start(0) - 20])
-            multiplex6p = str(record.seq[match.start(0) - 26:match.start(0) - 20])
-
-            #print(barcode)
-            #print(genotyping)
-            #print(record.seq)
-
-            if multiplex in bc:
-                bcStats[multiplex] += 1
-                if not barcode in library[multiplex]:
-                    library[multiplex][barcode] = 0
-                library[multiplex][barcode] += 1
-            elif multiplex6bp in bc:
-                bcStats[multiplex6bp] += 1
-                if not barcode in library[multiplex6bp]:
-                    library[multiplex6bp][barcode] = 0
-                library[multiplex6bp][barcode] += 1
-            else:
-                bcStats["unmatched"] += 1
-                if not barcode in library["unmatched"]:
-                    library["unmatched"][barcode] = 0
-                library["unmatched"][barcode] += 1
-
-        else :
-            # Emtpy vector
-            match = re.search('AGAGACGGATATCACTAGTCGTCTCCGTTCGCTCTAGACAGGGTACCCAGCATATGATAGGGTCCCCT', str(record.seq))
-
-            if match:
-
-                barcode = str(record.seq[match.start(0):match.start(0) + 67])
-                genotyping = str(record.seq[match.start(0) - 20:match.start(0)])
-                multiplex = str(record.seq[match.start(0) - 24:match.start(0) - 20])
-                multiplex6bp = str(record.seq[match.start(0) - 26:match.start(0) - 20])
-
-                if multiplex in bc:
-                    bcStats[multiplex] += 1
-                    if not barcode in library[multiplex]:
-                        library[multiplex][barcode] = 0
-                    library[multiplex][barcode] += 1
-                elif multiplex6bp in bc:
-                    bcStats[multiplex6bp] += 1
-                    if not barcode in library[multiplex6bp]:
-                        library[multiplex6bp][barcode] = 0
-                    library[multiplex6bp][barcode] += 1
-                else:
-                    bcStats["unmatched"] += 1
-                    if not barcode in library["unmatched"]:
-                        library["unmatched"][barcode] = 0
-                    library["unmatched"][barcode] += 1
-            else :
-                if args.spikein:
-                # Spike-in barcode
-                #  CCTAAAGCTTCTCCTGCCG GTGTGTGGAACGAGCACAGCgccgAGAGACGGATATCACTAGTCgccgCCATTTGCGCGCGCTCGCC
-                # 4mer index 20nt genotyping GTGTGTGGAACGAGCACAGCgccgAGAGACGGATATCACTAGTCgccgCCATTTGCGCGCGCTCGCC
-
-                    match = re.search('GTGTGTGGAACGAGCACAGCgccgAGAGACGGATATCACTAGTCgccgCCATTTGCGCGCGCTCGCC'.upper(), str(record.seq))
-
-                    if match:
-
-                        barcode = str(record.seq[match.start(0):match.start(0) + 67])
-                        genotyping = str(record.seq[match.start(0) - 20:match.start(0)])
-                        multiplex = str(record.seq[match.start(0) - 24:match.start(0) - 20])
-                        multiplex6bp = str(record.seq[match.start(0) - 26:match.start(0) - 20])
-
-                        if multiplex in bc:
-                            bcStats[multiplex] += 1
-                            if not barcode in library[multiplex]:
-                                library[multiplex][barcode] = 0
-                            library[multiplex][barcode] += 1
-                        elif multiplex6bp in bc:
-                            bcStats[multiplex6bp] += 1
-                            if not barcode in library[multiplex6bp]:
-                                library[multiplex6bp][barcode] = 0
-                            library[multiplex6bp][barcode] += 1
-                        else:
-                            bcStats["unmatched"] += 1
-                            if not barcode in library["unmatched"]:
-                                library["unmatched"][barcode] = 0
-                            library["unmatched"][barcode] += 1
+# Parse BAM
+if not os.path.exists(os.path.join(args.outdir, prefix)):
+    os.mkdir(os.path.join(args.outdir, prefix))
+with pysam.AlignmentFile(args.bamFile, 'rb', check_sq=False) as fin:      # Checking for reference sequences in the header has to be disabled for unaligned BAM.
+    with pysam.AlignmentFile(os.path.join(args.outdir, prefix, prefix + "_unmatched.bam"), 'wb', template=fin) as unmatched_bc:
+        with pysam.AlignmentFile(os.path.join(args.outdir, prefix, prefix + "_unknown.bam"), 'wb', template=fin) as unknown_sample:
+            with pysam.AlignmentFile(os.path.join(args.outdir, prefix, prefix + "_diagnostic.bam"), 'wb', template=fin) as diagnostic_pattern:
+                # Scan the reads
+                for record in fin:
+                    if recognize(bc_pattern, record, unknown_sample, extra=offset):
+                        pass  # Counters and barcode library are updated by the function directly, there is no additional logic to implement.
+                    if recognize(bc_pattern_dark, record, unknown_sample, extra=offset, dark=args.n_dark):
+                        pass  # Counters and barcode library are updated by the function directly, there is no additional logic to implement.
+                    elif recognize(empty_pattern, record, unknown_sample, diagnostic='empty') :
+                        bcStats.update([bc['empty']])    # if demultiplexing, sample-specific diagnostic counts will be handled by recognize()
+                        diagnostic_pattern.write(record)
+                    elif args.spikein and recognize(spike_pattern, record, unknown_sample, diagnostic='spike'):
+                        bcStats.update([bc['spike']])    # if demultiplexing, sample-specific diagnostic counts will be handled by recognize()
+                        diagnostic_pattern.write(record)
                     else :
-                        SeqIO.write(record, fout, "fastq")
+                        # None of the patterns has matched
+                        bcStats.update([bc["unmatched"]])
+                        ##library[bc["unmatched"]].update([barcode])
+                        unmatched_bc.write(record)
 
-                else:
+##############
+# Output the barcode counts for each sample
+##############
 
-                    SeqIO.write(record, fout, "fastq")
+samples = sorted(library.keys())
+for sample in samples:
+    with open(os.path.join(args.outdir, prefix, sample.replace('/', '.')) + "_barcode-counts.txt", "w") as fout:
+        for v,c in library[sample].most_common():
+            fout.write( v + "\t" + str(c) + "\n" )
 
+##############
+# Demultiplexing report
+##############
 
-    else :
+def natural_sorted(l):
+    """Sort list of numbers/strings in human-friendly order.
 
-        match = re.search('CGCCG[ATGC]{7}GCC[ATGC]{9}CGCCG', str(record.seq))
+    Args:
+        l(list): A list of strings.
+    Returns:
+        list
+    """
+    convert = lambda text: int(text) if text.isdigit() else text.lower()
+    alphanum_key = lambda key: [ convert(c) for c in re.split('([0-9]+)', key) ]
+    return sorted(l, key = alphanum_key)
 
-        if match:
-            barcode = str(record.seq[match.start(0) - 19:match.start(0) + 48])
-            genotyping = str(record.seq[match.start(0) - 39:match.start(0) - 19])
-            multiplex = str(record.seq[match.start(0) - 43:match.start(0) - 39])
-            multiplex6bp = str(record.seq[match.start(0) - 45:match.start(0) - 39])
-
-            if multiplex in bc:
-                bcStats[multiplex] += 1
-                if not barcode in library[multiplex]:
-                    library[multiplex][barcode] = 0
-                library[multiplex][barcode] += 1
-            elif multiplex6bp in bc:
-                bcStats[multiplex6bp] += 1
-                if not barcode in library[multiplex6bp]:
-                    library[multiplex6bp][barcode] = 0
-                library[multiplex6bp][barcode] += 1
-            else:
-                bcStats["unmatched"] += 1
-                if not barcode in library["unmatched"]:
-                    library["unmatched"][barcode] = 0
-                library["unmatched"][barcode] += 1
-
-        else :
-            # Emtpy vector
-            match = re.search('AGAGACGGATATCACTAGTCGTCTCCGTTCGCTCTAGACAGGGTACCCAGCATATGATAGGGTCCCCT', str(record.seq))
-
-            if match:
-                barcode = str(record.seq[match.start(0):match.start(0) + 67])
-                genotyping = str(record.seq[match.start(0) - 20:match.start(0)])
-                multiplex = str(record.seq[match.start(0) - 24:match.start(0) - 20])
-                multiplex6bp = str(record.seq[match.start(0) - 26:match.start(0) - 20])
-
-                if multiplex in bc:
-                    bcStats[multiplex] += 1
-                    if not barcode in library[multiplex]:
-                        library[multiplex][barcode] = 0
-                    library[multiplex][barcode] += 1
-                elif multiplex6bp in bc:
-                    bcStats[multiplex6bp] += 1
-                    if not barcode in library[multiplex6bp]:
-                        library[multiplex6bp][barcode] = 0
-                    library[multiplex6bp][barcode] += 1
-                else:
-                    bcStats["unmatched"] += 1
-                    if not barcode in library["unmatched"]:
-                        library["unmatched"][barcode] = 0
-                    library["unmatched"][barcode] += 1
-            else :
-
-                if args.spikein:
-                # Spike-in barcode
-                #  CCTAAAGCTTCTCCTGCCG GTGTGTGGAACGAGCACAGCgccgAGAGACGGATATCACTAGTCgccgCCATTTGCGCGCGCTCGCC
-                # 4mer index 20nt genotyping GTGTGTGGAACGAGCACAGCgccgAGAGACGGATATCACTAGTCgccgCCATTTGCGCGCGCTCGCC
-
-                    match = re.search('GTGTGTGGAACGAGCACAGCgccgAGAGACGGATATCACTAGTCgccgCCATTTGCGCGCGCTCGCC'.upper(), str(record.seq))
-
-                    if match:
-
-                        barcode = str(record.seq[match.start(0):match.start(0) + 67])
-                        genotyping = str(record.seq[match.start(0) - 20:match.start(0)])
-                        multiplex = str(record.seq[match.start(0) - 24:match.start(0) - 20])
-                        multiplex6bp = str(record.seq[match.start(0) - 26:match.start(0) - 20])
-
-                        if multiplex in bc:
-                            bcStats[multiplex] += 1
-                            if not barcode in library[multiplex]:
-                                library[multiplex][barcode] = 0
-                            library[multiplex][barcode] += 1
-                        elif multiplex6bp in bc:
-                            bcStats[multiplex6bp] += 1
-                            if not barcode in library[multiplex6bp]:
-                                library[multiplex6bp][barcode] = 0
-                            library[multiplex6bp][barcode] += 1
-                        else:
-                            bcStats["unmatched"] += 1
-                            if not barcode in library["unmatched"]:
-                                library["unmatched"][barcode] = 0
-                            library["unmatched"][barcode] += 1
-                    else :
-                        SeqIO.write(record, fout, "fastq")
-
-                else:
-
-                    SeqIO.write(record, fout, "fastq")
-
-fout.close()
-
-multiplexes = library.keys()
-multiplexes.sort()
-
-for multiplex in multiplexes:
-
-    fout = open(os.path.join(args.outdir, bc[multiplex] + "_barcode_counts.txt"), "w")
-
-    barcodes = library[multiplex].keys()
-    barcodes.sort()
-    for barcode in barcodes:
-        print(barcode + "\t" + str(library[multiplex][barcode]), file = fout)
-
-    fout.close()
-
-multiplexes = bc.keys()
-multiplexes.sort()
-
-for multiplex in multiplexes:
-    print(bc[multiplex] + "\t" + str(bcStats[multiplex]))
+samples = natural_sorted(bcStats.keys())
+with open(os.path.join(args.outdir, prefix, prefix + "_summary.txt"), "w") as fout:
+    for sample in samples:
+        fout.write(sample + "\t" + str(bcStats[sample]) + "\n")
