@@ -14,10 +14,11 @@ spec <- matrix(c(
   'nonrandom'     , 'r', 0, "logical"  , "Assign guides to groups in order of abundance instead of randomly (FALSE).",
   'seed'          , 's', 1, "numeric"  , "Seed for reproducible pseudo-randomisation.",
   'targetCol'     , 't', 1, "character", "Name of the column containing the guide names ('id').",
-  'reference'     , 'z', 1, "character", "Comma separated column names across which to apply mincount for the controls. (if NULL, then all)"
+  'reference'     , 'z', 1, "character", "Comma separated column names across which to apply mincount for the controls. (if NULL, then all)"#,
+#  'ctrllist'      , 'l', 1, "character", "File where the list of control guide IDs will be written out for Mageck."
 ), byrow=TRUE, ncol=5)
 opt <- getopt(spec)
-# opt <- list(controlGroups='CTRLHS,CTRLMM', countsFile='/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/HLA1_staggered/process/crispr-processed/counts/library/counts_mageck.txt', guidesPerGene=6, mincount=50, reference='NoIFNG_d0,imc_surface_plasmid')
+# opt <- list(controlGroups='NONTARGETING', countsFile='/Volumes/groups/zuber/zubarchive/USERS/Kimon/sara_mfpl/TTP_gw_screen/process/preprocess/counts/library/counts_mageck.txt', guidesPerGene=6, mincount=50, reference='T0_Ref_1,T0_Ref_2')
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -44,6 +45,8 @@ names(DT)[which(names(DT)==opt$groupCol)] <- 'sexygroup666'
 names(DT)[which(names(DT)==opt$targetCol)] <- 'sexyid666'
 
 for (gr in groupNames){
+  # gr <- groupNames[1]
+  
   # All guides above the threshold.
   meanCount <- NULL
   if (is.null(opt$reference)) {
@@ -53,7 +56,7 @@ for (gr in groupNames){
     # Specified samples only.
     meanCount <- rowMeans(DT[, c(opt$reference), with=FALSE])
   }
-
+  
   aux <- data.table(id = DT$sexyid666,
                     grp = DT$sexygroup666,
                     cnt = meanCount,
@@ -118,3 +121,7 @@ names(DT)[which(names(DT)=='sexygroup666')] <- opt$groupCol
 names(DT)[which(names(DT)=='sexyid666')] <- opt$targetCol
 
 fwrite(DT, file=opt$outFile, sep = "\t", quote=FALSE)
+
+# fileConn <- file('~/opt$outFile')
+# writeLines(DT, fileConn)
+# close(fileConn)
