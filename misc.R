@@ -7,6 +7,34 @@ library(htmltools)
 
 
 
+
+### Colour Palettes
+###################
+
+# convert list of RGB triplets. to hex
+rgb2hex <- function(RGBtuples){ rgb( t(as.data.frame(RGBtuples)), maxColorValue = 255) }
+# convert colour name vector to hex
+colour2hex <- function(namevector) { rgb( t(as.data.frame( lapply(namevector, function(x){ col2rgb(x)/255 } ) )) ) }
+# preview colour vector
+showpalette <- function(p) {
+  ggplot(data.frame(x=p, y=1), aes(p, y, fill=p)) +
+    geom_bar(stat='identity') +
+    scale_fill_manual(values=p) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
+          legend.position = 'none')
+}
+
+# colourblind palette using grey
+showpalette( c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7") )
+
+# colourblind palette using black
+showpalette( c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7") )
+
+
+
+
+
 ### Correlations within the dataframe.
 ######################################
 # colnames and rownames yes, non-numeric columns no.
@@ -73,7 +101,7 @@ my_pairwise_internal_corels <- function(mat, method = "pearson") {
 
 
 ### PCA and plots
-########
+#################
 # covars is DE style colData
 do_pca <- function(countsmat, covars, center = TRUE, scale = TRUE, loadthresh = 0.75){
   # Gene variances
