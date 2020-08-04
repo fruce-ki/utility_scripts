@@ -24,12 +24,12 @@ spec = matrix(c(
   'lfcthreshold',  'c', 1, "numeric",   "Log2 fold-change threshold (1)",
   'nidcols',       'I', 1, "numeric",   "Number of ID columns at the start of the table (1). see also -i",
   'idcol',         'i', 1, "numeric",   "ID column to use (1). The others will be removed. See also -I.",
-  'bmF',           'B', 0, "logical",   "Disable baseMean filtering. yes/no. (False)",
+  'bmF',           'B', 0, "logical",   "Disable baseMean filtering. (False)",
   'all',           'A', 0, "logical",   "Enable round-robin-style pairwise comparisons. Otherwise only comparisons only against reference. (False)" 
 ), byrow=TRUE, ncol=5)
 
 opt = getopt(spec)
-# opt <- list(baseDir='/groups/zuber/zubarchive/USERS/Kimon/markus/OTI_slamseq', countsFile='process/quant/counts/all_counts_xref.txt', resultsDir='results/quant/DE', RDSoutdir='process/quant/DE', samplesFile='description/covars.txt', control='control,noch,pre', designFormula='~ gene', forvar='time', selvar='chase', sellev='noch', minCount=10, lfcthreshold=1, nidcols=3, idcol=2, ntop=50, bmF=TRUE, pcutoff=0.05, all=FALSE)
+# opt <- list(baseDir='/Volumes/groups/zuber/zubarchive/USERS/Kimon/anja/M9186_quantseq', countsFile='process_quant/all_counts_xref.txt', resultsDir='results_quant/DE', RDSoutdir='process_quant/DE', samplesFile='description/covars.txt', control='Ren,empty,24h,K562-wt-Bulk', designFormula='~ protein', forvar='time', selvar='cells', sellev='K562_wt_Bulk', minCount=10, lfcthreshold=1, nidcols=3, idcol=2, ntop=50, bmF=FALSE, pcutoff=0.05, all=FALSE)
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -47,7 +47,7 @@ if ( is.null(opt$RDSoutdir ) ) {
   opt$RDSoutdir <- './process' 
 }
 
-if ( ! is.null(opt$minCount ) ) { 
+if ( is.null(opt$minCount ) ) { 
   opt$minCount <- 10
 }
 if ( is.null(opt$ntop ) ) { 

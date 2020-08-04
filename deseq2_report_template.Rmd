@@ -65,6 +65,7 @@ if (!is.null(params$reducedFormula)){
 deobj <- readRDS(params$derds)
 rpm <- readRDS(params$rmrds)
 # ctsmat <- counts(deobj)
+message(params$derds)
 vstmat <- assay(vst(deobj, blind=FALSE))     # Variance stabisized counts
 cD <- colData(deobj)[, 1:length(colData(deobj)), drop=FALSE]  # before model building, there in no size factor as last column
 
@@ -311,219 +312,287 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, p
 
 ```{r functionC}
 # Correlations
-my_pairwise_internal_corels <- function(mat = counts(deobj), method = "pearson") {
+my_pairwise_internal_corels <- function(mat = rpm, samples = row.names(colData(deobj)), method = "pearson", prefix=params$prefix, txs=3) {
   # Correlations
   cormat <- cor(mat, method=method)
   
   # Cluster
   hcfit <- hclust(dist(scale(cormat, center=TRUE)))
-  cormat <- cormat[hcfit$order, hcfit$order]
   rn <- rownames(cormat)
+  cormat <- cormat[samples, samples]                    # Supplied order
+  cormat2 <- cormat                                     # Duplicate on which to delete the diagonal with original order.
+  cormat3 <- cormat[rn[hcfit$order], rn[hcfit$order]]   # Duplicate on which to delete the diagonal with clustered order.
   
-  cormat2 <- cormat # Duplicate, for colour fills.
   # Delete diagonal half for the numeric labels.
-  for (r in 1:nrow(cormat)) {
-    for (c in 1:ncol(cormat)) {
+  for (r in 1:nrow(cormat2)) {
+    for (c in 1:ncol(cormat2)) {
       if (c <= r) {
-        cormat[r, c] <- NA_real_
+        cormat2[r, c] <- NA_real_
+      }
+    }
+  }
+  for (r in 1:nrow(cormat3)) {
+    for (c in 1:ncol(cormat3)) {
+      if (c <= r) {
+        cormat3[r, c] <- NA_real_
       }
     }
   }
   
   # Restructure for plotting.
-  cormat <- t(cormat)
-  cormat2 <- t(cormat2)
-  cormat <- as.data.table(t(cormat))
-  cormat2 <- as.data.table(t(cormat2))
+  rn <- rownames(cormat)
+  cormat <- as.data.table(cormat)
   cormat[, observation1 := factor(rn, ordered=TRUE, levels=rn)]
-  cormat2[, observation1 := factor(rn, ordered=TRUE, levels=rn)]
   cormat <- melt(cormat, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
-  cormat2 <- melt(cormat2, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
-  cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rev(rn))]
-  cormat2[, observation2 := factor(observation2, ordered=TRUE, levels=rev(rn))]
+  cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rn)]
   
-  # Relative to full range of values -1,1 (better context)
-  p1 <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
+  rn2 <- rownames(cormat2)
+  cormat2 <- as.data.table(cormat2)
+  cormat2[, observation1 := factor(rn2, ordered=TRUE, levels=rn2)]
+  cormat2 <- melt(cormat2, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
+  cormat2[, observation2 := factor(observation2, ordered=TRUE, levels=rn2)]
+  cormat2 <- cormat2[!is.na(Correlation)]
+  
+  rn3 <- rownames(cormat3)
+  cormat3 <- as.data.table(cormat3)
+  cormat3[, observation1 := factor(rn3, ordered=TRUE, levels=rn3)]
+  cormat3 <- melt(cormat3, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
+  cormat3[, observation2 := factor(observation2, ordered=TRUE, levels=rn3)]
+  cormat3 <- cormat3[!is.na(Correlation)]
+  
+  
+  # Full correlation range (-1, 1), In supplied custom order.
+  # Full square pattern, no values.
+  p1 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
-    geom_text(data=cormat, aes(label=round(Correlation, 2), colour=Correlation >= -0.70 & Correlation <= 0.70 )) +
-    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "blue", "darkblue", "black", "darkred", "red", "gold"), na.value = "transparent" ) +
-    scale_colour_manual(values=c("black", "white"), na.value="forestgreen", guide="none") +
-    labs(title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation"), 
-         x='', y='') +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
     theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
           panel.grid = element_blank() )
   
-  # Relative to actual value range min,max (better contrast)
-  m <- min(cormat2$Correlation, na.rm=TRUE)
-  M <- max(cormat2$Correlation, na.rm=TRUE)
-  # colourswitch <- c( m + 0.16 * (M-m),  m + 0.85 * (M-m) ) # switch letter colour at 15% and 85% of the value range, to stay legible over the fill gradient
-  #                                                          # Quantiles not suitable for this, because the gradient is not affected by values inbetween max and min.
-  colourswitch <- c( m + 0.49 * (M-m),  m + 0.51 * (M-m) ) 
+  # Full correlation range (-1, 1). In supplied custom order.
+  # Diagonal pattern, with values.
   p2 <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
-    # geom_text(data=cormat, aes(label=round(Correlation, 2), colour=( Correlation >= colourswitch[1] & Correlation <= colourswitch[2] ))) +
-    geom_text(data=cormat, aes(label=round(Correlation, 2), colour=( Correlation <= colourswitch[2] ))) +
-    # scale_fill_gradientn(colors=c("lightskyblue", "blue", "darkblue", "black", "darkred", "red", "gold"), na.value = "transparent" ) +
+    geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.70 & Correlation <= 0.70 ), size=rel(txs)) +
+    scale_x_discrete(position = "top") +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "transparent" ) +
+    scale_colour_manual(values=c("black", "white"), na.value="forestgreen", guide="none") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+  
+  # Full correlation range (-1, 1). In supplied custom order.
+  # Full square pattern, with diagonal values.
+  p12 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(data=cormat2, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.70 & Correlation <= 0.70 ), size=rel(txs)) +
+    scale_x_discrete(position = "top") +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
+    scale_colour_manual(values=c("black", "white"), na.value="forestgreen", guide="none") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+  
+  
+  # Dynamic correlation range, In clustered order.
+  # Full square pattern, no values.
+  cormat[, observation1 := factor(observation1, ordered=TRUE, levels=rn3)]
+  cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rn3)]
+  p3 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
     scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
-    scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
-    labs(title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation"), 
-         x='', y='') +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
     theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
           panel.grid = element_blank() )
   
-  return( list(full=p1, dyna=p2) )
+  # Dynamic correlation range, In clustered order.
+  # Diagonal pattern, with values.
+  m <- min(cormat3$Correlation, na.rm=TRUE)
+  M <- max(cormat3$Correlation, na.rm=TRUE)
+  colourswitch <- c( m + 0.49 * (M-m),  m + 0.51 * (M-m) ) 
+  p4 <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
+    scale_x_discrete(position = "top") +
+    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "transparent" ) +
+    scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+  
+  # Dynamic correlation range, In clustered order.
+  # Full square pattern, diagonal values.
+  cormat[, observation1 := factor(observation1, ordered=TRUE, levels=rn3)]
+  cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rn3)]
+  p34 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(data=cormat3, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +scale_x_discrete(position = "top") +
+    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
+    scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+  
+  
+  fwrite(dcast(cormat2, observation1 ~ observation2, value.var = "Correlation"),
+         file=paste0(prefix, '_cor.txt'),
+         sep='\t', quote = FALSE, row.names = FALSE, col.names = TRUE)
+  
+  
+  return( list(full=p1, dyna=p2, combo1=p12, act1=p3, act2=p4, combo2=p34) )
 }
 ```
 
-```{r functionGO}
-# # GO enrichment
-# do_go <- function(de, db, ntop, onto){
-#   if (any(de$meetthresh)) {
-#     geneList <- factor(as.integer(de$meetthresh & de$istop))
-#     names(geneList) <- de$name
-#     
-#     GOdata <- new("topGOdata",
-#                   description = paste(onto, db), 
-#                   ontology = onto,
-#                   allGenes = geneList,
-#                   nodeSize = 10,
-#                   annot = annFUN.org,
-#                   mapping = db,
-#                   ID = "ensembl")
-#     resFish <- runTest(GOdata, algorithm = "classic", statistic = "fisher")
-#     allRes <- GenTable(GOdata, classicFisher = resFish, ranksOf = "classicFisher", topNodes = ntop)
-#     
-#     return(allRes[allRes$classicFisher < 0.05,])
-#   }
-# }
-```
+<!-- ```{r functionGO} -->
+<!-- # # GO enrichment -->
+<!-- # do_go <- function(de, db, ntop, onto){ -->
+<!-- #   if (any(de$meetthresh)) { -->
+<!-- #     geneList <- factor(as.integer(de$meetthresh & de$istop)) -->
+<!-- #     names(geneList) <- de$name -->
+<!-- #      -->
+<!-- #     GOdata <- new("topGOdata", -->
+<!-- #                   description = paste(onto, db),  -->
+<!-- #                   ontology = onto, -->
+<!-- #                   allGenes = geneList, -->
+<!-- #                   nodeSize = 10, -->
+<!-- #                   annot = annFUN.org, -->
+<!-- #                   mapping = db, -->
+<!-- #                   ID = "ensembl") -->
+<!-- #     resFish <- runTest(GOdata, algorithm = "classic", statistic = "fisher") -->
+<!-- #     allRes <- GenTable(GOdata, classicFisher = resFish, ranksOf = "classicFisher", topNodes = ntop) -->
+<!-- #      -->
+<!-- #     return(allRes[allRes$classicFisher < 0.05,]) -->
+<!-- #   } -->
+<!-- # } -->
+<!-- ``` -->
 
-```{r functionsPCA}
-# PCA
-# (scaling and centering of genes to one another, NOT samples to one another)
-do_pca <- function(countsmat = rpm, covars = colData(deobj), center = TRUE, scale = TRUE, loadthresh = params$minL){
-  # Gene variances
-  genevar <- data.table(name = rownames(countsmat),
-                        Mean = rowMeans(countsmat),
-                        StDev = rowVars(countsmat) )
-  
-  # Rotate counts so genes are variables and samples are observations
-  countsmat <- t(countsmat)
-  
-  # Add covariates info
-  counts <- cbind(covars, as.data.table(countsmat))
-  
-  # Calculate principal components (after getting rid of zero-variance genes that can't be standardized).
-  
-  nonconstant <- which(apply(countsmat, 2, var)!=0)
-  countsmat <- countsmat[, nonconstant]
-  nvars <- dim(countsmat)[2]
-  
-  pca <- prcomp(countsmat, center = center, scale. = scale)
-  srn <- sqrt(nrow(countsmat) - 1)
-  pc <- sweep(pca$x, 2, 1 / (pca$sdev * srn), FUN = '*')
-  pc <- cbind(pc, data.frame(sample = rownames(pc)))
-  covars <- cbind(covars, data.frame(sample = rownames(covars)))
-  pc <- as.data.frame(merge(pc, covars, by="sample", all = TRUE))
-  npc <- sum(pca$sdev > 1)
-    
-  # Screeplot.
-  
-  pcaimp <- as.data.table(cbind(as.data.frame(t(summary(pca)$importance)), 
-                  data.frame(PC = 1:length(colnames(pca$x)))))
-  pcaimp <- melt(pcaimp, variable.name = "type", value.name = "Proportion", id.vars = c("PC", "Standard deviation"))
-  
-  pcmax=15
-  pimp <- ggplot(pcaimp[(PC<pcmax),], aes(x=PC, y=Proportion)) +
-    facet_grid(type ~ ., scales="free_y") +
-    geom_bar(aes(fill=type), stat="identity", width=0.6) +
-    geom_line(aes(colour=type)) +
-    scale_fill_manual(values = c("grey50", "transparent")) +
-    scale_colour_manual(values = c("transparent", "grey25")) +
-    scale_x_continuous(breaks = seq(1, pcmax, 2)) +
-    labs(title = "PCA Screeplot", subtitle=paste0(nvars, " features, ", npc, " PCs"), x = "Principal Component") +
-    theme(axis.title.y = element_blank(),
-          legend.position = "none")
+<!-- ```{r functionsPCA} -->
+<!-- do_pca <- function(countsmat = rpm, covars = rbind(data.frame(sample=rownames(colData(deobj)), colData(deobj))) , center = TRUE, scale = TRUE, loadthresh = params$minL, prefix = paste0(params$prefix, '_pc')) { -->
+<!--   # countsmat = counts -->
 
-  # Top loadings for the first 3 PCs.
-  
-  loads <- as.data.table(t(t(pca$rotation) * pca$sdev))
-  loads[, rowID := rownames(pca$rotation)]
-  loads <- melt(loads, value.name = "Loading", id.vars="rowID", variable.name="PC")
-  loads[, absload := abs(Loading)]
-  lhigh <- loads$absload > loadthresh     # keep only high loadings
-  setorder(loads, PC, -absload)
-  sel1 <- loads[lhigh > loadthresh & PC=="PC1", rowID]
-  sel2 <- loads[lhigh > loadthresh & PC=="PC2", rowID]
-  sel3 <- loads[lhigh > loadthresh & PC=="PC3", rowID]
-  sel <- unique(loads[lhigh, rowID])
-  
-  # Coefficient names.
-  
-  ig <- names(covars)
-  ig <- ig[! ig %in% c('sample', 'Sample', 'name', 'Name', 'sizeFactor')]
+<!--   # Gene variances -->
+<!--   genevar <- data.table(name = rownames(countsmat), -->
+<!--                         Mean = rowMeans(countsmat), -->
+<!--                         StDev = rowVars(countsmat) ) -->
 
-  # Means and Variances of the top loads in the first 3 PCs.
-  
-  genevar = data.table(rowID = colnames(countsmat),
-                       Mean = colMeans(countsmat), 
-                       StDev = colSds(countsmat) )
-  genevar[, istop:= rowID %in% sel]
-  
-  pvar1 <- ggMarginal(ggplot(genevar) +
-      geom_point(aes(x=Mean, y=StDev, label=rowID, colour=istop), shape=16, size=0.8, alpha=0.5) +
-      scale_x_log10() +
-      scale_colour_manual(values=c("black", "violetred")) +
-      scale_y_log10() +
-      labs(x="Mean", y="Standard Deviation", title="All features") +
-      theme(legend.position = "none"),
-    type = "histogram")
-  
-  pvar2 <- ggplot(genevar[(istop),]) +
-      geom_point(aes(x=Mean, y=StDev, label=rowid), shape=16, size=0.8, alpha=0.5, colour="purple") +
-      labs(x="Mean", y="Standard Deviation", 
-           title="Top-loading features", subtitle = "in the first 3 PCs") +
-      scale_x_log10() +
-      scale_y_log10()
-  
-  # Correlation of the samples for the selected features only.
-  
-  pcor <- my_pairwise_internal_corels(t(countsmat[, sel]))
-  
-  # Plot first 3 PCs in 2D pairs.
-  # Highlight one variable at a time.
-  pc12 <- lapply(ig, function(varname) { 
-    return( 
-      ggplot(pc, aes_string(x="PC1", y="PC2", label="sample", colour=varname)) +
-        geom_point(alpha=0.8, size=rel(1.5)) +
-        coord_fixed()
-    )})
-  
-  pc13 <- lapply(ig, function(varname) { 
-    return( 
-      ggplot(pc, aes_string(x="PC1", y="PC3", label="sample", colour=varname)) +
-        geom_point(alpha=0.8, size=rel(1.5)) +
-        coord_fixed()
-    )})
-  
-  pc32 <- lapply(ig, function(varname) { 
-    return( 
-      ggplot(pc, aes_string(x="PC3", y="PC2", label="sample", colour=varname)) +
-        geom_point(alpha=0.8, size=rel(1.5)) +
-        coord_fixed()
-    )})
-  
-  return(list(pca=pca, 
-              nvars=nvars, 
-              nPC=npc, 
-              pimp=pimp, 
-              load1=sel1, load2=sel2, load3=sel3,
-              pc_1_2=pc12, pc_1_3=pc13, pc_3_2=pc32,
-              pvar1=pvar1, pvar2=pvar2, 
-              pcor1=pcor[[1]] , pcor2=pcor[[2]]
-              ))
-}
-```
+<!--   # Rotate counts so genes are variables and samples are observations -->
+<!--   countsmat <- t(countsmat) # rotate 270 so the final rotate for correlations results in the same sample order as the initial correlations -->
+
+<!--   # Add covariates info -->
+<!--   counts <- cbind(covars, as.data.table(countsmat)) -->
+
+<!--   # Calculate principal components (after getting rid of zero-variance genes that can't be standardized). -->
+
+<!--   nonconstant <- which(apply(countsmat, 2, var)!=0) -->
+<!--   countsmat <- countsmat[, nonconstant] -->
+<!--   nvars <- dim(countsmat)[2] -->
+
+<!--   pca <- prcomp(countsmat, center = center, scale. = scale) -->
+<!--   srn <- sqrt(nrow(countsmat) - 1) -->
+<!--   pc <- sweep(pca$x, 2, 1 / (pca$sdev * srn), FUN = '*') -->
+<!--   pc <- cbind(pc, data.frame(sample = rownames(pc))) -->
+<!--   #covars <- cbind(covars, data.frame(sample = rownames(covars))) -->
+<!--   pc <- as.data.frame(merge(pc, covars, by="sample", all = TRUE)) -->
+<!--   npc <- sum(pca$sdev > 1) -->
+
+<!--   # Screeplot. -->
+
+<!--   pcaimp <- as.data.table(cbind(as.data.frame(t(summary(pca)$importance)), -->
+<!--                                 data.frame(PC = 1:length(colnames(pca$x))))) -->
+<!--   pcaimp <- melt(pcaimp, variable.name = "type", value.name = "Proportion", id.vars = c("PC", "Standard deviation")) -->
+
+<!--   pcmax=15 -->
+<!--   pimp <- ggplot(pcaimp[(PC<pcmax),], aes(x=PC, y=Proportion)) + -->
+<!--     facet_grid(type ~ ., scales="free_y") + -->
+<!--     geom_bar(aes(fill=type), stat="identity", width=0.6) + -->
+<!--     geom_line(aes(colour=type)) + -->
+<!--     scale_fill_manual(values = c("grey50", "transparent")) + -->
+<!--     scale_colour_manual(values = c("transparent", "grey25")) + -->
+<!--     scale_x_continuous(breaks = seq(1, pcmax, 2)) + -->
+<!--     labs(title = "PCA Screeplot", subtitle=paste0(nvars, " features, ", npc, " PCs"), x = "Principal Component") + -->
+<!--     theme(axis.title.y = element_blank(), -->
+<!--           legend.position = "none") -->
+
+<!--   # Top loadings for the first 3 PCs. -->
+
+<!--   loads <- as.data.table(t(t(pca$rotation) * pca$sdev)) -->
+<!--   loads[, rowID := rownames(pca$rotation)] -->
+<!--   loads <- melt(loads, value.name = "Loading", id.vars="rowID", variable.name="PC") -->
+<!--   loads[, absload := abs(Loading)] -->
+<!--   lhigh <- loads$absload > loadthresh     # keep only high loadings -->
+<!--   setorder(loads, PC, -absload) -->
+<!--   sel1 <- loads[lhigh > loadthresh & PC=="PC1", rowID] -->
+<!--   sel2 <- loads[lhigh > loadthresh & PC=="PC2", rowID] -->
+<!--   sel3 <- loads[lhigh > loadthresh & PC=="PC3", rowID] -->
+<!--   sel <- unique(loads[lhigh, rowID]) -->
+
+<!--   # Coefficient names. -->
+
+<!--   ig <- names(covars) -->
+<!--   ig <- ig[! ig %in% c('sample', 'Sample', 'name', 'Name', 'sizeFactor')] -->
+
+<!--   # Means and Variances of the top loads in the first 3 PCs. -->
+
+<!--   genevar = data.table(rowID = colnames(countsmat), -->
+<!--                        Mean = colMeans(countsmat), -->
+<!--                        StDev = colSds(countsmat) ) -->
+<!--   genevar[, istop:= rowID %in% sel] -->
+
+<!--   pvar1 <- ggMarginal(ggplot(genevar) + -->
+<!--                         geom_point(aes(x=Mean, y=StDev, label=rowID, colour=istop), shape=16, size=0.8, alpha=0.5) + -->
+<!--                         scale_x_log10() + -->
+<!--                         scale_colour_manual(values=c("black", "violetred")) + -->
+<!--                         scale_y_log10() + -->
+<!--                         labs(x="Mean", y="Standard Deviation", title="All features") + -->
+<!--                         theme(legend.position = "none"), -->
+<!--                       type = "histogram") -->
+
+<!--   pvar2 <- ggplot(genevar[(istop),]) + -->
+<!--     geom_point(aes(x=Mean, y=StDev, label=rowid), shape=16, size=0.8, alpha=0.5, colour="purple") + -->
+<!--     labs(x="Mean", y="Standard Deviation", -->
+<!--          title="Top-loading features", subtitle = "in the first 3 PCs") + -->
+<!--     scale_x_log10() + -->
+<!--     scale_y_log10() -->
+
+<!--   # Correlation of the samples for the selected features only. -->
+
+<!--   pcor <- my_pairwise_internal_corels(t(countsmat[, sel]), samples=covars$sample, prefix=prefix) -->
+
+<!--   # Plot first 3 PCs in 2D pairs. -->
+<!--   # Highlight one variable at a time. -->
+<!--   pc12 <- lapply(ig, function(varname) { -->
+<!--     return( -->
+<!--       ggplot(pc, aes_string(x="PC1", y="PC2", label="sample", colour=varname)) + -->
+<!--         geom_point(alpha=0.8, size=rel(1.5)) + -->
+<!--         coord_fixed() -->
+<!--     )}) -->
+
+<!--   pc13 <- lapply(ig, function(varname) { -->
+<!--     return( -->
+<!--       ggplot(pc, aes_string(x="PC1", y="PC3", label="sample", colour=varname)) + -->
+<!--         geom_point(alpha=0.8, size=rel(1.5)) + -->
+<!--         coord_fixed() -->
+<!--     )}) -->
+
+<!--   pc32 <- lapply(ig, function(varname) { -->
+<!--     return( -->
+<!--       ggplot(pc, aes_string(x="PC3", y="PC2", label="sample", colour=varname)) + -->
+<!--         geom_point(alpha=0.8, size=rel(1.5)) + -->
+<!--         coord_fixed() -->
+<!--     )}) -->
+
+<!--   return(list(pca=pca, -->
+<!--               nvars=nvars, -->
+<!--               nPC=npc, -->
+<!--               pimp=pimp, -->
+<!--               load1=sel1, load2=sel2, load3=sel3, -->
+<!--               pc_1_2=pc12, pc_1_3=pc13, pc_3_2=pc32, -->
+<!--               pvar1=pvar1, pvar2=pvar2, -->
+<!--               pcor1=pcor[['dyna']], pcor2=pcor[['act1']] -->
+<!--   )) -->
+<!-- } -->
+<!-- ``` -->
 
 
 # Correlations
@@ -534,14 +603,14 @@ Correlations of the samples, based on the raw and the Variance-Stabilisation-Tra
 
 ```{r correlations, fig.height=7, fig.width=16}
 corels1 <- my_pairwise_internal_corels()
-print( corels1[[1]] + corels1[[2]])
+print( corels1[[3]] )
 ```
 
 ## RPM counts
 
 ```{r correlations2, fig.height=7, fig.width=16}
 corels2 <- my_pairwise_internal_corels(mat=rpm)
-print( corels2[[1]] + corels2[[2]])
+print( corels1[[3]] )
 ```
 
 
@@ -549,76 +618,76 @@ print( corels2[[1]] + corels2[[2]])
 
 ```{r correlations3, fig.height=7, fig.width=16}
 corels3 <- my_pairwise_internal_corels(mat = vstmat)
-print( corels3[[1]] + corels3[[2]])
+print( corels1[[3]] )
 ```
 
 
-# PCA
+<!-- # PCA -->
 
-Based on the RPM counts.
+<!-- Based on the RPM counts. -->
 
-## Plots
+<!-- ## Plots -->
 
-```{r pca}
-all_pca <- do_pca()
+<!-- ```{r pca} -->
+<!-- all_pca <- do_pca() -->
 
-# print( paste("Num of Variables:", all_pca$nvars, ", Num of Principal Components:", all_pca$nPC) )
+<!-- # print( paste("Num of Variables:", all_pca$nvars, ", Num of Principal Components:", all_pca$nPC) ) -->
 
-# Scree
-print(all_pca$pimp)
-```
+<!-- # Scree -->
+<!-- print(all_pca$pimp) -->
+<!-- ``` -->
 
-### PC 1 + PC 2
+<!-- ### PC 1 + PC 2 -->
 
-```{r pc12, fig.width=7, fig.height=7}
-htmltools::tagList(lapply(all_pca[["pc_1_2"]], function(x) { ggplotly(x) }))
-# lapply(all_pca[["pc_1_2"]], function(x) { x })
-```
+<!-- ```{r pc12, fig.width=7, fig.height=7} -->
+<!-- htmltools::tagList(lapply(all_pca[["pc_1_2"]], function(x) { ggplotly(x) })) -->
+<!-- # lapply(all_pca[["pc_1_2"]], function(x) { x }) -->
+<!-- ``` -->
 
-### PC 1 + PC 3
+<!-- ### PC 1 + PC 3 -->
 
-```{r pc13, fig.width=7, fig.height=7}
-htmltools::tagList(lapply(all_pca[["pc_1_3"]], function(x) { ggplotly(x) }))
-# lapply(all_pca[["pc_1_3"]], function(x) { x })
-```
+<!-- ```{r pc13, fig.width=7, fig.height=7} -->
+<!-- htmltools::tagList(lapply(all_pca[["pc_1_3"]], function(x) { ggplotly(x) })) -->
+<!-- # lapply(all_pca[["pc_1_3"]], function(x) { x }) -->
+<!-- ``` -->
 
-### PC 3 + PC 2
+<!-- ### PC 3 + PC 2 -->
 
-```{r pc32, fig.width=7, fig.height=7}
-htmltools::tagList(lapply(all_pca[["pc_3_2"]], function(x) { ggplotly(x) }))
-# lapply(all_pca[["pc_3_2"]], function(x) { x })
-```
+<!-- ```{r pc32, fig.width=7, fig.height=7} -->
+<!-- htmltools::tagList(lapply(all_pca[["pc_3_2"]], function(x) { ggplotly(x) })) -->
+<!-- # lapply(all_pca[["pc_3_2"]], function(x) { x }) -->
+<!-- ``` -->
 
 
-## Top high-loading features in the first 3 PCs
+<!-- ## Top high-loading features in the first 3 PCs -->
 
-Only the `r params$ntop` highest-loading features with loading >= `r params$minL` are listed here, in order of decreasing loading. 
+<!-- Only the `r params$ntop` highest-loading features with loading >= `r params$minL` are listed here, in order of decreasing loading.  -->
 
-### PC1
+<!-- ### PC1 -->
 
-```{r pc1}
-head(all_pca[["load1"]], n=params$ntop)
-```
+<!-- ```{r pc1} -->
+<!-- head(all_pca[["load1"]], n=params$ntop) -->
+<!-- ``` -->
 
-### PC2
+<!-- ### PC2 -->
 
-```{r pc2}
-head(all_pca[["load2"]], n=params$ntop)
-```
+<!-- ```{r pc2} -->
+<!-- head(all_pca[["load2"]], n=params$ntop) -->
+<!-- ``` -->
 
-### PC3
+<!-- ### PC3 -->
 
-```{r pc3}
-head(all_pca[["load3"]], n=params$ntop)
-```
+<!-- ```{r pc3} -->
+<!-- head(all_pca[["load3"]], n=params$ntop) -->
+<!-- ``` -->
 
-## Filtered correlation
+<!-- ## Filtered correlation -->
 
-Calculated using only the features with loading >= `r params$minL` in any of the first 3 PCs.
+<!-- Calculated using only the features with loading >= `r params$minL` in any of the first 3 PCs. -->
 
-```{r fig.width=16, fig.height=7}
-print( all_pca[["pcor1"]] + all_pca[["pcor2"]] )
-```
+<!-- ```{r fig.width=16, fig.height=7} -->
+<!-- print( all_pca[["pcor1"]] + all_pca[["pcor2"]] ) -->
+<!-- ``` -->
 
 
 # DE
@@ -907,19 +976,19 @@ print(corels2[[2]] + labs(substitle='RPM'))
 print(corels3[[1]] + labs(substitle='VST count'))
 print(corels3[[2]] + labs(substitle='VST count'))
 
-# PCA plots
-print(all_pca$pimp)
-for (x in all_pca[["pc_1_2"]]) {
-  print(x)
-}
-for (x in all_pca[["pc_1_3"]]) {
-  print(x)
-}
-for (x in all_pca[["pc_3_2"]]) {
-  print(x)
-}
-print(all_pca[["pcor1"]])
-print(all_pca[["pcor2"]])
+# # PCA plots
+# print(all_pca$pimp)
+# for (x in all_pca[["pc_1_2"]]) {
+#   print(x)
+# }
+# for (x in all_pca[["pc_1_3"]]) {
+#   print(x)
+# }
+# for (x in all_pca[["pc_3_2"]]) {
+#   print(x)
+# }
+# print(all_pca[["pcor1"]])
+# print(all_pca[["pcor2"]])
 
 # DE plots
 for (x in pexp) {
