@@ -299,7 +299,7 @@ do_pca <- function(countsmat, covars, center = TRUE, scale = TRUE, loadthresh = 
               load1=sel1, load2=sel2, load3=sel3,
               pc_1_2=pc12, pc_1_3=pc13, pc_3_2=pc32,
               pvar1=pvar1, pvar2=pvar2, 
-              pcor1=pcor[['dyna']], pcor2=pcor[['act1']]
+              pcor1=pcor[['combo1']], pcor2=pcor[['act1']]
               ))
 }
 ```
@@ -321,7 +321,7 @@ counts[is.na(counts)] <- 0
 ```{r correlations, fig.height=16, fig.width=16}
 corels <- my_pairwise_internal_corels(counts, samples = covars$sample)
 # print(corels[["full"]])
-print(corels[["dyna"]])
+print(corels[["combo1"]])
 print(corels[["act1"]])
 # ggplotly(corels[["act1"]])
 ```
