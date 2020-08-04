@@ -6,6 +6,20 @@ library(plotly)
 library(htmltools)
 
 
+# RMarkdown header template
+###########################
+
+# title: "Report"
+# author: "Kimon Froussios"
+# date: "`r format(Sys.time(), '%d %B, %Y')`"
+# output: 
+#   html_document:
+#     code_folding: hide
+#     toc: true
+#     toc_float: true
+#     toc_depth: 4
+#     collapsed: false
+# params:
 
 
 ### Colour Palettes
@@ -13,8 +27,10 @@ library(htmltools)
 
 # convert list of RGB triplets. to hex
 rgb2hex <- function(RGBtuples){ rgb( t(as.data.frame(RGBtuples)), maxColorValue = 255) }
+
 # convert colour name vector to hex
 colour2hex <- function(namevector) { rgb( t(as.data.frame( lapply(namevector, function(x){ col2rgb(x)/255 } ) )) ) }
+
 # preview colour vector
 showpalette <- function(p) {
   ggplot(data.frame(x=p, y=1), aes(p, y, fill=p)) +
@@ -25,11 +41,8 @@ showpalette <- function(p) {
           legend.position = 'none')
 }
 
-# colourblind palette using grey
-showpalette( c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7") )
-
-# colourblind palette using black
-showpalette( c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7") )
+# colourblind palette
+showpalette( c("#000000", "#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7") )
 
 
 
@@ -38,79 +51,154 @@ showpalette( c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2",
 ### Correlations within the dataframe.
 ######################################
 # colnames and rownames yes, non-numeric columns no.
-my_pairwise_internal_corels <- function(mat, method = "pearson") {
+# Requires a vector of sample names for the non-clustered plots.
+my_pairwise_internal_corels <- function(mat, samples, method = "pearson", prefix=params$prefix, txs=3) {
   # Correlations
   cormat <- cor(mat, method=method)
   
   # Cluster
   hcfit <- hclust(dist(scale(cormat, center=TRUE)))
-  cormat <- cormat[hcfit$order, hcfit$order]
   rn <- rownames(cormat)
+  cormat <- cormat[samples, samples]                    # Supplied order
+  cormat2 <- cormat                                     # Duplicate on which to delete the diagonal with original order.
+  cormat3 <- cormat[rn[hcfit$order], rn[hcfit$order]]   # Duplicate on which to delete the diagonal with clustered order.
   
-  cormat2 <- cormat # Duplicate, for colour fills.
   # Delete diagonal half for the numeric labels.
-  for (r in 1:nrow(cormat)) {
-    for (c in 1:ncol(cormat)) {
+  for (r in 1:nrow(cormat2)) {
+    for (c in 1:ncol(cormat2)) {
       if (c <= r) {
-        cormat[r, c] <- NA_real_
+        cormat2[r, c] <- NA_real_
+      }
+    }
+  }
+  for (r in 1:nrow(cormat3)) {
+    for (c in 1:ncol(cormat3)) {
+      if (c <= r) {
+        cormat3[r, c] <- NA_real_
       }
     }
   }
   
   # Restructure for plotting.
-  cormat <- t(cormat)
-  cormat2 <- t(cormat2)
-  cormat <- as.data.table(t(cormat))
-  cormat2 <- as.data.table(t(cormat2))
+  rn <- rownames(cormat)
+  cormat <- as.data.table(cormat)
   cormat[, observation1 := factor(rn, ordered=TRUE, levels=rn)]
-  cormat2[, observation1 := factor(rn, ordered=TRUE, levels=rn)]
   cormat <- melt(cormat, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
+  cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rn)]
+  
+  rn2 <- rownames(cormat2)
+  cormat2 <- as.data.table(cormat2)
+  cormat2[, observation1 := factor(rn2, ordered=TRUE, levels=rn2)]
   cormat2 <- melt(cormat2, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
-  cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rev(rn))]
-  cormat2[, observation2 := factor(observation2, ordered=TRUE, levels=rev(rn))]
+  cormat2[, observation2 := factor(observation2, ordered=TRUE, levels=rn2)]
+  cormat2 <- cormat2[!is.na(Correlation)]
   
-  # Relative to full range of values -1,1 (better context)
-  p1 <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
+  rn3 <- rownames(cormat3)
+  cormat3 <- as.data.table(cormat3)
+  cormat3[, observation1 := factor(rn3, ordered=TRUE, levels=rn3)]
+  cormat3 <- melt(cormat3, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
+  cormat3[, observation2 := factor(observation2, ordered=TRUE, levels=rn3)]
+  cormat3 <- cormat3[!is.na(Correlation)]
+  
+  
+  # Full correlation range (-1, 1), In supplied custom order.
+  # Full square pattern, no values.
+  p1 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
-    geom_text(data=cormat, aes(label=round(Correlation, 2), colour=Correlation >= -0.70 & Correlation <= 0.70 )) +
-    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "blue", "darkblue", "black", "darkred", "red", "gold"), na.value = "transparent" ) +
-    scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
-    labs(title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation"), 
-         x='', y='') +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
     theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
-          panel.grid.major = element_blank() )
+          panel.grid = element_blank() )
   
-  # Relative to actual value range min,max (better contrast)
-  m <- min(cormat2$Correlation, na.rm=TRUE)
-  M <- max(cormat2$Correlation, na.rm=TRUE)
-  colourswitch <- c( m + 0.16 * (M-m),  m + 0.85 * (M-m) ) # switch letter colour at 15% and 85% of the value range, to stay legible over the fill gradient
-  # Quantiles not suitable for this, because the gradient is not affected by values inbetween max and min.
+  # Full correlation range (-1, 1). In supplied custom order.
+  # Diagonal pattern, with values.
   p2 <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
-    geom_text(data=cormat, aes(label=round(Correlation, 2), colour=( Correlation >= colourswitch[1] & Correlation <= colourswitch[2] ))) +
-    scale_fill_gradientn(colors=c("lightskyblue", "blue", "darkblue", "black", "darkred", "red", "gold"), na.value = "transparent" ) +
-    scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
-    labs(title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation"), 
-         x='', y='') +
-    theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
-          panel.grid.major = element_blank() )
+    geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.70 & Correlation <= 0.70 ), size=rel(txs)) +
+    scale_x_discrete(position = "top") +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "transparent" ) +
+    scale_colour_manual(values=c("black", "white"), na.value="forestgreen", guide="none") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
   
-  return( list(full=p1, dyna=p2) )
+  # Full correlation range (-1, 1). In supplied custom order.
+  # Full square pattern, with diagonal values.
+  p12 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(data=cormat2, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.70 & Correlation <= 0.70 ), size=rel(txs)) +
+    scale_x_discrete(position = "top") +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
+    scale_colour_manual(values=c("black", "white"), na.value="forestgreen", guide="none") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+  
+  
+  # Dynamic correlation range, In clustered order.
+  # Full square pattern, no values.
+  cormat[, observation1 := factor(observation1, ordered=TRUE, levels=rn3)]
+  cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rn3)]
+  p3 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+    theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
+          panel.grid = element_blank() )
+  
+  # Dynamic correlation range, In clustered order.
+  # Diagonal pattern, with values.
+  m <- min(cormat3$Correlation, na.rm=TRUE)
+  M <- max(cormat3$Correlation, na.rm=TRUE)
+  colourswitch <- c( m + 0.49 * (M-m),  m + 0.51 * (M-m) ) 
+  p4 <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
+    scale_x_discrete(position = "top") +
+    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "transparent" ) +
+    scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+  
+  # Dynamic correlation range, In clustered order.
+  # Full square pattern, diagonal values.
+  cormat[, observation1 := factor(observation1, ordered=TRUE, levels=rn3)]
+  cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rn3)]
+  p34 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(data=cormat3, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +scale_x_discrete(position = "top") +
+    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
+    scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+  
+  
+  fwrite(dcast(cormat2, observation1 ~ observation2, value.var = "Correlation"),
+         file=paste0(prefix, '_cor.txt'),
+         sep='\t', quote = FALSE, row.names = FALSE, col.names = TRUE)
+  
+  
+  return( list(full=p1, dyna=p2, combo1=p12, act1=p3, act2=p4, combo2=p34) )
 }
+
 
 
 
 ### PCA and plots
 #################
 # covars is DE style colData
-do_pca <- function(countsmat, covars, center = TRUE, scale = TRUE, loadthresh = 0.75){
+do_pca <- function(countsmat, covars, center = TRUE, scale = TRUE, loadthresh = params$minL, prefix = paste0(params$prefix, '_pc')) {
+  # countsmat = counts
+  
   # Gene variances
   genevar <- data.table(name = rownames(countsmat),
                         Mean = rowMeans(countsmat),
                         StDev = rowVars(countsmat) )
   
   # Rotate counts so genes are variables and samples are observations
-  countsmat <- t(countsmat)
+  countsmat <- t(countsmat) # rotate 270 so the final rotate for correlations results in the same sample order as the initial correlations
   
   # Add covariates info
   counts <- cbind(covars, as.data.table(countsmat))
@@ -125,7 +213,7 @@ do_pca <- function(countsmat, covars, center = TRUE, scale = TRUE, loadthresh = 
   srn <- sqrt(nrow(countsmat) - 1)
   pc <- sweep(pca$x, 2, 1 / (pca$sdev * srn), FUN = '*')
   pc <- cbind(pc, data.frame(sample = rownames(pc)))
-  covars <- cbind(covars, data.frame(sample = rownames(covars)))
+  #covars <- cbind(covars, data.frame(sample = rownames(covars)))
   pc <- as.data.frame(merge(pc, covars, by="sample", all = TRUE))
   npc <- sum(pca$sdev > 1)
   
@@ -190,28 +278,28 @@ do_pca <- function(countsmat, covars, center = TRUE, scale = TRUE, loadthresh = 
   
   # Correlation of the samples for the selected features only.
   
-  pcor <- my_pairwise_internal_corels(t(countsmat[, sel]))
+  pcor <- my_pairwise_internal_corels(t(countsmat[, sel]), samples=covars$sample, prefix=prefix)
   
   # Plot first 3 PCs in 2D pairs.
   # Highlight one variable at a time.
   pc12 <- lapply(ig, function(varname) { 
     return( 
       ggplot(pc, aes_string(x="PC1", y="PC2", label="sample", colour=varname)) +
-        geom_point(shape=16) +
+        geom_point(alpha=0.8, size=rel(1.5)) +
         coord_fixed()
     )})
   
   pc13 <- lapply(ig, function(varname) { 
     return( 
       ggplot(pc, aes_string(x="PC1", y="PC3", label="sample", colour=varname)) +
-        geom_point(shape=16) +
+        geom_point(alpha=0.8, size=rel(1.5)) +
         coord_fixed()
     )})
   
   pc32 <- lapply(ig, function(varname) { 
     return( 
       ggplot(pc, aes_string(x="PC3", y="PC2", label="sample", colour=varname)) +
-        geom_point(shape=16) +
+        geom_point(alpha=0.8, size=rel(1.5)) +
         coord_fixed()
     )})
   
@@ -222,9 +310,10 @@ do_pca <- function(countsmat, covars, center = TRUE, scale = TRUE, loadthresh = 
               load1=sel1, load2=sel2, load3=sel3,
               pc_1_2=pc12, pc_1_3=pc13, pc_3_2=pc32,
               pvar1=pvar1, pvar2=pvar2, 
-              pcor1=pcor[[1]] , pcor2=pcor[[2]]
+              pcor1=pcor[['dyna']], pcor2=pcor[['act1']]
   ))
 }
+
 
   
 

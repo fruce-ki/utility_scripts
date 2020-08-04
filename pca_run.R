@@ -13,7 +13,7 @@ spec = matrix(c(
 ), byrow=TRUE, ncol=5)
 
 opt = getopt(spec)
-# opt <- list(countsFile='/groups/zuber/zubarchive/USERS/Kimon/markus/OTI_slamseq_deep/process/quant/all_counts_rpm_xref.txt', samplesFile='/groups/zuber/zubarchive/USERS/Kimon/markus/OTI_slamseq_deep/description/covars.txt', resultsDir='/groups/zuber/zubarchive/USERS/Kimon/markus/OTI_slamseq_deep/results/quant/PCA', nidcols=3, idcol=2)
+# opt <- list(countsFile='/Volumes/groups/zuber/zubarchive/USERS/Kimon/anja/M9186_quantseq/process_quant/all_counts_rpm_xref.txt', samplesFile='/Volumes/groups/zuber/zubarchive/USERS/Kimon/anja/M9186_quantseq/description/covars.txt', resultsDir='/Volumes/groups/zuber/zubarchive/USERS/Kimon/anja/M9186_quantseq/results_quant/PCA', nidcols=3, idcol=2)
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
