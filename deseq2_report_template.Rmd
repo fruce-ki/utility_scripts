@@ -312,7 +312,7 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, p
 
 ```{r functionC}
 # Correlations
-my_pairwise_internal_corels <- function(mat = rpm, samples = row.names(colData(deobj)), method = "pearson", prefix=params$prefix, txs=3) {
+my_pairwise_internal_corels <- function(mat = rpm, samples = row.names(colData(deobj)), method = "pearson", prefix=file.path(params$baseDir, params$resultsDir, params$prefix), txs=3) {
   # Correlations
   cormat <- cor(mat, method=method)
   
@@ -589,7 +589,7 @@ my_pairwise_internal_corels <- function(mat = rpm, samples = row.names(colData(d
 <!--               load1=sel1, load2=sel2, load3=sel3, -->
 <!--               pc_1_2=pc12, pc_1_3=pc13, pc_3_2=pc32, -->
 <!--               pvar1=pvar1, pvar2=pvar2, -->
-<!--               pcor1=pcor[['dyna']], pcor2=pcor[['act1']] -->
+<!--               pcor1=pcor[['combo1']], pcor2=pcor[['act1']] -->
 <!--   )) -->
 <!-- } -->
 <!-- ``` -->
@@ -603,14 +603,16 @@ Correlations of the samples, based on the raw and the Variance-Stabilisation-Tra
 
 ```{r correlations, fig.height=7, fig.width=16}
 corels1 <- my_pairwise_internal_corels()
-print( corels1[[3]] )
+print( corels1[['combo1']] )
+print( corels1[['act1']] )
 ```
 
 ## RPM counts
 
 ```{r correlations2, fig.height=7, fig.width=16}
 corels2 <- my_pairwise_internal_corels(mat=rpm)
-print( corels1[[3]] )
+print( corels2[['combo1']] )
+print( corels2[['act1']] )
 ```
 
 
@@ -618,7 +620,8 @@ print( corels1[[3]] )
 
 ```{r correlations3, fig.height=7, fig.width=16}
 corels3 <- my_pairwise_internal_corels(mat = vstmat)
-print( corels1[[3]] )
+print( corels3[['combo1']] )
+print( corels3[['act1']] )
 ```
 
 
