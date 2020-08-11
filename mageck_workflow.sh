@@ -120,18 +120,18 @@ if [ $do_pre -eq 1 ]; then
 
     echo ''
     echo "Demultiplexing BAM using anchor sequence."
-    fileutilities.py T ${indir}/*.bam --loop srun ,--mem=50000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q \&
-    wait_for_jobs demultip
+    fileutilities.py T ${indir}/*.bam --loop sbatch ,-J demux ,--mem=50000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q
+    wait_for_jobs demux
 
     echo ''
     echo "FastQC (in the background)." # and don't wait for it. I don't need its output for a while.
 #   # module load fastqc/0.11.5-java-1.8.0_121
-    fileutilities.py T ${countsdir}/fastq/*/*.fqc --loop srun ,--mem-per-cpu=5000 ,--cpus-per-task 4 fastqc ,-q ,-t 4 ,-f fastq ,-o ${countsdir}/fastqc {abs} \&
+    fileutilities.py T ${countsdir}/fastq/*/ --dir fqc | fileutilities.py P --loop sbatch ,--mem-per-cpu=5000 ,--cpus-per-task 4 ,--wrap "'fastqc -q -t 4 -f fastq -o ${countsdir}/fastqc {abs}'"
 #   # module unload fastqc/0.11.5-java-1.8.0_121
 
     echo ''
     echo "Compressing FASTQ (in the background)."
-    fileutilities.py T ${countsdir}/fastq/*/*.fq --loop srun ,--mem=50000 gzip {abs} \&
+    fileutilities.py T ${countsdir}/fastq/*/ --dir fastq fq | fileutilities.py P --loop sbatch ,-J gzip ,--mem=50000 ,--wrap "'gzip {abs}'"
 
     echo ''
     echo "Guides library to FASTA."
@@ -150,13 +150,13 @@ if [ $do_pre -eq 1 ]; then
 
     echo ''
     echo "Bowtie2 aligning."
-    fileutilities.py T ${countsdir}/fastq/*/*.fq.gz --loop srun ,--mem=10000 ,--cpus-per-task=4 bowtie2 ,-x ${library/.txt/}  ,-U {abs} ,--threads 4 ,-L 20 ,--score-min 'C,0,-1' ,-N 0 ,--seed 42 '2>' ${countsdir}/aligned/${libname}/{bas}.log \> ${countsdir}/aligned/${libname}/{bas}.sam \&
+    fileutilities.py T ${countsdir}/fastq/*/ --dir fastq.gz fq.gz | fileutilities.py P --loop sbatch ,-J bowtie2 ,--mem=10000 ,--cpus-per-task=4 ,--wrap "'bowtie2 -x ${library/.txt/}  -U {abs} --threads 4 -L 20 --score-min C,0,\-1 -N 0 --seed 42 2> ${countsdir}/aligned/${libname}/{bas}.log > ${countsdir}/aligned/${libname}/{bas}.sam'"
     wait_for_jobs bowtie2
 
     echo ''
     echo "Quantifying with featureCounts."
-    fileutilities.py T ${countsdir}/aligned/${libname}/*.sam --loop srun ,--mem-per-cpu=5000 ,--cpus-per-task=4 featureCounts ,-T 4 ,-a ${library/.txt/.saf} ,-F SAF ,-o ${countsdir}/counts/${libname}/{bas}.txt {abs} \&
-    wait_for_jobs featureC
+    fileutilities.py T ${countsdir}/aligned/${libname}/ --dir sam | fileutilities.py P --loop sbatch ,-J fcount ,--mem-per-cpu=5000 ,--cpus-per-task=4 ,--wrap "'featureCounts -T 4 -a ${library/.txt/.saf} -F SAF -o ${countsdir}/counts/${libname}/{bas}.txt {abs}'"
+    wait_for_jobs fcount
 
     echo ''
     echo "Combining samples into one table."
@@ -169,7 +169,7 @@ if [ $do_pre -eq 1 ]; then
     echo ''
     echo "MultiQC"
     wait_for_jobs fastqc  # It should be long finished by now, but better ask.
-    srun multiqc -f -x *.run -o ${countsdir}/multiqc ${countsdir}/fastqc ${countsdir}/aligned/${libname} ${countsdir}/counts/${libname}
+    multiqc -f -x *.run -o ${countsdir}/multiqc ${countsdir}/fastqc ${countsdir}/aligned/${libname} ${countsdir}/counts/${libname}
 
     echo ''
     echo "Cleaning up intermediate files"
@@ -186,7 +186,8 @@ fi
 
 counts="${countsdir}/counts/${libname}/counts_mageck.txt"
 if [[ ! -f $counts ]]; then
-  exit 1 "Counts file does not exist."
+  echo "Counts file does not exist: ${counts}"
+  exit 1
 fi
 
 if [ $do_comparison -eq 1 ]; then
