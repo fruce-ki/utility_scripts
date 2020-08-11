@@ -239,7 +239,7 @@ def samPatternStats(pattern, bam='-', bco=-4, bcl=4, literal=True, mmCap=2, wild
 
 
 def fqPatternStats(pattern, fastq, bco=-4, bcl=4, literal=True, mmCap=2, wild='N', minFreq=0.01, filtered=False, nreads=None):
-    """Find a pattern's positions and flanking sequences in a BAM.
+    """Find a pattern's positions and flanking sequences in a FASTQ.
 
     Meant to be used to verify the position of a known spacer sequence and identify
     the demultiplexing barcodes adjacent to it.
