@@ -35,7 +35,7 @@ colour2hex <- function(namevector) { rgb( t(as.data.frame( lapply(namevector, fu
 showpalette <- function(p) {
   ggplot(data.frame(x=p, y=1), aes(p, y, fill=p)) +
     geom_bar(stat='identity') +
-    scale_fill_manual(values=p) +
+    scale_fill_identity() +
     theme_minimal() +
     theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
           legend.position = 'none')
@@ -52,7 +52,7 @@ showpalette( c("#000000", "#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442",
 ######################################
 # colnames and rownames yes, non-numeric columns no.
 # Requires a vector of sample names for the non-clustered plots.
-my_pairwise_internal_corels <- function(mat, samples, method = "pearson", prefix=params$prefix, txs=3) {
+my_pairwise_internal_corels <- function(mat = rpm, samples = row.names(colData(deobj)), method = "pearson", prefix=file.path(params$baseDir, params$resultsDir, params$prefix), txs=3) {
   # Correlations
   cormat <- cor(mat, method=method)
   
@@ -62,6 +62,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", prefix
   cormat <- cormat[samples, samples]                    # Supplied order
   cormat2 <- cormat                                     # Duplicate on which to delete the diagonal with original order.
   cormat3 <- cormat[rn[hcfit$order], rn[hcfit$order]]   # Duplicate on which to delete the diagonal with clustered order.
+  cormat4 <- cormat3
   
   # Delete diagonal half for the numeric labels.
   for (r in 1:nrow(cormat2)) {
@@ -71,10 +72,10 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", prefix
       }
     }
   }
-  for (r in 1:nrow(cormat3)) {
-    for (c in 1:ncol(cormat3)) {
+  for (r in 1:nrow(cormat4)) {
+    for (c in 1:ncol(cormat4)) {
       if (c <= r) {
-        cormat3[r, c] <- NA_real_
+        cormat4[r, c] <- NA_real_
       }
     }
   }
@@ -98,11 +99,21 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", prefix
   cormat3[, observation1 := factor(rn3, ordered=TRUE, levels=rn3)]
   cormat3 <- melt(cormat3, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
   cormat3[, observation2 := factor(observation2, ordered=TRUE, levels=rn3)]
-  cormat3 <- cormat3[!is.na(Correlation)]
+  
+  rn4 <- rownames(cormat4)
+  cormat4 <- as.data.table(cormat4)
+  cormat4[, observation1 := factor(rn3, ordered=TRUE, levels=rn4)]
+  cormat4 <- melt(cormat4, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
+  cormat4[, observation2 := factor(observation2, ordered=TRUE, levels=rn4)]
+  cormat4 <- cormat4[!is.na(Correlation)]
+  
+  # Text colour switch for the dynamic range
+  m <- min(cormat4$Correlation, na.rm=TRUE)
+  M <- max(cormat4$Correlation, na.rm=TRUE)
+  colourswitch <- c( m + 0.49 * (M-m),  m + 0.51 * (M-m) ) 
   
   
-  # Full correlation range (-1, 1), In supplied custom order.
-  # Full square pattern, no values.
+  # Square. Custom order. No values. Full range.
   p1 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
     scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
@@ -110,8 +121,15 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", prefix
     theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
           panel.grid = element_blank() )
   
-  # Full correlation range (-1, 1). In supplied custom order.
-  # Diagonal pattern, with values.
+  # Square. Custom order. No values. Dynamic range.
+  p1a <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+    theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
+          panel.grid = element_blank() )
+  
+  # Triangle. Custom order. With values. Full range.
   p2 <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
     geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.70 & Correlation <= 0.70 ), size=rel(txs)) +
@@ -122,8 +140,18 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", prefix
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
   
-  # Full correlation range (-1, 1). In supplied custom order.
-  # Full square pattern, with diagonal values.
+  # Triangle. Custom order. With values. Dynamic range.
+  p2a <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
+    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "transparent" ) +
+    scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
+    scale_x_discrete(position = "top") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+  
+  # Square. Custom order. With values. Full range.
   p12 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
     geom_text(data=cormat2, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.70 & Correlation <= 0.70 ), size=rel(txs)) +
@@ -134,24 +162,26 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", prefix
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
   
+  # Square. Custom order. With values. Dyhamic range.
+  p12a <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(data=cormat2, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
+    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "transparent" ) +
+    scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
   
-  # Dynamic correlation range, In clustered order.
-  # Full square pattern, no values.
-  cormat[, observation1 := factor(observation1, ordered=TRUE, levels=rn3)]
-  cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rn3)]
-  p3 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+  # Square. Clustered order. No values. Dyhamic range.
+  p3 <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
     scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
     theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
           panel.grid = element_blank() )
   
-  # Dynamic correlation range, In clustered order.
-  # Diagonal pattern, with values.
-  m <- min(cormat3$Correlation, na.rm=TRUE)
-  M <- max(cormat3$Correlation, na.rm=TRUE)
-  colourswitch <- c( m + 0.49 * (M-m),  m + 0.51 * (M-m) ) 
-  p4 <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
+  # Triangle. Clustered order. with values. Dyhamic range.
+  p4 <- ggplot(cormat4, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
     geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
     scale_x_discrete(position = "top") +
@@ -161,13 +191,10 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", prefix
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
   
-  # Dynamic correlation range, In clustered order.
-  # Full square pattern, diagonal values.
-  cormat[, observation1 := factor(observation1, ordered=TRUE, levels=rn3)]
-  cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rn3)]
-  p34 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+  # Square. Clustered order. With values. Dyhamic range.
+  p34 <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
-    geom_text(data=cormat3, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +scale_x_discrete(position = "top") +
+    geom_text(data=cormat4, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +scale_x_discrete(position = "top") +
     scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
     scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
@@ -180,7 +207,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", prefix
          sep='\t', quote = FALSE, row.names = FALSE, col.names = TRUE)
   
   
-  return( list(full=p1, dyna=p2, combo1=p12, act1=p3, act2=p4, combo2=p34) )
+  return( list(full=p1, dyna=p2, combo1=p12, act1=p3, act2=p4, combo2=p34, full2=p1a, dyna2=p2a, combo3=p12a) )
 }
 
 
@@ -389,3 +416,46 @@ my_cont_ggpairs <- function(df, method="lm", info="lmrsq", xtrans=NULL, ytrans=N
     theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5))
   return(p)
 }
+
+
+
+
+## GO enrichment
+################
+
+do_go <- function(de, db, ntop, onto){
+  if (any(de$meetthresh)) {
+    geneList <- factor(as.integer(de$meetthresh & de$istop))
+    names(geneList) <- de$name
+
+    GOdata <- new("topGOdata",
+                  description = paste(onto, db),
+                  ontology = onto,
+                  allGenes = geneList,
+                  nodeSize = 10,
+                  annot = annFUN.org,
+                  mapping = db,
+                  ID = "ensembl")
+    resFish <- runTest(GOdata, algorithm = "classic", statistic = "fisher")
+    allRes <- GenTable(GOdata, classicFisher = resFish, ranksOf = "classicFisher", topNodes = ntop)
+
+    return(allRes[allRes$classicFisher < 0.05,])
+  }
+}
+
+# for (res  in resall){
+#   # GO term enrichment
+#   print(paste(res[["contrast"]], "-- GO Biological Process"))
+#   go1 <- do_go(res[["shrunkLFC"]], 'org.Mm.eg', ntop, 'BP')
+#   print(go1)
+#   print(paste(res[["contrast"]], "-- GO Molecular Function"))
+#   go2 <- do_go(res[["shrunkLFC"]], 'org.Mm.eg', ntop, 'MF')
+#   print(go2)
+#   print(paste(res[["contrast"]], "-- GO Cellular Component"))
+#   go3 <- do_go(res[["shrunkLFC"]], 'org.Mm.eg', ntop, 'CC')
+#   print(go3)
+# }
+
+
+
+
