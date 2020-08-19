@@ -394,7 +394,7 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, anchorS
     if lane[(len(lane)-4):len(lane)] == '.bam':
         lane = lane[0:(len(lane)-4)]         # crop .bam suffix
     # Demultiplexing dictionaries
-    demuxS = dict()  # demuxS[barcode] = sample
+    demuxS1 = dict()  # demuxS1[barcode] = sample
     spacerP = list() # spacerP = [positions]
     demuxB = dict()  # demuxB[position] = [barcodes]
     withPos = False  # Explicit anchor positions provided
@@ -410,7 +410,7 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, anchorS
                 if 'position' in row.keys():
                     exit("The 'position' field is deprecated. It should now be named 'anchor_pos'.")
             if row['lane'] == lane or row['lane'] == lane + '.bam':    # Only interested in the details for the lane being demultiplexed by this instance of the script.
-                demuxS[ row['barcode'] ] = row['sample_name']
+                demuxS1[ row['barcode'] ] = row['sample_name']
                 if withPos:
                     pos = int(row['anchor_pos']) - 1  # 0-based indexing
                     if pos < 0:
@@ -429,26 +429,26 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, anchorS
                             demuxB[pos] = list()
                         demuxB[pos].append(row['barcode'])
     # Maybe the lane specifications did not match?
-    if len(demuxS) == 0:
+    if len(demuxS1) == 0:
         raise Exception("It looks like no info was parsed from the barcodes table. The 'lane' column of the barcodes table include " + lane + ' or ' + lane + '.bam ?')
     # Open output files
     fqOut = dict()
-    for barcode in demuxS.keys():
+    for barcode in demuxS1.keys():
         try:
             os.makedirs(outputdir)
         except OSError:   # path already exists. Hopefully you have permission to write where you want to, so that won't be the cause.
             pass
-        file = lane + '_' + demuxS[barcode] + '.fq'
-        fqOut[demuxS[barcode]] = open(os.path.join(outputdir, file), "w", buffering=10000000) # 10MB
+        file = lane + '_' + demuxS1[barcode] + '.fq'
+        fqOut[demuxS1[barcode]] = open(os.path.join(outputdir, file), "w", buffering=10000000) # 10MB
     unknown = None
     if unmatched:
         unknown = open(os.path.join(outputdir, lane + '_unmatched.fq'), "w", buffering=10000000) # 10MB
     fqcOut = dict()
     unknownqc = None
     if trimQC:
-        for barcode in demuxS.keys():
-            file = lane + '_' + demuxS[barcode] + '.fqc'
-            fqcOut[demuxS[barcode]] = open(os.path.join(outputdir, file), "w", buffering=10000000) # 10MB
+        for barcode in demuxS1.keys():
+            file = lane + '_' + demuxS1[barcode] + '.fqc'
+            fqcOut[demuxS1[barcode]] = open(os.path.join(outputdir, file), "w", buffering=10000000) # 10MB
         if unmatched:
             unknownqc = open(os.path.join(outputdir, lane + '_unmatched.fqc'), "w", buffering=10000000) # 10MB
 
@@ -498,13 +498,13 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, anchorS
                         if lentrim <= len(seq):    # The guide is not cropped by read length
                             bcFound = True
                             # Print FASTQ entry
-                            fqOut[demuxS[bc]].write('@' + name + "\n" + seq[trimPos:lentrim] + "\n+\n" + qual[trimPos:lentrim] + "\n")
+                            fqOut[demuxS1[bc]].write('@' + name + "\n" + seq[trimPos:lentrim] + "\n+\n" + qual[trimPos:lentrim] + "\n")
                             # Print partly trimmed FASTQ entry for FastQC
                             if trimQC:
                                 qctrimPos = min(bcPos, anchorFoundAt)
-                                fqcOut[demuxS[bc]].write('@' + name + "\n" + seq[qctrimPos:lentrim] + "\n+\n" + qual[qctrimPos:lentrim] + "\n")
+                                fqcOut[demuxS1[bc]].write('@' + name + "\n" + seq[qctrimPos:lentrim] + "\n+\n" + qual[qctrimPos:lentrim] + "\n")
                             # Keep count
-                            counter.update(['assigned', demuxS[bc]])
+                            counter.update(['assigned', demuxS1[bc]])
             if (not bcFound) and unmatched:
                 unknown.write('@' + name + "\n" + seq + "\n+\n" + qual + "\n")
                 counter.update(['BC unmatched'])
@@ -535,7 +535,7 @@ def demuxWAnchor(bam, barcodes, outputdir='./process/fastq', tally=None, anchorS
 
 
 def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=33, unmatched=False):
-    """Demultiplexing BAM file according to BC tag field.
+    """Demultiplexing BAM file according to BC and B2 tag fields.
 
     No trimming is performed.
     Keeping an index of all readname-barcode pairs currently takes up a lot of memory, try 10x the GB size of the BAM.
@@ -543,6 +543,7 @@ def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=3
     Args:
         bam :           Input BAM file. Single-end reads.
         barcodes:       Tabbed text file: lane, sample_name, barcode.
+                        For dual barcodes: lane, sample_name, bar1code, bar2code.
         outputdir :     Output directory where demultiplexed BAM files will be saved.
         tally :         File to write a tally of the reads assigned to each sample. (Default STDOUT)
         qualOffset :    Base-call quality offset for conversion from pysam to fastq.
@@ -560,31 +561,41 @@ def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=3
     if lane[(len(lane)-4):len(lane)] == '.bam':
         lane = lane[0:(len(lane)-4)]         # crop .bam suffix
     # Demultiplexing dictionaries
-    demuxS = dict()  # demuxS[barcode] = sample
+    demuxS1 = dict()  # demuxS1[barcode] = sample
+    demuxS2 = dict()  # demuxS2[barcode] = sample
     # Parse barcodes
+    dual = False
     with open(barcodes, "rt") as bcFile:
         csvreader = csv.DictReader(bcFile, delimiter="\t")
-        for i, row in enumerate(csvreader):
-            if i == 0:
-                if not ("lane" in row.keys() or "sample_name" in row.keys() or "barcode" in row.keys()):
-                    raise Exception("Error: 'lane', 'sample_name', or 'barcode' field is missing from the barcodes table.")
-            if row['lane'] == lane or row['lane'] == lane + '.bam':    # Only interested in the details for the lane being demultiplexed by this instance of the script.
-                demuxS[ row['barcode'] ] = row['sample_name']
+        if not ("lane" in csvreader.fieldnames or "sample_name" in csvreader.fieldnames):
+            raise Exception("Error: 'lane' or 'sample_name' field is missing from the barcodes table.")
+        if 'barcode' in csvreader.fieldnames:
+            for i, row in enumerate(csvreader):
+                if row['lane'] == lane or row['lane'] == lane + '.bam':    # Only interested in the details for the lane being demultiplexed by this instance of the script.
+                    demuxS1[ row['barcode'] ] = row['sample_name']
+        elif 'bar2code' in csvreader.fieldnames and 'bar1code' in csvreader.fieldnames:
+            dual = True
+            for i, row in enumerate(csvreader):
+                if row['lane'] == lane or row['lane'] == lane + '.bam':    # Only interested in the details for the lane being demultiplexed by this instance of the script.
+                    demuxS1[ row['bar1code'] ] = row['sample_name']
+                    demuxS2[ row['bar2code'] ] = row['sample_name']
+        else:
+            raise Exception("Could not determine barcode column(s).")
     # Maybe the lane specifications did not match?
-    if len(demuxS) == 0:
+    if len(demuxS1) == 0:
         raise Exception("It looks like no info was parsed from the barcodes table. Does the 'lane' column of the barcodes table include " + lane + ' or ' + lane + '.bam ?')
 
     # Open input. Need it as template for the output files.
     samin = pysam.AlignmentFile(bam, "rb", check_sq=False)
     # Open output files
+    try:
+        os.makedirs(outputdir)
+    except OSError:   # path already exists. Hopefully you have permission to write where you want to.
+        pass
     samOut = dict()
-    for barcode in demuxS.keys():
-        try:
-            os.makedirs(outputdir)
-        except OSError:   # path already exists. Hopefully you have permission to write where you want to, so that won't be the cause.
-            pass
-        file = demuxS[barcode] + '_' + barcode + '_' + lane + '.bam'
-        samOut[demuxS[barcode]] = pysam.AlignmentFile(os.path.join(outputdir, file), "wb", template=samin)
+    for barcode in demuxS1.keys():
+        file = demuxS1[barcode] + '_' + barcode + '.bam'
+        samOut[demuxS1[barcode]] = pysam.AlignmentFile(os.path.join(outputdir, file), "wb", template=samin)
     unknown = None
     if unmatched:
         unknown = pysam.AlignmentFile(os.path.join(outputdir, lane + '_unmatched.bam'), "wb", template=samin)
@@ -592,7 +603,6 @@ def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=3
     # Parse SAM
     seen = dict()           # Keep track of seen fragment names (for paired-end, where only the first read may have a BC tag)
     counter = Counter()     # Report the numbers of reads
-    k = demuxS.keys()
     for r in samin:
         counter.update(['total'])
         if counter['total'] % 10000000 == 0:
@@ -602,17 +612,27 @@ def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=3
         seq = r.query_sequence
         quals = r.query_qualities
         bc = None
-        if r.has_tag('BC'):         # probably first read of the fragment. Consider pre-sorting BAM by fragment name.
+        b2 = None
+        if r.has_tag('BC'):         # probably first read of the fragment.
             bc = r.get_tag('BC')
-            seen[name] = bc
         else:
             bc = seen[name]        # second/later read. Use BC from first read.
+        if r.has_tag('B2'):       # secondary barcode, from dual indexing
+            b2 = r.get_tag('B2')
+        elif dual:                  # only try to fetch prexisting secondary barcode if dual indexing
+            b2 = seen[name]
+        # Sample assigned to 2nd barcode, for comparison to 1st barcode.
+        sample = None
+        if dual:
+            for b in demuxS2.keys(): # Allow for the annotated barcode in the table to be truncated relative to the actual barcode recorded in the BAM. No mismatches.
+                if b in b2:
+                    sample = demuxS2[b]
         # Print BAM entry
-        for b in k:     # Allow for the annotated barcode in the table to be truncated relative to the actual barcode recorded in the BAM. No mismatches.
-            if b in bc:
-                samOut[demuxS[b]].write(r)
+        for b in demuxS1.keys():     # Allow for the annotated barcode in the table to be truncated relative to the actual barcode recorded in the BAM. No mismatches.
+            if b in bc and ((not dual) or (dual and sample == demuxS1[b])):  # in dual, both barcodes must point to the same sample, thus excluding barcode drifts.
+                samOut[demuxS1[b]].write(r)
                 # Keep count
-                counter.update(['assigned', demuxS[b]])
+                counter.update(['assigned', demuxS1[b]])
                 break
             else:
                 if unmatched:
