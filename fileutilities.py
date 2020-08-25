@@ -978,7 +978,7 @@ class FilesList(list):
     Attributes defined here:
         aliases = [] : Practical aliases for the full file-paths.
     """
-    def __init__(self, files=None, aliases=None, fromtuples=None, verbatim=True):
+    def __init__(self, files=None, aliases=None, fromtuples=None):
         """Construct an instance of the FilesList.
 
         A FilesList can be created:
@@ -988,7 +988,6 @@ class FilesList(list):
         - from a list of (file, alias) tuples.
 
         Args:
-            verbatim(bool): Whether to skip path pre-preocessing. (Default True)
             files[str]: A list of files. (Default None)
             aliases[str]: A list of aliases. (Default None)
             fromtuples[(str,str)]: A list of tuples (file, alias). (Default
@@ -1010,8 +1009,7 @@ class FilesList(list):
             aliases = []
         # Assign default aliases to be same as files. Expand file paths.
         if files is not None:
-            if not verbatim:
-                files = expand_fpaths(files)
+            files = expand_fpaths(files)
             if not aliases:
                 for f in files:
                     aliases.append(self.autoalias(f))
@@ -1075,7 +1073,7 @@ class FilesList(list):
         """
         return (self[loc], self.aliases[loc])
 
-    def append(self, myfile, myalias=None, verbatim=True):
+    def append(self, myfile, myalias=None):
         """Appends value to both the paths list and the aliases list.
 
         This method overrides the built-in append() of list. It is backwards
@@ -1088,18 +1086,16 @@ class FilesList(list):
         Args:
             myfile(str): File (path will be expanded).
             myalias(str): Alias for the file (Default None).
-            verbatim(bool): Do not pre-process path for the target value. (Default True)
         """
         if myfile is not None:
-            if not verbatim:
-                myfile = expand_fpaths([myfile])[0]
+            myfile = expand_fpaths([myfile])[0]
         super(FilesList, self).append(myfile)
         if not myalias:
             myalias = self.autoalias(myfile)
         self.aliases.append(myalias)
         self.aliases = autonumerate(self.aliases)
 
-    def populate_from_files(self, myfiles, colSep="\t", verbatim=True, alias_verbatim=True):
+    def populate_from_files(self, myfiles, colSep="\t", alias_verbatim=False):
         """Parse the list of files from one or multiple text files.
 
         Read in multiple lists of files from text and append them to the
@@ -1122,7 +1118,7 @@ class FilesList(list):
         Args:
             file[str]: A list of text files each containing a list of files.
             colSep(str): Column separator. (Default "\\t")
-            verbatim(bool): Do not pre-process paths for the target values. (Default True)
+            alias_verbatim(bool): Don't auto-enumerate duplicate aliases. (Default False)
         Returns:
             FilesList: Returns self, to facilitate instantiation shortcuts.
         """
@@ -1147,14 +1143,13 @@ class FilesList(list):
                         else:
                             self.aliases.append(self.autoalias(fields[0]))
         # Expand to absolute paths and add to main self list.
-        if not verbatim:
-            paths = expand_fpaths(paths)
+        paths = expand_fpaths(paths)
         self.extend(paths)
         if not alias_verbatim:
             self.aliases = autonumerate(self.aliases)
         return self
 
-    def populate_from_directories(self, dirpaths, patterns=None, verbatim=True, alias_verbatim=True):
+    def populate_from_directories(self, dirpaths, patterns=None, alias_verbatim=False):
         """Get files based on naming patterns from within a list of directories.
 
         Useful for selecting among files that follow a naming convention. The
@@ -1172,7 +1167,7 @@ class FilesList(list):
             patterns[str]: A list of regex strings. Only files matching at least
                         one of these will be returned. The patterns will be
                         matched anywhere in the filenames.
-            verbatim(bool): Do not pre-process paths for the target values. (Default True)
+            alias_verbatim(bool): Do not auto-enumerate duplicate aliases. (Default False)
         Returns:
             FilesList: Returns self, to facilitate instantiation shortcuts.
         """
@@ -1276,7 +1271,7 @@ def main(args):
     parser.add_argument('-R','--expand_ranges', action='store_true',
                                 help=" If numeric ranges exist among the targets expand them as individual vlaues. Ranges must be in from:to format, inclusive of both end values. (Default False)")
     parser.add_argument('-V','--verbatim', action='store_true',
-                                help=" Preserve the target values from a list file, do not try to expand them into absolute paths. (Default impute absolute paths)")
+                                help="Do not enumerate duplicate values in the alias column of list input.")
     # General tasks.
     parser.add_argument('--dir', type=str, nargs='*',
                                 help=" List the contents of the target paths. Full absolute file paths are returned. Each file is also given an alias. Supplying an optional list of regex patterns enables filtering of the result.")
@@ -1328,7 +1323,7 @@ def main(args):
                     flist.append(fields[0])
     elif params.INPUTTYPE == 'L':
         # Create the FilesList, by appending the contents of all provided lists.
-        flist = FilesList().populate_from_files(targets, verbatim=params.verbatim, alias_verbatim=params.verbatim)
+        flist = FilesList().populate_from_files(targets, alias_verbatim=params.verbatim)
     elif params.INPUTTYPE == 'T':
         # Create the FilesList by supplying a direct list of files.
         flist = FilesList(targets, verbatim=params.verbatim)
