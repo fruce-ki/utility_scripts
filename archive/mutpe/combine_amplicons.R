@@ -6,7 +6,7 @@ library(data.table)
 # The output is in .stats format that can be processed by mutpe
 
 args <- commandArgs(trailingOnly = TRUE)
-# args <- c('Ramos', '/Volumes/groups/pavri/Kimon/ursi/Ramos_MutPE/aux/merge_amplicons.txt')
+# args <- c('Ramos', '/Volumes/groups/pavri/Kimon/ursi/Ramos_MutPE/aux/merge_amplicons2.txt')
 
 vdj = args[1]
 mergers <- fread(args[2], header=FALSE)
@@ -22,24 +22,26 @@ if (vdj == 'B18') {
 	stop('Unknown view window')
 }
 
-# i <- 1
 for (i in 1:nrow(mergers)) {
+  # i <- 1
 	files <- as.character(mergers[i,])
 	outfile <- files[1]
 	files <- files[2:length(files)]
 	# files <- paste0('/Volumes', files)
 	# Get rid of missing amplicon data
 	files <- files[file.exists(files)]
-	amplicons <- amplicons[file.exists(files), ]
-	row.names(amplicons) <- files
+	amps <- amplicons[file.exists(files), ]
+	row.names(amps) <- files
 	
+	DT <- NULL
 	if (length(files) > 0){
 		# Constrain each file to the amplicon coordinates (get rid of off-target alignments),
 		# and then concatenate
 		DT <- rbindlist(lapply(files, 
 													 function(x) { 
+													    # x <- files[1]
 													 		tmp <- fread(x)
-													 		tmp[pos >= amplicons[x, "xleft"] & pos <= amplicons[x, "xright"]]
+													 		tmp[pos >= amps[x, "xleft"] & pos <= amps[x, "xright"]]
 													 	}))
 		setorder(DT, pos)
 		# upgrade integer columns to float

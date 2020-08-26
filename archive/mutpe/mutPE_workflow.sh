@@ -42,9 +42,10 @@ doviz=1
 dopost=1
 allowoutties=0
 vdj="B18"       # Default
+allelecutoff=1
 
 # Parse options.
-while getopts 'd:D:b:p:r:a:i:o:F:m:M:L:l:x:X:H:R:f:S:V:OPUsf12345' flag; do
+while getopts 'd:D:b:p:r:a:i:o:F:m:M:L:l:x:X:H:R:f:S:V:A:OPUsf12345' flag; do
   case "${flag}" in
     d) base="${OPTARG}" ;;        # Base dir
     b) run="${OPTARG}" ;;         # Batch subdir. If defined, it will be appended to $data, $process and $results
@@ -56,6 +57,7 @@ while getopts 'd:D:b:p:r:a:i:o:F:m:M:L:l:x:X:H:R:f:S:V:OPUsf12345' flag; do
     o) offsets="${OPTARG}" ;;     # Reference deletions: "REF:START:LENGTH" ie. "HDR2:2301:6,HDR4:2301:6"
     F) fastasuffix="${OPTARG}";;  # Reference fasta suffix. (assumes the prefix is the same as the bowtie2 index prefix)
     R) refLen="${OPTARG}";;
+    A) allelecutoff="${OPTARG}";; # Ignore mutations with frequencies higher than this, as likely clonal SNPs.
     f) mergelen="${OPTARG}";;
     m) minOver="${OPTARG}" ;;
     M) maxOver="${OPTARG}" ;;
@@ -367,10 +369,10 @@ fi
 if [[ "$doviz" -eq 1 ]]; then
     echo ""
     echo "Visualising *point.stats into ${results}/${run//\//_}*.html/pdf"
-    srun --ntasks=1 --mpi=none ${XDIR}/mutPE_mutation-stats_viz.R ${base}/${results} ${run/\//_}_point NULL yes no $offsets $vdj ${base}/${process}/*.point.stats
+    srun --ntasks=1 --mpi=none ${XDIR}/mutPE_mutation-stats_viz.R ${base}/${results} ${run/\//_}_point NULL yes no $offsets $vdj $allelecutoff ${base}/${process}/*.point.stats
     echo "Visualising *indel.stats into ${results}/${run//\//_}*.html/pdf"
     # Output only the unstratified indels. It doesn't make much sense to stratify indels by point mutation load.
-    srun --ntasks=1 --mpi=none ${XDIR}/mutPE_mutation-stats_viz.R ${base}/${results} ${run/\//_}_indel NULL yes no $offsets $vdj ${base}/${process}/*aln.indel.stats
+    srun --ntasks=1 --mpi=none ${XDIR}/mutPE_mutation-stats_viz.R ${base}/${results} ${run/\//_}_indel NULL yes no $offsets $vdj $allelecutoff ${base}/${process}/*aln.indel.stats
     echo "BedGraphs for ${results}"
     # Add track header
     ${XDIR}/fileutilities.py T ${base}/${process} --dir bedGraph | srun --ntasks=1 --mpi=none ${XDIR}/fileutilities.py P --loop mv {abs} ${base}/${process}/tmp \&\& printf '"track type=bedGraph name=%s\n"' "{ali}" \> {abs} \&\& cat ${base}/${process}/tmp \>\> {abs}
@@ -386,7 +388,7 @@ if [[ "$doviz" -eq 1 ]]; then
         # So I have to keep some more of the filename, even though it's repetitive.
         srun --ntasks=1 --mpi=none ${XDIR}/fileutilities.py L $subs -V --loop ${XDIR}/fileutilities.py T point 1-1.point 2-2.point 3-3.point 4-4.point 5-15.point 16-30.point ,--loop ${XDIR}/mutPE_mutation-stats_substract.R ${base}/${process}/substractions/\$\(basename {abs}\)_\$\(basename {ali}\).{{val}}.stats {abs}.aln.{{val}}.stats {ali}.aln.{{val}}.stats
         echo "Visualising substractions for ${results}"
-        srun --ntasks=1 --mpi=none ${XDIR}/mutPE_mutation-stats_viz.R ${base}/${results}/substractions ${run/\//_}_substracted NULL yes no $offsets $vdj ${base}/${process}/substractions/*.stats
+        srun --ntasks=1 --mpi=none ${XDIR}/mutPE_mutation-stats_viz.R ${base}/${results}/substractions ${run/\//_}_substracted NULL yes no $offsets $vdj $allelecutoff ${base}/${process}/substractions/*.stats
         echo "BedGraphs for ${results}/substractions"
         ${XDIR}/fileutilities.py T ${base}/${process}/substractions --dir bedGraph | srun --ntasks=1 --mpi=none ${XDIR}/fileutilities.py P --loop mv {abs} ${base}/${process}/substractions/tmp \&\& printf '"track type=bedGraph name=%s\n"' "{ali}" \> {abs} \&\& cat ${base}/${process}/substractions/tmp \>\> {abs}
         mv ${base}/${process}/substractions/*point*bedGraph ${base}/${results}/substractions/

@@ -1326,7 +1326,7 @@ def main(args):
         flist = FilesList().populate_from_files(targets, alias_verbatim=params.verbatim)
     elif params.INPUTTYPE == 'T':
         # Create the FilesList by supplying a direct list of files.
-        flist = FilesList(targets, verbatim=params.verbatim)
+        flist = FilesList(targets)
     elif params.INPUTTYPE == 'D':
         # Data will be read from STDIN. No files needed. Make an empty list.
         # Not all functions will switch to STDIN given this. Several will simply do nothing.

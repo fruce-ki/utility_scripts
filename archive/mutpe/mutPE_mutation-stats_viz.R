@@ -13,10 +13,7 @@ library(plotly)
 library(patchwork)
 
 args <- commandArgs(trailingOnly = TRUE)
-# args <- c('~/', 'test', 'NULL', 'no', 'yes', 'HDR2:2301:6', 'B18', '/Volumes/groups/pavri/Kimon/ursi/mutPEseq/round5/process_vdj/in-vitro/HDR2/substractions/86740_B18_C2_s1_86732_B18_C2_r1.point.stats')
-# args <- c('~/', 'test', 'NULL', 'no', 'no', 'HDR2:2301:6', 'B18', '/groups/pavri/Kimon/ursi/mutPEseq/round5/process_vdj/in-vitro/HDR2/substractions/86740_B18_C2_s1_86732_B18_C2_r1.point.stats')
-# args <- c('~/', 'test', 'NULL', 'no', 'yes', '-:0:0', 'Ramos3', '/Volumes/groups/pavri/Kimon/ursi/Ramos_MutPE/process_vdj/vdj3/56618_VDJ3_shRenilla.aln.point.stats')
-
+# args <- c('~/', 'test', 'NULL', 'yes', 'no', '-:0:0', 'Ramos', '0.3', '/Volumes/groups/pavri/Kimon/ursi/Ramos_MutPE/process_vdj/mergers/88025-VDJ1_88034-VDJ2_88043-VDJ3_A9_renilla.aln.2-2.point.stats')
 
 trimmedstart <- 1             # shorten reference name. Keep from here
 trimmedend <- 20              # shorten reference name. Keep to here
@@ -28,7 +25,8 @@ dobars <- args[5] == "yes"    # 'yes'/'no'. No will show only the pileup plots. 
 offsets <- args[6]            # Correct for deletions in references. "REF:START:LENGTH,REF:START:LENGTH" ie. "HDR2:280:6"
                               # For no corrections needed you can use "-:0:0". REF will be grepl'ed.
 vdj <- args[7]                # select for predefined ranges
-statsfiles <- args[8:length(args)]       # TSV input files: seq \t pos \t type \t count \t depth
+allelecutoff <- as.numeric(args[8])        # Ignore mutations greater than 30% of coverage.
+statsfiles <- args[9:length(args)]       # TSV input files: seq \t pos \t type \t count \t depth
 
 covfilter <- 100    # min read count per position
 cntfilter <- 30    # min mutated read count per peak
@@ -91,9 +89,10 @@ if (vdj == 'B18' || vdj == 'B18_1' || vdj == 'B18_1a' || vdj == 'B18_1b') {
 names(bed) <- c('chr', 'xleft', 'xright', 'seq')
 bed[, xleft := xleft + 1]   # Convert coordinate ranges from 0-based right-open to 1-based right-closed
 bed[, xleft := xleft - 0.3] # Pad segment ends to more closely line up with bar edges rather than centres
-bed[, xrightt := xright + 0.3]
+bed[, xright := xright + 0.3]
 warmspots <- unique(bed[!grepl('[Aa][Gg][Cc][Tt]', seq, perl=TRUE), .(xleft, xright)])
 hotspots <- unique(bed[grepl('[Aa][Gg][Cc][Tt]', seq, perl=TRUE), .(xleft, xright)]) # avoiding duplicate matches for palindromes
+bed <- rbind(hotspots, warmspots)
 
 # Crashes are silent and mysterious because of the open PDF output file.
 # So I have ot make checks before opening the PDF stream.
@@ -119,12 +118,15 @@ mega=data.table(chr=NA_character_,
                 type=NA_character_,
                 count=NA_integer_,
                 depth=NA_integer_,
-                seq=NA_character_,
                 newpos=NA_real_,
+                seq=NA_character_,
                 mutated=NA,
-                aggrcount=NA_real_,
                 freq=NA_real_,
+                aggrcount=NA_real_,
                 aggrfreq=NA_real_,
+                in_pattern=NA,
+                was=NA_character_,
+                became=NA_character_,
                 trusty=NA,
                 aggrtrusty=NA,
                 flag=NA,
@@ -132,6 +134,8 @@ mega=data.table(chr=NA_character_,
 
 # pdf('~/test.pdf', width=12, height=10)
 pdf(file.path(outdir, paste0(prefix, '.pdf')), width=12, height=10)
+mtxf <- file.path(outdir, paste0(prefix, '_matrices.txt'))
+cat('', file=mtxf)
 
 counts <- data.table(file=statsfiles, max_coverage=NA_real_, min_coverage=NA_real_, mean_coverage=NA_real_, median_coverage=NA_real_)
 setkey(counts, file)
@@ -190,19 +194,6 @@ for (sf in statsfiles){
     posdata[grepl('-', type, fixed=TRUE), type := 'del']
   }
 
-  
-  # If there is nothing to show, don't try to. Not worth the code gymnastics to output blank plots.
-  if(isindel){
-    if(all(posdata[type == '-', count == 0])) {
-      message(paste("No indels found in ", sf))
-      next
-    }
-  } else {
-    if(all(posdata$type == 'ref')) {
-      message(paste("No mutations found in ", sf))
-      next
-    }
-  }
 
   
   # Fix number, order and colour of categories for point mutations and combined files.
@@ -231,14 +222,72 @@ for (sf in statsfiles){
   }
   posdata[, type := ordered(type, levels=levvec)]
 
-  # Calculate frequencies and aggregate frequencies by position
+  # Calculate frequencies 
   posdata[, mutated := count != 0 & (type != 'ref' | isindel)]       # There are no reference entries in the dedicated indel file
-  posdata[(mutated), aggrcount := sum(count), by=c('seq', 'newpos')]    # Aggrecated mutation count (all mutation types per position)
-  posdata[is.na(aggrcount), aggrcount := 0]
   posdata[(mutated), freq := count / depth]
   posdata[is.na(freq), freq := 0]
+  
+  # Remove mutations with high frequencies, as likely clonal SNPs.
+  posdata <- posdata[!mutated | (mutated & freq <= allelecutoff), ]
+  
+  # If there is nothing to show, don't try to. Not worth the code gymnastics to output blank plots.
+  if(isindel){
+    if(all(posdata[type == '-', count == 0])) {
+      message(paste("No indels found in ", sf))
+      next
+    }
+  } else {
+    if(all(posdata$type == 'ref')) {
+      message(paste("No mutations found in ", sf))
+      next
+    }
+  }
+  
+  # Aggregate frequencies by position
+  posdata[(mutated), aggrcount := sum(count), by=c('seq', 'newpos')]    # Aggrecated mutation count (all mutation types per position)
+  posdata[is.na(aggrcount), aggrcount := 0]
   posdata[, aggrfreq := aggrcount / depth]
 
+  # Is it in a hotspot?
+  is_in_pattern <- function(p) {
+    # p <- 2190   # p <- 2188
+    any( apply(bed[, .(xleft, xright)], 1, function(tuple){
+      p > tuple['xleft'] && p < tuple['xright']
+    }) )
+  }
+  posdata[, in_pattern := vapply(pos, is_in_pattern, logical(1))]
+  # Overall mutations
+  posdata[grepl('>', type) & !grepl('N>', type), c('was', 'became') := list(substr(type, start=1, stop=1), substr(type, start=3, stop=3))]
+  contingency1 <- data.frame(`from/to`=c('A', 'T', 'G', 'C'),
+                             A=c(0,
+                                 sum(posdata[mutated & was == 'A' & became == 'T', count]),
+                                 sum(posdata[mutated & was == 'A' & became == 'G', count]),
+                                 sum(posdata[mutated & was == 'A' & became == 'C', count])),
+                             T=c(sum(posdata[mutated & was == 'T' & became == 'A', count]),
+                                 0,
+                                 sum(posdata[mutated & was == 'T' & became == 'G', count]),
+                                 sum(posdata[mutated & was == 'T' & became == 'C', count])),
+                             G=c(sum(posdata[mutated & was == 'G' & became == 'A', count]),
+                                 sum(posdata[mutated & was == 'G' & became == 'T', count]),
+                                 0,
+                                 sum(posdata[mutated & was == 'G' & became == 'C', count])),
+                             C=c(sum(posdata[mutated & was == 'C' & became == 'A', count]),
+                                 sum(posdata[mutated & was == 'C' & became == 'T', count]),
+                                 sum(posdata[mutated & was == 'C' & became == 'G', count]),
+                                 0) )
+  # Potential AIDER targets
+  contingency2 <- data.frame(in_patt = sum(posdata[mutated & in_pattern & was %in% c('C', 'G'), count]),
+                             out_patt = sum(posdata[mutated & !in_pattern & was %in% c('C', 'G'), count]) )
+  
+  # Write out mutation type counts
+  cat(c(basename(sf), "\n\nCG in WRCY\n"), file=mtxf, append=TRUE)
+  write.table(contingency2, file=mtxf, sep="\t", row.names=FALSE, quote=FALSE, append=TRUE)
+  cat("\n", file=mtxf, append=TRUE)
+  write.table(contingency1, file=mtxf, sep="\t", row.names=FALSE, quote=FALSE, append=TRUE)
+  cat("\n", file=mtxf, append=TRUE)
+  
+  # next
+  
   # Flip the frequencies of the deleted bases to negative Y, for better clarity
   if (isindel) {
     posdata[type=='-', freq := -freq]
@@ -275,12 +324,15 @@ for (sf in statsfiles){
                                   type = NA_character_,
                                   count = 0,
                                   depth = 0,
-                                  seq = rep(posdata[missing[i, from], seq], n),
                                   newpos = (posdata[missing[i, from], newpos] + 1):(posdata[missing[i, from], newpos] + n),
+                                  seq = rep(posdata[missing[i, from], seq], n),
                                   mutated = FALSE,
-                                  aggrcount = 0,
                                   freq = 0,
+                                  aggrcount = 0,
                                   aggrfreq = 0,
+                                  in_pattern = NA,
+                                  was = NA_character_,
+                                  became = NA_character_,
                                   trusty = FALSE,
                                   aggrtrusty = FALSE,
                                   flag = NA) )
@@ -411,59 +463,6 @@ for (sf in statsfiles){
           panel.grid.major.y = element_blank(),
           panel.grid.minor.y = element_blank())
   
-  # Three annotation styles.
-  
-  # zebra1 <- pp  # Stripe hotspots, dash CDRs below, zoomed in
-  # zebra2 <- pp  # Stripe hotspots, dash CDRs above, zoomed out
-  # dashy <- pp  # Stripe CDRs, dash hotspots below
-  # 
-  # if (nrow(warmspots) > 0) {
-  #   for (i in 1:nrow(warmspots)) {
-  #     zebra1 <- zebra1 +
-  #       geom_rect(xmin=warmspots[i,]$xleft, xmax=warmspots[i,]$xright, ymin=0, ymax=1.5, fill='#FFEEBB')
-  #   }
-  #   for (i in 1:nrow(warmspots)) {
-  #     zebra2 <- zebra2 +
-  #       geom_rect(xmin=warmspots[i,]$xleft, xmax=warmspots[i,]$xright, ymin=-1, ymax=1.5, fill='#FFEEBB')
-  #   }
-  # }
-  # if (nrow(hotspots) > 0) {
-  #   for (i in 1:nrow(hotspots)) {
-  #     zebra1 <- zebra1 +
-  #       geom_rect(xmin=hotspots[i,]$xleft, xmax=hotspots[i,]$xright, ymin=0, ymax=1.5, fill='#FFD6BB')
-  #   }
-  #   for (i in 1:nrow(hotspots)) {
-  #     zebra2 <- zebra2 +
-  #       geom_rect(xmin=hotspots[i,]$xleft, xmax=hotspots[i,]$xright, ymin=-1, ymax=1.5, fill='#FFD6BB')
-  #   }
-  # }
-  # if (nrow(cdrs) > 0) {
-  #   zebra1 <- zebra1 +
-  #     geom_segment(data=cdrs,
-  #                  aes(x=xleft, xend=xright, y= -0.05 * maxfreq, yend= -0.05 * maxfreq), inherit.aes=FALSE,
-  #                  colour='grey75', size=2)
-  #   zebra2 <- zebra2 +
-  #     geom_segment(data=cdrs,
-  #                  aes(x=xleft, xend=xright, y= 1.1, yend= 1.1), inherit.aes=FALSE,
-  #                  colour='grey50', size=2)
-  #   for (i in 1:nrow(cdrs)) {
-  #     dashy <- dashy +
-  #       geom_rect(xmin=cdrs[i,]$xleft, xmax=cdrs[i,]$xright, ymin=-1, ymax=1.5, fill='grey95')
-  #   }
-  # }
-  # # Keep dashes over the boxes, even if it means repeating code
-  # if (nrow(warmspots) > 0) {
-  #   dashy <- dashy +
-  #     geom_segment(data=warmspots,
-  #                  aes(x=xleft, xend=xright, y= -0.05 * maxfreq, yend= -0.05 * maxfreq), inherit.aes=FALSE,
-  #                  colour='gold2', size=3)
-  # }
-  # if (nrow(hotspots) > 0) {
-  #   dashy <- dashy +
-  #     geom_segment(data=hotspots,
-  #                aes(x=xleft, xend=xright, y= -0.05 * maxfreq, yend= -0.05 * maxfreq), inherit.aes=FALSE,
-  #                colour='orangered', size=3)
-  # }
 
   # Annotated version
   covscale1 <- 1.3  # Don't change the value for reuse with other plots. 
