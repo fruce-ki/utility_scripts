@@ -95,7 +95,7 @@ fi
 # memory=$((4 * $threads))
 memory='40G'
 echo "$bam - Threads: $threads Memory: $memory"
-    
+
 if [ "$dunk" -eq 1 ]; then
     echo "$bam - slamdunk"
     sbatch --qos=medium -c $threads --mem=$memory -J slamdunk -o /dev/null -e /dev/null --wrap "slamdunk all -r $ref -b $bed -o ${outdir}/dunk -5 12 -n 100 -c 2 -mv 0.2 -t $threads -rl $readlen -mbq $minq -m -ss ${outdir}/dunk/samplesheet.tsv"
@@ -118,7 +118,7 @@ if [ "$post" -eq 1 ]; then
     # cat ${outdir}/alleyoop/summary/*summary.txt | tail -n 1 >> ${outdir}/alleyoop/summary.txt
 
     echo "$bam - MultiQC"
-    sbatch -o /dev/null -e /dev/null multiqc -f -o ${outdir}/multiqc_alleyoop ${outdir}/alleyoop/summary ${outdir}/alleyoop/rates ${outdir}/alleyoop/tcperreadpos ${outdir}/alleyoop/tcperutrpos ${outdir}/alleyoop/utrrates
+    sbatch -o /dev/null -e /dev/null multiqc -f -o ${outdir}/multiqc_alleyoop ${outdir}/fastqc_post ${outdir}/alleyoop/summary ${outdir}/alleyoop/rates ${outdir}/alleyoop/tcperreadpos ${outdir}/alleyoop/tcperutrpos ${outdir}/alleyoop/utrrates
 
     echo "$bam - RPMu"
     srun slamseq_rpmu.R ${outdir}/dunk/count/*tcount.tsv
@@ -136,7 +136,7 @@ if [ "$post" -eq 1 ]; then
     if [ -e "${xref}" ] ; then
       # Unlike quantseq, the output counts of slamdunk are per UTR, not per gene. So Entrez are not unique and cannot be used as keys in pandas/fileutilities.py.
       echo "$bam - Adding crossreferencing IDs"
-      slamseq_xref.R ${outdir} 'all_rpmu.txt' $xref 1 1 
+      slamseq_xref.R ${outdir} 'all_rpmu.txt' $xref 1 1
     fi
 fi
 
