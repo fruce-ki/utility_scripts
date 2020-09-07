@@ -24,19 +24,22 @@ if ( is.null(opt$reportFile) ) {
   opt$reportFile <- '~/utility_scripts/PCA_report_template.Rmd'
 }
 
-if ( is.null(opt$nidcols ) ) { 
+if ( is.null(opt$nidcols ) ) {
   opt$nidcols <- 1
 }
+if ( is.null(opt$idcol ) ) {
+  opt$idcol <- 1
+}
 
-if ( is.null(opt$resultsDir    ) ) { 
-  opt$resultsDir <- '.'         
+if ( is.null(opt$resultsDir    ) ) {
+  opt$resultsDir <- '.'
 }
 
 
 dir.create(opt$resultsDir, recursive=TRUE)
 
 # Fire up the Rmd report
-rmarkdown::render(opt$reportFile, 
+rmarkdown::render(opt$reportFile,
                   output_file = sub('.txt|.tsv', '_pca.html', basename(opt$countsFile)),
                   output_dir = opt$resultsDir,
                   params=list(cts = opt$countsFile,
