@@ -16,7 +16,7 @@ set -e
 ## Parameters ##
 function usage() {
     echo "Usage:"
-    echo "      $0 -i BAM -r REF_FASTA -b UTR_BED -a GTF -o OUT_DIR -l READ_LEN [-x XREF] [-u UMI_LENGTH] [-q MINALQ] [-T TRIM_5] [-t TRIM_3]"
+    echo "      $0 -i BAM_DIR -r REF_FASTA -b UTR_BED -a GTF -o OUT_DIR -l READ_LEN [-x XREF] [-u UMI_LENGTH] [-q MINALQ] [-T TRIM_5] [-t TRIM_3]"
     exit 1
 }
 # Parse options.
@@ -39,7 +39,7 @@ while getopts 'i:r:b:a:o:q:t:T:x:u:U:l:123' flag; do
     q) minq="${OPTARG}" ;;			# minimum alignement quality (1)
     t) trim3="${OPTARG}" ;;         # cutadapt trim this many bases from end of reads
     T) trim5="${OPTARG}" ;;         # cutadapt trim this many bases from start of reads. Applied *after* UMI extraction, if any.
-    x) xref="${OPTARG}" ;;         # cutadapt trim this many bases from start of reads
+    x) xref="${OPTARG}" ;;         # table with additional IDs
     u) umilen="${OPTARG}" ;;         # Length of UMI at 5' of read. If non-zero, will be trimmed and used to deduplicate
     U) mm_umi="${OPTARG}" ;;         # Mismatch allowance in UMI
     l) rlen="${OPTARG}" ;;         # Read length
@@ -100,7 +100,7 @@ if [ "$pre" -eq 1 ]; then
     fileutilities.py T ${fqdir}/*.fastq.gz --loop sbatch ,-J fastQC ,-o /dev/null ,-e /dev/null ,--get-user-env ,--wrap "'fastqc -o ${outdir}/fastqc_pre {abs}'"
     wait_for_jobs fastQC
     sbatch -J multiqc -o /dev/null -e /dev/null multiqc -f -o ${outdir}/multiqc_pre ${outdir}/fastqc_pre
-    
+
     echo "$bam - UMI"
     if [ "$umilen" -gt 0 ]; then
         mkdir -p ${outdir}/dedup
@@ -111,7 +111,7 @@ if [ "$pre" -eq 1 ]; then
         }
         fileutilities.py T ${fqdir}/*.fastq.gz --loop sbatch ,-J umitrim ,-o /dev/null ,-e /dev/null umi_tools extract ,-I {abs} ,-S ${outdir}/dedup/{cor}_umi-clipped.fastq.gz ,-p $(repl $umilen) ,--extract-method=string ,--quality-encoding=phred33
         wait_for_jobs umitrim
-        
+
         fqdir="${outdir}/dedup/"
     fi
 
@@ -129,17 +129,17 @@ fi
 bamdir="${outdir}/dunk/filter"  # need it accessible outside the block
 threads=4                       # also
 memory='40G'
-    
+
 if [ "$dunk" -eq 1 ]; then
     fqdir="${outdir}/fastq_trimmed"
-    
-    fileutilities.py T $fqdir --dir fastq.gz | perl -e 'while(<>){~s/.fastq$/\tdummy\t0/; print}' > ${outdir}/dunk/samplesheet.tsv
+
+    fileutilities.py T $fqdir --dir 'fastq.gz$|fq.gz$' | perl -e 'while(<>){~s/\.fastq$|\.fq$/\tdummy\t0/; print}' > ${outdir}/dunk/samplesheet.tsv
     threads=$( wc -l ${outdir}/dunk/samplesheet.tsv | perl -e 'while(<>){~/^(\d+)/; print $1}' )
     # memory=$((4 * $threads))
     if [ "$threads" -gt 24 ]; then
       threads=24
     fi
-    
+
     echo "$bam - MAP"
     sbatch -J slamaln -o /dev/null -e /dev/null --qos=medium -c $threads --mem=$memory --wrap "slamdunk map -t $threads -r $ref -o ${outdir}/dunk/map -5 0 -n 100 --quantseq -ss ${outdir}/dunk/samplesheet.tsv"
     wait_for_jobs slamaln
@@ -147,7 +147,7 @@ if [ "$dunk" -eq 1 ]; then
     echo "$bam - FILTER"
     sbatch -J slamfltr -c $threads --mem=$memory --wrap "slamdunk filter -t $threads -o ${outdir}/dunk/filter -b $bed ${outdir}/dunk/map/*.bam"
     wait_for_jobs slamfltr
-    
+
     if [ "$umilen" -gt 0 ]; then
         mkdir -p ${outdir}/dedup ${outdir}/dedup/tmp ${outdir}/dedup/map_sorted
 
@@ -160,7 +160,7 @@ if [ "$dunk" -eq 1 ]; then
         echo ""
         echo "$bam - Removing duplicates"
         fileutilities.py T ${outdir}/dedup/map_sorted/*.bam --loop sbatch ,-J umidedup ,-o /dev/null ,-e /dev/null umi_tools dedup ,-I {abs} ,-S ${outdir}/dedup/{cor}.deduped.bam ,-L ${outdir}/dedup/{cor}_dedup.log  ,--edit-distance-threshold=${mm_umi}
-        wait_for_jobs umidedup  
+        wait_for_jobs umidedup
     fi
 fi
 
@@ -173,7 +173,7 @@ if [ "$post" -eq 1 ]; then
     if [ "$threads" -gt 24 ]; then
       threads=24
     fi
-    
+
     echo "$bam - QUANTIFY alignments with qual >$minq"
     fileutilities.py T ${bamdir}/*.bam --loop sbatch ,-J ftrcnt ,-o /dev/null ,-e /dev/null ,-c 4 ,--wrap "'featureCounts -T 4 -M --primary -Q $minq -a $annot -o ${outdir}/counts/{cor}.txt {abs}'"
     wait_for_jobs ftrcnt
@@ -184,7 +184,7 @@ if [ "$post" -eq 1 ]; then
     else
         sbatch -o /dev/null -e /dev/null -J multiqc multiqc -f -o ${outdir}/multiqc ${outdir}/fastqc_pre ${outdir}/fastqc_post ${outdir}/fastq_trimmed ${outdir}/counts
     fi
-    
+
     echo "$bam - Collect all"
     fileutilities.py T ${outdir}/counts/*trimmed.txt -i -l --cols 6 | perl -e 'while(<>){~s/(_umi-clipped)?(_trimmed)?(\.fa?s?t?q_slamdunk_mapped_filtered)?_\|6//g;print}' > ${outdir}/all_counts.tsv
     rpm.R -f ${outdir}/all_counts.tsv -i 1

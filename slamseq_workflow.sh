@@ -87,7 +87,7 @@ if [ "$pre" -eq 1 ]; then
     sbatch -o /dev/null -e /dev/null multiqc -f -o ${outdir}/multiqc_post ${outdir}/fastqc_post ${outdir}/fastq_trimmed
 fi
 
-fileutilities.py T ${outdir}/fastq_trimmed/ --dir fq.gz | perl -e 'while(<>){~s/.fq$/\tdummy\t0/; print}' > ${outdir}/dunk/samplesheet.tsv
+fileutilities.py T ${outdir}/fastq_trimmed/ --dir 'fastq.gz$|fq.gz$' | perl -e 'while(<>){~s/\.fastq$\.fq$/\tdummy\t0/; print}' > ${outdir}/dunk/samplesheet.tsv
 threads=$( wc -l ${outdir}/dunk/samplesheet.tsv | perl -e 'while(<>){~/^(\d+)/; print $1}' )
 if [ "$threads" -gt 24 ]; then
     threads=24
