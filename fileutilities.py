@@ -1073,7 +1073,7 @@ class FilesList(list):
         """
         return (self[loc], self.aliases[loc])
 
-    def append(self, myfile, myalias=None):
+    def append(self, myfile, myalias=None, alias_verbatim=False):
         """Appends value to both the paths list and the aliases list.
 
         This method overrides the built-in append() of list. It is backwards
@@ -1093,7 +1093,9 @@ class FilesList(list):
         if not myalias:
             myalias = self.autoalias(myfile)
         self.aliases.append(myalias)
-        self.aliases = autonumerate(self.aliases)
+        if not alias_verbatim:
+            self.aliases = autonumerate(self.aliases)
+        # return self
 
     def populate_from_files(self, myfiles, colSep="\t", alias_verbatim=False):
         """Parse the list of files from one or multiple text files.
@@ -1182,11 +1184,11 @@ class FilesList(list):
                         continue
                     if not patterns:
                         # No filter.
-                        self.append(os.path.join(d, f), self.autoalias(f), verbatim=verbatim)
+                        self.append(os.path.join(d, f), self.autoalias(f), alias_verbatim=alias_verbatim)
                     else:
                         for p in rx:
                             if p.search(f):
-                                self.append(os.path.join(d, f), self.autoalias(f), verbatim=verbatim)
+                                self.append(os.path.join(d, f), self.autoalias(f), alias_verbatim=alias_verbatim)
                                 break
             finally:
                 pass
