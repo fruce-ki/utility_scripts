@@ -118,22 +118,22 @@ if [ "$post" -eq 1 ]; then
     # sbatch -o /dev/null -e /dev/null multiqc -f -o ${outdir}/multiqc_alleyoop ${outdir}/fastqc_post ${outdir}/alleyoop/summary ${outdir}/alleyoop/rates ${outdir}/alleyoop/tcperreadpos ${outdir}/alleyoop/tcperutrpos ${outdir}/alleyoop/utrrates
 
     echo "$bam - RPMu"
-    slamseq_rpmu.R collapsed ${outdir}/dunk/count/*tcount_collapsed.csv
-    slamseq_rpmu.R utr ${outdir}/dunk/count/*tcount.tsv
+    # slamseq_rpmu.R collapsed ${outdir}/dunk/count/*tcount_collapsed.csv
+    # slamseq_rpmu.R utr ${outdir}/dunk/count/*tcount.tsv
 
     echo "$bam - Merge"
     fileutilities.py T ${outdir}/dunk/count --dir 'filtered_tcount_collapsed.rpmu.txt$' | fileutilities.py P -i -r --appnd > ${outdir}/all_collapsed_rpmu.txt
     fileutilities.py T ${outdir}/dunk/count --dir 'filtered_tcount.rpmu.txt$' | fileutilities.py P -i -r --appnd > ${outdir}/all_utr_rpmu.txt
-    #dedup_table_field.R ${outdir}/all_collapsed_rpmu.txt gene_name
+    # After merging on rowID, the Name field needs to be deduplicated and then brought first to merge with the xref.
     dedup_table_field.R ${outdir}/all_utr_rpmu.txt Name
-    # mv ${outdir}/all_collapsed_rpmu_dedup.tsv ${outdir}/all_collapsed_rpmu.txt
-    mv ${outdir}/all_utr_rpmu_dedup.tsv ${outdir}/all_utr_rpmu.txt
+    fileutilities.py T ${outdir}/all_utr_rpmu_dedup.tsv -r --cols 1 0 2:$(fileutilities.py T ${outdir}/all_utr_rpmu_dedup.tsv --cntcols | cut -f 1) > ${outdir}/all_utr_rpmu.txt
+    rm ${outdir}/all_utr_rpmu_dedup.tsv
 
     if [ -e "${xref}" ] ; then
-      # Unlike quantseq, the output counts of slamdunk are per UTR, not per gene. So Entrez are not unique and cannot be used as keys in pandas/fileutilities.py.
+      # Merge xref on gene identifier. But genes are not unique row identifiers for the UTR results, so I can't use my usual fileutilities/pandas.
       echo "$bam - Adding crossreferencing IDs"
       slamseq_xref.R ${outdir} 'all_utr_rpmu.txt' $xref 1 1
-      slamseq_xref.R ${outdir} 'all_collapsed_rpmu.txt' $xref 1 1
+      slamseq_xref.R ${outdir} 'all_collapsed_rpmu.txt' $xref 1 1     # could have use fileutilities here, but consistency is simpler.
     fi
 fi
 
