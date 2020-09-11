@@ -23,4 +23,4 @@ merged <- apply(DT[, grepl(colname, names(DT), fixed=TRUE), with=FALSE], 1, func
 DT <- DT[, ! 1:length(DT) %in% dups[2:length(dups)], with=FALSE]
 set(DT, i=NULL, j=colname, merged)
 
-fwrite(DT, file=sub('\\.tsv$', '_dedup.tsv', file, perl=TRUE), sep="\t", quote=FALSE)
+fwrite(DT, file=sub('\\.tsv$|\\.txt$', '_dedup.tsv', file, perl=TRUE), sep="\t", quote=FALSE)
