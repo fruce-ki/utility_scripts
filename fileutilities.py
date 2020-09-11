@@ -830,78 +830,6 @@ def merge_tables(flist, colSep=["\t"], header=False, index=[0], merge=True, type
     return result
 
 
-# Helper function
-def getDuplicateColumns(df):
-    '''
-    Get a list of duplicate columns.
-    It will iterate over all the columns in dataframe and find the columns whose contents are duplicate.
-
-    Stolen from https://thispointer.com/how-to-find-drop-duplicate-columns-in-a-dataframe-python-pandas/ .
-
-    Args:
-    	df: Dataframe object
-    Returns:
-        List of columns whose contents are redudnant (one occurence of each will not be included in the list).
-    '''
-    duplicateColumnNames = set()
-    # Iterate over all the columns in dataframe
-    for x in range(df.shape[1]):
-        # Select column at xth index.
-        col = df.iloc[:, x]
-        # Iterate over all the columns in DataFrame from (x+1)th index till end
-        for y in range(x + 1, df.shape[1]):
-            # Select column at yth index.
-            otherCol = df.iloc[:, y]
-            # Check if two columns at x 7 y index are equal
-            if col.equals(otherCol):
-                duplicateColumnNames.add(df.columns.values[y])
-    return list(duplicateColumnNames)
-
-
-def dedup_columns(flist, cols=[0,1], colSep=["\t"], merge=True):
-    """Merge duplicate columns from the files, as they are.
-
-    This function also supports key-aware appending, using outer-join, when a
-    row index is specified.
-
-    Args:
-        flist: A list/FilesList of files to combine.
-        colSep[str]: A list of characters used as field delimiters.
-                    (Default ["\t"])
-        cols[int] : A list of positional indexes of the
-                    desired columns. (Default [0,1]).
-
-    Returns:
-        pandas.Dataframe
-    """
-    try:
-        flist.aliases[0]
-    except AttributeError:
-        flist = FilesList(flist)
-    # Determine how many columns each file has.
-    numofcols = count_columns(flist, colSep=colSep)
-    # Delegate fetching all the columns.
-    result = []
-    keyhead = None
-    for f, (myfile, myalias) in flist.enum():
-        # List the columns.
-        allcols = [i for i in range(0,numofcols[f])]
-        df = get_columns(FilesList(files=[myfile], aliases=[myalias]), cols=allcols,
-        						colSep=colSep, header=False, merge=False, index=None)[0]
-        # Collect duplicated values, drop duplicated columns, assign values to new column.
-        v = df.iloc[:, cols].apply(lambda x: next(s for s in x.unique() if s), axis=1)
-        df.drop(df.columns[cols], axis=1, inplace=True)
-        df = pd.concat([df, v], axis=1, join='outer', sort=False, ignore_index=False)
-        if not keyhead:
-            keyhead = df.index.name
-        result.append(df)
-    # Merge.
-    if merge:
-        result = [pd.concat(result, axis=1, join='outer', ignore_index=False, sort=False), ]
-        result[0].index.name = keyhead
-    return result
-
-
 def get_crosspoints(flist, cols=[0], rows=[0], colSep=["\t"], header=False, index=None, merge=True):
     """ Get the values at selected rows and columns.
 
@@ -1296,8 +1224,6 @@ def main(args):
                                 help="Add all the columns from the target files into a single table (via outer join). If index is used, the values must be unique within each file.")
     parser.add_argument('--merge', nargs=3, type=str,
                                 help="Merge table files. The first column of each file will be used as row index regardless of -i flag status. First argument is join type: 'left', 'right', 'inner', 'outer'. Second argument is preserve first header row: 'yes', 'no' (because merge sorts rows). Third argument is detect and drop additional duplicated columns: 'yes', 'no'.")
-    parser.add_argument('--mrgdups', type=int, nargs='+',
-    							help="Combine gappy duplicate columns into a single column with all the values. Columns are specified by their 0-based positional index given as arguments here.")
     parser.add_argument('--valset', nargs=3,
                                 help="Get the non-redundant set of values in the given row/column. Takes three arguments: (i) orientation 'r' for row or 'c' for column, (ii) position index of the row/column, (iii) repetition filter: 'a' all values, 'u' unique values only, 'r' only values with two or more instances.")
     params = parser.parse_args(args)
@@ -1332,7 +1258,7 @@ def main(args):
     elif params.INPUTTYPE == 'D':
         # Data will be read from STDIN. No files needed. Make an empty list.
         # Not all functions will switch to STDIN given this. Several will simply do nothing.
-        flist = FilesList(verbatim=params.verbatim)
+        flist = FilesList()
     else:
         sys.exit(ml.errstring("Unknown INPUTTYPE."))
 
@@ -1490,34 +1416,6 @@ def main(args):
                 sys.stderr.write(ml.donestring("appending columns, index "+ str(idx is not None)))
             else:
                 sys.stderr.write(ml.donestring(params.merge[0] +" merge of tables"))
-
-
-    # MERGE duplicate columns. ---------------------------------------------------------
-    elif params.mrgdups:
-        # Create output filenames, if applicable. If [], then STDOUT.
-        outfiles = make_names(flist.aliases, (outdir, outpref, outsuff))
-        outstream = sys.stdout
-        merge = False if outfiles else True
-        # Do.
-        result = dedup_columns(flist, colSep=params.sep, cols=params.mrgdups)
-		# I need the for loop to iterate at least once. Relevant for STDIN input, since I have no input files listed then.
-        if flist == []:
-            flist.append("<STDIN>")
-        if merge:
-            if params.metadata:
-                # Dump all the metadata from all the merged input sources.
-                for i, (myfile, myalias) in flist.enum():
-                    outstream.write(metadata[myfile])
-            outstream.write( result[0].to_csv(header=params.relabel, index=params.index, sep=params.sep[0]))
-        else:
-            for i, (myfile, myalias) in flist.enum():
-                outstream = open(outfiles[i], 'w')
-                if params.metadata:
-                    outstream.write(metadata[myfile])
-                outstream.write( result[i].to_csv(header=params.relabel, index=params.index, sep=params.sep[0]))
-                outstream.close()
-        if params.STDERRcomments:
-            sys.stderr.write(ml.donestring("deduplicating columns"))
 
 
     # COUNT columns. ----------------------------------------------------------
