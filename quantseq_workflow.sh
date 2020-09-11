@@ -89,16 +89,16 @@ mkdir -p ${outdir}/fastqc_pre ${outdir}/fastqc_post ${outdir}/fastq ${outdir}/fa
 
 if [ "$pre" -eq 1 ]; then
     echo "$bam - BAM2FQ"
-    fileutilities.py T $bam/*bam --loop sbatch ,-J bam2fq ,-o /dev/null ,-e /dev/null ,--get-user-env ,--wrap "'samtools bam2fq -0 ${outdir}/fastq/{bas}.fastq {abs}'"
+    fileutilities.py T $bam --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J bam2fq ,--get-user-env ,--wrap "'samtools bam2fq -0 ${outdir}/fastq/{bas}.fastq {abs}'"
     wait_for_jobs bam2fq
-    fileutilities.py T ${outdir}/fastq/*.fastq --loop sbatch ,-J fqzip ,-o /dev/null ,-e /dev/null ,--get-user-env ,--wrap "'gzip -f {abs}'"
+    fileutilities.py T ${outdir}/fastq --dir 'fastq$|fq$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J fqzip ,--get-user-env ,--wrap "'gzip -f {abs}'"
     wait_for_jobs fqzip
 
     fqdir="${outdir}/fastq/"
 
     echo "$bam - QC"
-    fileutilities.py T ${fqdir}/*.fastq.gz --loop sbatch ,-J fastQC ,-o /dev/null ,-e /dev/null ,--get-user-env ,--wrap "'fastqc -o ${outdir}/fastqc_pre {abs}'"
-    wait_for_jobs fastQC
+    fileutilities.py T ${fqdir} --dir 'fastq.gz$|fq.gz$' | fileutilities.py P --loop sbatch ,-J fastQC ,-o /dev/null ,-e /dev/null ,--get-user-env ,--wrap "'fastqc -o ${outdir}/fastqc_pre {abs}'"
+    # wait_for_jobs fastQC
     sbatch -J multiqc -o /dev/null -e /dev/null multiqc -f -o ${outdir}/multiqc_pre ${outdir}/fastqc_pre
 
     echo "$bam - UMI"
@@ -109,18 +109,18 @@ if [ "$pre" -eq 1 ]; then
         repl() {        # Create a UMI pattern of appropriate length.
             printf "N"'%.s' $(seq 1 $1);
         }
-        fileutilities.py T ${fqdir}/*.fastq.gz --loop sbatch ,-J umitrim ,-o /dev/null ,-e /dev/null umi_tools extract ,-I {abs} ,-S ${outdir}/dedup/{cor}_umi-clipped.fastq.gz ,-p $(repl $umilen) ,--extract-method=string ,--quality-encoding=phred33
+        fileutilities.py T ${fqdir} --dir 'fastq.gz$|fq.gz$' | fileutilities.py P --loop sbatch ,-J umitrim ,-o /dev/null ,-e /dev/null umi_tools extract ,-I {abs} ,-S ${outdir}/dedup/{cor}_umi-clipped.fastq.gz ,-p $(repl $umilen) ,--extract-method=string ,--quality-encoding=phred33
         wait_for_jobs umitrim
 
         fqdir="${outdir}/dedup/"
     fi
 
     echo "$bam - TRIM"
-    fileutilities.py T ${fqdir}/*.fastq.gz --loop sbatch ,-J cutadapt ,-o /dev/null ,-e /dev/null ,--get-user-env cutadapt ,-a A{18} ,-g T{18} $trim5 $trim3 ,-q $minq3 ,-m $minlen ,-o ${outdir}/fastq_trimmed/{cor}_trimmed.fastq.gz {abs} \> ${outdir}/fastq_trimmed/{cor}.cutadapt.log
+    fileutilities.py T ${fqdir} --dir 'fastq.gz$|fq.gz$' | fileutilities.py P --loop sbatch ,-J cutadapt ,-o /dev/null ,-e /dev/null ,--get-user-env cutadapt ,-a A{18} ,-g T{18} $trim5 $trim3 ,-q $minq3 ,-m $minlen ,-o ${outdir}/fastq_trimmed/{cor}_trimmed.fastq.gz {abs} \> ${outdir}/fastq_trimmed/{cor}.cutadapt.log
     wait_for_jobs cutadapt
 
     echo "$bam - QC"
-    fileutilities.py T ${outdir}/fastq_trimmed/*.fastq.gz --loop sbatch ,-J fastQC ,-o /dev/null ,-e /dev/null ,--get-user-env ,--wrap "'fastqc -o ${outdir}/fastqc_post {abs}'"
+    fileutilities.py T ${fqdir} --dir 'fastq.gz$|fq.gz$' | fileutilities.py P --loop sbatch ,-J fastQC ,-o /dev/null ,-e /dev/null ,--get-user-env ,--wrap "'fastqc -o ${outdir}/fastqc_post {abs}'"
     wait_for_jobs fastQC
     sbatch -J multiqc -o /dev/null -e /dev/null multiqc -f -o ${outdir}/multiqc_post ${outdir}/fastqc_post
 
