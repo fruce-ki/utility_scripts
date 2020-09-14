@@ -104,22 +104,23 @@ fi
 
 if [ "$post" -eq 1 ]; then
     echo "$bam - alleyoop"
-    mkdir -p ${outdir}/alleyoop/summary/ ${outdir}/alleyoop/rates ${outdir}/alleyoop/utrrates ${outdir}/alleyoop/tcperreadpos ${outdir}/alleyoop/tcperutrpos
-
-    # sbatch -J alleyoop -o /dev/null -e /dev/null --wrap "alleyoop summary -t ${outdir}/dunk/count/ -o ${outdir}/alleyoop/summary/summary.txt ${outdir}/dunk/filter/*bam"
-    # fileutilities.py T ${outdir}/dunk/filter --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J alleyoop ,--wrap "'alleyoop rates -o ${outdir}/alleyoop/rates -r $ref -mq $minq {abs}'"
-    # fileutilities.py T ${outdir}/dunk/filter --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J alleyoop ,--wrap "'alleyoop utrrates -o ${outdir}/alleyoop/utrrates -r $ref -b $bed -l $readlen {abs}'"
-    # fileutilities.py T ${outdir}/dunk/filter --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J alleyoop ,--wrap "'alleyoop tcperreadpos -o ${outdir}/alleyoop/tcperreadpos -r $ref -s ${outdir}/dunk/snp -l $readlen -mq $minq {abs}'"
-    # fileutilities.py T ${outdir}/dunk/filter --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J alleyoop ,--wrap "'alleyoop tcperutrpos -o ${outdir}/alleyoop/tcperutrpos -r $ref -b $bed -s ${outdir}/dunk/snp -l $readlen -mq $minq {abs}'"
-    # fileutilities.py T ${outdir}/dunk/count --dir 'tcount.tsv$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J alleyoop ,--wrap "'alleyoop collapse -o ${outdir}/dunk/count {abs}'"
+    # mkdir -p ${outdir}/alleyoop/summary/ ${outdir}/alleyoop/rates ${outdir}/alleyoop/utrrates ${outdir}/alleyoop/tcperreadpos ${outdir}/alleyoop/tcperutrpos
+    #
+    fileutilities.py T ${outdir}/dunk/count --dir 'tcount.tsv$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J alleyoop ,--wrap "'alleyoop collapse -o ${outdir}/dunk/count {abs}'"
+    fileutilities.py T ${outdir}/dunk/filter --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J alleyoop ,--wrap "'alleyoop rates -o ${outdir}/alleyoop/rates -r $ref -mq $minq {abs}'"
+    fileutilities.py T ${outdir}/dunk/filter --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J alleyoop ,--wrap "'alleyoop utrrates -o ${outdir}/alleyoop/utrrates -r $ref -b $bed -l $readlen {abs}'"
+    fileutilities.py T ${outdir}/dunk/filter --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J alleyoop ,--wrap "'alleyoop tcperreadpos -o ${outdir}/alleyoop/tcperreadpos -r $ref -s ${outdir}/dunk/snp -l $readlen -mq $minq {abs}'"
+    fileutilities.py T ${outdir}/dunk/filter --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J alleyoop ,--wrap "'alleyoop tcperutrpos -o ${outdir}/alleyoop/tcperutrpos -r $ref -b $bed -s ${outdir}/dunk/snp -l $readlen -mq $minq {abs}'"
     # wait_for_jobs alleyoop
-
+    sbatch -J alleyoop -o /dev/null -e /dev/null --wrap "alleyoop summary -t ${outdir}/dunk/count/ -o ${outdir}/alleyoop/summary/summary.txt ${outdir}/dunk/filter/*bam"
+    wait_for_jobs alleyoop
+    #
     echo "$bam - MultiQC"
-    # sbatch -o /dev/null -e /dev/null multiqc -f -o ${outdir}/multiqc_alleyoop ${outdir}/fastqc_post ${outdir}/alleyoop/summary ${outdir}/alleyoop/rates ${outdir}/alleyoop/tcperreadpos ${outdir}/alleyoop/tcperutrpos ${outdir}/alleyoop/utrrates
+    sbatch -o /dev/null -e /dev/null multiqc -f -o ${outdir}/multiqc_alleyoop ${outdir}/fastqc_post ${outdir}/alleyoop/summary ${outdir}/alleyoop/rates ${outdir}/alleyoop/tcperreadpos ${outdir}/alleyoop/tcperutrpos ${outdir}/alleyoop/utrrates
 
     echo "$bam - RPMu"
-    # slamseq_rpmu.R collapsed ${outdir}/dunk/count/*tcount_collapsed.csv
-    # slamseq_rpmu.R utr ${outdir}/dunk/count/*tcount.tsv
+    slamseq_rpmu.R collapsed ${outdir}/dunk/count/*tcount_collapsed.csv
+    slamseq_rpmu.R utr ${outdir}/dunk/count/*tcount.tsv
 
     echo "$bam - Merge"
     fileutilities.py T ${outdir}/dunk/count --dir 'filtered_tcount_collapsed.rpmu.txt$' | fileutilities.py P -i -r --appnd > ${outdir}/all_collapsed_rpmu.txt
