@@ -47,23 +47,27 @@ showpalette( c("#000000", "#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442",
 
 
 
+cormat <- matrix(rep(seq(-0.9, 1, 0.1),5), ncol = 10)
+samples <- c('a','b','c','d','e','f','g','h','i','j')
+colnames(cormat) <- samples
+rownames(cormat) <- samples
 
 ### Correlations within the dataframe.
 ######################################
 # colnames and rownames yes, non-numeric columns no.
 # Requires a vector of sample names for the non-clustered plots.
-my_pairwise_internal_corels <- function(mat = rpm, samples = colnames(rpm), method = "pearson", prefix='./correlations', txs=3) {
+my_pairwise_internal_corels <- function(mat = rpm, samples = samples_tidy$name, method = "pearson", prefix=params$outpref, txs=4) {
   # Correlations
   cormat <- cor(mat, method=method)
-
+  
   # Cluster
   hcfit <- hclust(dist(scale(cormat, center=TRUE)))
   rn <- rownames(cormat)
   cormat <- cormat[samples, samples]                    # Supplied order
   cormat2 <- cormat                                     # Duplicate on which to delete the diagonal with original order.
-  cormat3 <- cormat[rn[hcfit$order], rn[hcfit$order]]   # Duplicate on which to delete the diagonal with clustered order.
-  cormat4 <- cormat3
-
+  cormat3 <- cormat[rn[hcfit$order], rn[hcfit$order]]   # Duplicate in clustered order.
+  cormat4 <- cormat3                                    # duplicate on which to delete the diagonal with in clustered order.
+  
   # Delete diagonal half for the numeric labels.
   for (r in 1:nrow(cormat2)) {
     for (c in 1:ncol(cormat2)) {
@@ -79,40 +83,40 @@ my_pairwise_internal_corels <- function(mat = rpm, samples = colnames(rpm), meth
       }
     }
   }
-
+  
   # Restructure for plotting.
   rn <- rownames(cormat)
   cormat <- as.data.table(cormat)
   cormat[, observation1 := factor(rn, ordered=TRUE, levels=rn)]
   cormat <- melt(cormat, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
   cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rn)]
-
+  
   rn2 <- rownames(cormat2)
   cormat2 <- as.data.table(cormat2)
   cormat2[, observation1 := factor(rn2, ordered=TRUE, levels=rn2)]
   cormat2 <- melt(cormat2, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
   cormat2[, observation2 := factor(observation2, ordered=TRUE, levels=rn2)]
   cormat2 <- cormat2[!is.na(Correlation)]
-
+  
   rn3 <- rownames(cormat3)
   cormat3 <- as.data.table(cormat3)
   cormat3[, observation1 := factor(rn3, ordered=TRUE, levels=rn3)]
   cormat3 <- melt(cormat3, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
   cormat3[, observation2 := factor(observation2, ordered=TRUE, levels=rn3)]
-
+  
   rn4 <- rownames(cormat4)
   cormat4 <- as.data.table(cormat4)
   cormat4[, observation1 := factor(rn3, ordered=TRUE, levels=rn4)]
   cormat4 <- melt(cormat4, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
   cormat4[, observation2 := factor(observation2, ordered=TRUE, levels=rn4)]
   cormat4 <- cormat4[!is.na(Correlation)]
-
+  
   # Text colour switch for the dynamic range
   m <- min(cormat4$Correlation, na.rm=TRUE)
   M <- max(cormat4$Correlation, na.rm=TRUE)
   colourswitch <- c( m + 0.49 * (M-m),  m + 0.51 * (M-m) )
-
-
+  
+  
   # Square. Custom order. No values. Full range.
   p1 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -121,7 +125,7 @@ my_pairwise_internal_corels <- function(mat = rpm, samples = colnames(rpm), meth
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-
+  
   # Square. Custom order. No values. Dynamic range.
   p1a <- ggplot(cormat, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -130,18 +134,18 @@ my_pairwise_internal_corels <- function(mat = rpm, samples = colnames(rpm), meth
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-
+  
   # Triangle. Custom order. With values. Full range.
   p2 <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
     geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
     scale_x_discrete(position = "top") +
-    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "transparent" ) +
-    scale_colour_manual(values=c("black", "white"), na.value="forestgreen", guide="none") +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
+    scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-
+  
   # Triangle. Custom order. With values. Dynamic range.
   p2a <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -152,18 +156,18 @@ my_pairwise_internal_corels <- function(mat = rpm, samples = colnames(rpm), meth
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-
+  
   # Square. Custom order. With values. Full range.
   p12 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
     geom_text(data=cormat2, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
     scale_x_discrete(position = "top") +
     scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
-    scale_colour_manual(values=c("black", "white"), na.value="forestgreen", guide="none") +
+    scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-
+  
   # Square. Custom order. With values. Dyhamic range.
   p12a <- ggplot(cormat, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -174,8 +178,8 @@ my_pairwise_internal_corels <- function(mat = rpm, samples = colnames(rpm), meth
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-
-
+  
+  
   # Square. Clustered order. No values. Full range.
   p3 <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -184,7 +188,7 @@ my_pairwise_internal_corels <- function(mat = rpm, samples = colnames(rpm), meth
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-
+  
   # Square. Clustered order. No values. Dyhamic range.
   p3a <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -193,18 +197,18 @@ my_pairwise_internal_corels <- function(mat = rpm, samples = colnames(rpm), meth
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-
+  
   # Triangle. Clustered order. with values. Full range.
   p4 <- ggplot(cormat4, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
     geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
     scale_x_discrete(position = "top") +
     scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
-    scale_colour_manual(values=c("black", "white"), na.value="forestgreen", guide="none") +
+    scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-
+  
   # Triangle. Clustered order. with values. Dyhamic range.
   p4a <- ggplot(cormat4, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -215,18 +219,18 @@ my_pairwise_internal_corels <- function(mat = rpm, samples = colnames(rpm), meth
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-
+  
   # Square. Clustered order. With values. Full range.
   p34 <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
     geom_text(data=cormat4, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
     scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
-    scale_colour_manual(values=c("black", "white"), na.value="forestgreen", guide="none") +
+    scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
     scale_x_discrete(position = "top") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-
+  
   # Square. Clustered order. With values. Dyhamic range.
   p34a <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -237,17 +241,18 @@ my_pairwise_internal_corels <- function(mat = rpm, samples = colnames(rpm), meth
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-
+  
   fwrite(dcast(cormat2, observation1 ~ observation2, value.var = "Correlation"),
          file=paste0(prefix, '_cor.txt'),
          sep='\t', quote = FALSE, row.names = FALSE, col.names = TRUE)
-
-
+  
+  
   return( list(sfrnc=p1, tfrnc=p2, frnc=p12,
                sdrnc=p1a, tdrnc=p2a, drnc=p12a,
                sfrc=p3, tfrc=p4, frc=p34,
                sdrc=p3a, tdrc=p4a, drc=p34a) )
 }
+
 
 
 
