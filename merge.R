@@ -1,6 +1,8 @@
 #!/usr/bin/env Rscript
 
-## Full/Outer merge of any number of tables. The first column is used as index.
+## Full/Outer merge/join of any number of tables. The first column is used as index.
+## Tables are expected to have named columns. 
+## The index columns don;t need to have the same name, but The first file's index-column name should not be reused for non-index columns in any of the other tables.
 ## Output to STDOUT, be sure to redirect!
 
 library(data.table)
