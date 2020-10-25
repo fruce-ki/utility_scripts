@@ -21,6 +21,7 @@ knitr::opts_chunk$set(echo = TRUE, warning=FALSE)
 library(httr)
 library(lubridate)
 library(ggplot2)
+library(gganimate)
 library(ggrepel)
 library(patchwork)
 library(data.table)
@@ -32,7 +33,140 @@ require(rgeos)
 options(scipen=2)
 ```
 
+Source: https://opendata.ecdc.europa.eu/covid19/
+
 # Load and process map and current data
+
+```{r}
+tf <- "~/global.csv"
+GET("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", authenticate(":", ":", type="ntlm"), write_disk(tf, overwrite = TRUE))
+globcases <- fread(tf)
+setnames(globcases, c('dateRep', 'day', 'month', 'year', 'new_Cases', 'new_Deaths', 'Country', 'geoId', 'countryCode', 'population', 'continent', 'roll_norm_Cases'))
+globcases[, Date := dmy(dateRep)]
+globcases <- globcases[, .(Country, countryCode, continent, population, Date, new_Cases, new_Deaths)]
+# str(globcases)
+
+## Create year-week field, to enable smoother merging with the other tables, as they can have NA dates.
+# Start with separate fields, in case I need to add tweaks to them.
+globcases[, year := strftime(globcases$Date, format='%Y')]
+globcases[, week := as.integer(strftime(globcases$Date, format='%V'))]
+globcases[, year_week := paste0(year, '-W', week)]
+globcases[, year := NULL]
+globcases[, week := NULL]
+
+tf <- "~/testing.csv"
+GET("https://opendata.ecdc.europa.eu/covid19/testing/csv", authenticate(":", ":", type="ntlm"), write_disk(tf, overwrite = TRUE))
+tests <- fread(tf)
+setnames(tests, c('Country', 'countryCode', 'year_week', 'test_Cases', 'new_Tests', 'population', 'test_Rate', 'pos_Rate', 'source'))
+tests <- tests[, .(Country, year_week, test_Cases, new_Tests)]
+# str(tests)
+## The UK has been mistyped in some entries, so that needs fixing to enable better correct merging of the tables.
+tests[Country=='United Kingdom', Country := 'United_Kingdom']
+## Fix inconsistent formatting that is messing up the mergers
+tests[, year_week:= sub('W0', 'W', year_week)]
+
+tf <- "~/hospitalizations.csv"
+GET("https://opendata.ecdc.europa.eu/covid19/hospitalicuadmissionrates/csv", authenticate(":", ":", type="ntlm"), write_disk(tf, overwrite = TRUE))
+icu <- fread(tf)
+setnames(icu, c('Country', 'Type', 'Date', 'year_week', 'Value', 'source', 'URL'))
+## The UK has been mistyped in some entries, so that needs fixing to enable better correct merging of the tables.
+icu[Country=='United Kingdom', Country := 'United_Kingdom']
+icu[, Date := as.Date(Date)]
+## Fix inconsistent formatting that is messing up the mergers
+icu[, year_week:= sub('W0', 'W', year_week)]
+## Split daily and weekly metrics that are wreaking havoc on my mergers.
+occup <- icu[grepl('occupancy', Type, fixed=TRUE), .(Country, Date, Type, Value)]
+occup <- dcast(occup, Country + Date ~ Type)
+setnames(occup, c('Country', 'Date', 'occup_ICU', 'occup_Hosp'))
+admit <- icu[grepl('admissions', Type, fixed=TRUE), .(Country, year_week, Type, Value)]
+admit <- dcast(admit, Country + year_week ~ Type)
+setnames(admit, c('Country', 'year_week', 'norm_new_ICU', 'norm_new_Hosp'))
+admit[, norm_new_ICU := norm_new_ICU * 10 ]   # re-normalize to 1M instead of 100K, to be same as my other norms
+admit[, norm_new_Hosp := norm_new_Hosp * 10 ]
+# str(icu)
+```
+
+```{r}
+# Marry the tables
+DT <- merge(merge(globcases, occup, by=c('Country', 'Date'), all=TRUE), 
+            merge(admit, tests, by=c('Country', 'year_week'), all=TRUE), 
+            by=c('Country', 'year_week'), all=TRUE)
+# View(merge(globcases, occup, by=c('Country', 'Date'), all=TRUE)[Country=='Denmark',])
+# View(merge(admit, tests, by=c('Country', 'year_week'), all=TRUE)[Country=='Denmark',])
+# View(DT[Country=='Denmark',])
+# str(DT)
+
+## Some country codes are NA in some rows. Try to fill in the missing values.
+DT[, countryCode := .SD$countryCode[!is.na(.SD$countryCode)][1], by=Country]
+
+# Sort newest last, for cumulative metrics.
+setorder(DT, Country, Date)
+
+## Missing days break the cumulative sums
+DT[is.na(new_Cases), new_Cases := 0]
+DT[is.na(new_Deaths), new_Deaths := 0]
+DT[is.na(new_Tests), new_Tests := 0]
+DT[is.na(norm_new_Hosp), norm_new_Hosp := 0]
+DT[is.na(norm_new_ICU), norm_new_ICU := 0]
+
+# Total Cases and Deaths
+DT[, total_Cases := cumsum(new_Cases), by=Country]
+DT[, total_Deaths := cumsum(new_Deaths), by=Country]
+DT[, total_Tests := cumsum(new_Tests), by=Country]
+
+# Sliding window cumulative cases in a W-days window.
+W <- 7
+DT[, roll_Cases := frollsum(new_Cases, n=W, align='right', na.rm=TRUE), by=Country]
+DT[, roll_Deaths := frollsum(new_Deaths, n=W, align='right', na.rm=TRUE), by=Country]
+DT[, roll_Tests := frollsum(new_Tests, n=W, align='right', na.rm=TRUE), by=Country]
+
+# Population normalisations to P citizens
+P <- 1e6
+DT[, norm_new_Cases := new_Cases / population * P, by=Country]
+DT[, norm_new_Deaths := new_Deaths / population * P, by=Country]
+DT[, norm_new_Tests := new_Tests / population * P, by=Country]
+DT[, norm_tot_Cases := total_Cases / population * P, by=Country]
+DT[, norm_tot_Deaths := total_Deaths / population * P, by=Country]
+DT[, norm_tot_Tests := total_Tests / population * P, by=Country]
+DT[, norm_tot_ICU := cumsum(norm_new_ICU), by=Country]
+DT[, norm_tot_Hosp := cumsum(norm_new_Hosp), by=Country]
+DT[, norm_roll_Cases := roll_Cases / population * P, by=Country]
+DT[, norm_roll_Deaths := roll_Deaths / population * P, by=Country]
+DT[, norm_roll_Tests := roll_Tests / population * P, by=Country]
+DT[, norm_roll_ICU := frollsum(norm_new_ICU, n=W, align='right', na.rm=TRUE), by=Country]
+DT[, norm_roll_Hosp := frollsum(norm_new_Hosp, n=W, align='right', na.rm=TRUE), by=Country]
+
+# Severity rates
+DT[, Mortality := total_Deaths / total_Cases]
+DT[, roll_TestCase_Rate := norm_roll_Cases / norm_roll_Tests]
+DT[, roll_HospICU_Rate := norm_roll_ICU / norm_roll_Hosp]
+DT[, roll_ICUDeath_Rate := norm_roll_Deaths / norm_roll_ICU]
+
+# Global
+DT[, gNew_Cases := sum(new_Cases, na.rm=TRUE), by=Date]
+DT[, gNew_Deaths := sum(new_Deaths, na.rm=TRUE), by=Date]
+DT[, gNew_Tests := sum(new_Tests, na.rm=TRUE), by=Date]
+DT[, gTotal_Cases := sum(total_Cases, na.rm=TRUE), by=Date]
+DT[, gTotal_Deaths := sum(total_Deaths, na.rm=TRUE), by=Date]
+DT[, gTotal_Tests := sum(total_Tests, na.rm=TRUE), by=Date]
+DT[, gRoll_Cases := sum(roll_Cases, na.rm=TRUE), by=Date]
+DT[, gRoll_Deaths := sum(roll_Deaths, na.rm=TRUE), by=Date]
+DT[, gRoll_Tests := sum(roll_Tests, na.rm=TRUE), by=Date]
+DT[, gMortality := gTotal_Deaths / gTotal_Cases]
+
+# Rates of daily change
+DT[, roll_Cases_Rate := frollapply(roll_Cases, n=2, FUN = function(x){x[2] / x[1]}, align="right"), by=Country]
+DT[, roll_Deaths_Rate := frollapply(roll_Deaths, n=2, FUN = function(x){x[2] / x[1]}, align="right"), by=Country]
+DT[, roll_Tests_Rate := frollapply(norm_roll_Tests, n=2, FUN = function(x){x[2] / x[1]}, align="right"), by=Country]
+DT[, roll_Hosp_Rate := frollapply(norm_roll_Hosp, n=2, FUN = function(x){x[2] / x[1]}, align="right"), by=Country]
+DT[, roll_ICU_Rate := frollapply(norm_roll_ICU, n=2, FUN = function(x){x[2] / x[1]}, align="right"), by=Country]
+
+DT[, gRoll_Cases_Rate := frollapply(gRoll_Cases, n=2, FUN = function(x){x[2] / x[1]}, align="right"), by=Country]
+DT[, gRoll_Deaths_Rate := frollapply(gRoll_Deaths, n=2, FUN = function(x){x[2] / x[1]}, align="right"), by=Country]
+
+# Compare severity to one country.
+homecountry = 'Austria'
+```
 
 ```{r}
 # Download the shape file from the web and unzip it:
@@ -40,87 +174,23 @@ options(scipen=2)
 # system("unzip ~/shape_files/world_shape_file.zip")
 world_spdf <- readOGR(dsn='~/shape_files/world_shape_file', layer='TM_WORLD_BORDERS_SIMPL-0.3')
 
-tf <- "~/covid19.csv"
-GET("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", authenticate(":", ":", type="ntlm"), write_disk(tf, overwrite = TRUE))
-DT <- fread(tf)
-setnames(DT, c('dateRep', 'day', 'month', 'year', 'new_Cases', 'new_Deaths', 'Country', 'geoId', 'countryCode', 'population', 'continent', 'roll_norm_Cases'))
-DT[, Date := dmy(dateRep)]
-```
-
-```{r}
-# Dataframe-ize.
+# Dataframe-ize map.
 world_df <- as.data.table(tidy(world_spdf, region="ISO3"))
 # For plottting, the order of rows is super important. 
 # Merge operations later can change the order, so I need to be able to recover it.
 world_df[, ord := 1:nrow(world_df)]
-
-# Sort newest last.
-setorder(DT, Country, year, month, day)
-
-# Total Cases and Deaths
-DT[, total_Cases := cumsum(new_Cases), by=Country]
-DT[, total_Deaths := cumsum(new_Deaths), by=Country]
-DT[, Mortality := total_Deaths / total_Cases, by=Country]
-
-# Sliding window cumulative cases in a W-days window.
-W <- 7
-DT[, roll_Cases := frollsum(new_Cases, n=W, align='right'), by=Country]
-DT[, roll_Deaths := frollsum(new_Deaths, n=W, align='right'), by=Country]
-
-# Remove all lines with no info
-#DT <- DT[total_Cases > 0,]
-
-
-# Day relative to first reported case
-DT[, Day := 1:length(.SD$new_Cases), by=Country]
-
-# Day relative to N deaths
-N <- 100
-DT[, Nplus := abs(total_Deaths - N)]
-DT[, Day_Aligned := Day - .SD[Nplus==min(Nplus), Day][1], by=Country]
-DT[, Nplus := NULL]
-
-# Day relative to today
-DT[, past_Days := Day - max(Day), by=Country]
-
-# Population normalisations to P citizens
-P <- 1e6
-DT[, norm_new_Cases := new_Cases / population * P, by=Country]
-DT[, norm_new_Deaths := new_Deaths / population * P, by=Country]
-DT[, norm_tot_Cases := total_Cases / population * P, by=Country]
-DT[, norm_tot_Deaths := total_Deaths / population * P, by=Country]
-DT[, norm_roll_Cases := roll_Cases / population * P, by=Country]
-DT[, norm_roll_Deaths := roll_Deaths / population * P, by=Country]
-
-# Global
-DT[, gNew_Cases := sum(new_Cases, na.rm=TRUE), by=Date]
-DT[, gNew_Deaths := sum(new_Deaths, na.rm=TRUE), by=Date]
-DT[, gTotal_Cases := sum(total_Cases, na.rm=TRUE), by=Date]
-DT[, gTotal_Deaths := sum(total_Deaths, na.rm=TRUE), by=Date]
-DT[, gRoll_Cases := sum(roll_Cases, na.rm=TRUE), by=Date]
-DT[, gRoll_Deaths := sum(roll_Deaths, na.rm=TRUE), by=Date]
-DT[, gMortality := gTotal_Deaths / gTotal_Cases]
-
-# Rates of daily change
-DT[, roll_Cases_Rate := frollapply(roll_Cases, n=2, FUN = function(x){x[2] / x[1]}, align="right"), by=Country]
-DT[, roll_Deaths_Rate := frollapply(roll_Deaths, n=2, FUN = function(x){x[2] / x[1]}, align="right"), by=Country]
-DT[, gRoll_Cases_Rate := frollapply(gRoll_Cases, n=2, FUN = function(x){x[2] / x[1]}, align="right"), by=Country]
-DT[, gRoll_Deaths_Rate := frollapply(gRoll_Deaths, n=2, FUN = function(x){x[2] / x[1]}, align="right"), by=Country]
-
-# Compare severity to one country.
-homecountry = 'Austria'
-
-
 ```
 
-The Covid10 dataset from ECDC comes without geospacial data. The geospacial data available from other sources may not be the most up-to-date with recognised countries and names.
+The Covid19 dataset from ECDC comes without geospacial data. The geospacial data available from other sources may not be the most up-to-date with recognised countries and names.
 
 ```{r}
-message(paste(sum(!( world_spdf$ISO2 %in% DT$geoId | world_spdf$ISO3 %in% DT$countryCode)), 
+message(paste(sum(!(world_spdf$ISO3 %in% DT$countryCode)), 
 							"countries in the map file do not correspond to an entry in the Covid19 data."))
 
-outgroup <- unique(DT[!(geoId %in% world_spdf$ISO2 | countryCode %in% world_spdf$ISO3), 
-											.(Country, countryCode, geoId)])
+print(world_spdf$ISO3[! world_spdf$ISO3 %in% DT$countryCode])
+
+
+outgroup <- unique(DT[!(countryCode %in% world_spdf$ISO3), .(Country, countryCode)])
 message(paste(nrow(outgroup),
 							"countries in the Covid19 data do not correspond to an entity in the map file:"))
 print(outgroup)
@@ -129,262 +199,191 @@ print(outgroup)
 One of those entries corresponds to a ship, leaving only 5 Countries not represented in the map file.
 I think for a global overview map, the missing countries will not make a big difference.
 
-<!-- ```{r} -->
-<!-- ggplot() + -->
-<!-- 	geom_polygon(data=world_df, aes(x=long, y=lat, group=group), fill='grey60', colour='black', size=0.2) + -->
-<!-- 	theme_void() + -->
-<!-- 	theme(panel.background = element_rect(fill='#BBDDFF')) -->
-<!-- ``` -->
 
 # Status
 
 ```{r}
-minpop=5e5
-current <- max(DT$Date)
+case_col = '#FF0000'
+death_col = '#0055FF'
+hosp_col = '#555500'
+icu_col = '#995500'
+test_col = '#005500'
+
+
+current <- max(DT$Date, na.rm = TRUE)
 
 print( data.frame(DaysTracked = length(unique(DT$Date)),
 					CountriesTracked = length(unique(DT$Country)) ) )
 
-print( data.frame( Global_Cases = sum(DT$new_Cases),
-					Global_Deaths = sum(DT$new_Deaths),
-					Global_Mortality = sum(DT$new_Deaths) / sum(DT$new_Cases) ) )
+print( data.frame( Global_Cases = sum(DT$new_Cases, na.rm = TRUE),
+					Global_Deaths = sum(DT$new_Deaths, na.rm = TRUE),
+					Global_Mortality = sum(DT$new_Deaths, na.rm = TRUE) / sum(DT$new_Cases, na.rm = TRUE) ) )
 ```
 
 ## Reported events since the beginning
 
-### Absolute
+Per `r P/1e6`M residents.
 
 ```{r, fig.width=10, fig.height=5}
-subDT1 <- merge(world_df, DT[past_Days==0, .(countryCode, continent, total_Cases)], by.x='id', by.y='countryCode')
-setorder(subDT1, ord)
+subDT <- merge(world_df, DT[Date==current, ], by.x='id', by.y='countryCode', all=TRUE)
+setorder(subDT, ord)
 
-subDT2 <- merge(world_df, DT[past_Days==0, .(countryCode, continent, total_Deaths)], by.x='id', by.y='countryCode')
-setorder(subDT2, ord)
-
-p1 <-	ggplot(subDT1, aes(x=long, y=lat, group=group, fill=total_Cases)) +
+print(
+  ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_tot_Cases)) +
 		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkred', low='white') +
+		scale_fill_gradient(high=case_col, low='white') +
+    coord_cartesian(ylim=c(-60,80)) +
 		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
+		theme(panel.background = element_rect(fill='#BBFFFF'))
+)
 
-p2 <-	ggplot(subDT2, aes(x=long, y=lat, group=group, fill=total_Deaths)) +
+print(
+  ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_tot_Deaths)) +
 		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkgreen', low='white') +
+		scale_fill_gradient(high=death_col, low='white') +
+		coord_cartesian(ylim=c(-60,80)) +
 		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
-
-print( p1 )
-print( p2 )
+		theme(panel.background = element_rect(fill='#BBFFFF'))
+)
 ```
 
 ```{r, fig.width=7, fig.height=6}
-p1 <-	ggplot(subDT1[continent=='Europe',], aes(x=long, y=lat, group=group, fill=total_Cases)) +
+print(
+  ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_tot_Cases)) +
 		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkred', low='white') +
+		scale_fill_gradient(high=case_col, low='white') +
 	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
 		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
+		theme(panel.background = element_rect(fill='#BBFFFF'))
+)
 
-p2 <-	ggplot(subDT2[continent=='Europe',], aes(x=long, y=lat, group=group, fill=total_Deaths)) +
+print(
+  ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_tot_Deaths)) +
 		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkgreen', low='white') +
+		scale_fill_gradient(high=death_col, low='white') +
 	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
 		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
+		theme(panel.background = element_rect(fill='#BBFFFF'))
+)
 
+if(any(!is.na(subDT$norm_tot_Tests) & subDT$norm_tot_Tests > 0)){
+  print(
+    ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_tot_Tests)) +
+  		geom_polygon(colour='black', size=0.2) +
+  		scale_fill_gradient(high=test_col, low='white') +
+  	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
+  		theme_void() +
+  		theme(panel.background = element_rect(fill='#BBFFFF'))
+  )
+}
 
-print( p1 )
-print( p2 )
-```
+if(any(!is.na(subDT$norm_tot_Hosp) & subDT$norm_tot_Hosp > 0)){
+  print(
+    ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_tot_Hosp)) +
+  		geom_polygon(colour='black', size=0.2) +
+  		scale_fill_gradient(high=hosp_col, low='white') +
+  	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
+  		theme_void() +
+  		theme(panel.background = element_rect(fill='#BBFFFF'))
+  )
+}
 
-### Normalized per `r P` residents.
-
-```{r, fig.width=10, fig.height=5}
-subDT1 <- merge(world_df, DT[past_Days==0, .(countryCode, continent, norm_tot_Cases)], by.x='id', by.y='countryCode')
-setorder(subDT1, ord)
-
-subDT2 <- merge(world_df, DT[past_Days==0, .(countryCode, continent, norm_tot_Deaths)], by.x='id', by.y='countryCode')
-setorder(subDT2, ord)
-
-p1 <-	ggplot(subDT1, aes(x=long, y=lat, group=group, fill=norm_tot_Cases)) +
-		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkred', low='white') +
-		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
-
-p2 <-	ggplot(subDT2, aes(x=long, y=lat, group=group, fill=norm_tot_Deaths)) +
-		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkgreen', low='white') +
-		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
-
-print( p1 )
-print( p2 )
-```
-
-```{r, fig.width=7, fig.height=6}
-p1 <-	ggplot(subDT1[continent=='Europe',], aes(x=long, y=lat, group=group, fill=norm_tot_Cases)) +
-		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkred', low='white') +
-	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
-		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
-
-p2 <-	ggplot(subDT2[continent=='Europe',], aes(x=long, y=lat, group=group, fill=norm_tot_Deaths)) +
-		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkgreen', low='white') +
-	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
-		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
-
-
-print( p1 )
-print( p2 )
+if(any(!is.na(subDT$norm_tot_ICU) & subDT$norm_tot_ICU > 0)){
+  print(
+    ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_tot_ICU)) +
+  		geom_polygon(colour='black', size=0.2) +
+  		scale_fill_gradient(high=icu_col, low='white') +
+  	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
+  		theme_void() +
+  		theme(panel.background = element_rect(fill='#BBFFFF'))
+  )
+}
 ```
 
 ## Reported events in last `r W` days
 
-### Absolute
+Per `r P/1e6`M residents.
 
 ```{r, fig.width=10, fig.height=5}
-subDT1 <- merge(world_df, DT[past_Days==0, .(countryCode, continent, roll_Cases)], by.x='id', by.y='countryCode')
-setorder(subDT1, ord)
-
-subDT2 <- merge(world_df, DT[past_Days==0, .(countryCode, continent, roll_Deaths)], by.x='id', by.y='countryCode')
-setorder(subDT2, ord)
-
-p1 <-	ggplot(subDT1, aes(x=long, y=lat, group=group, fill=roll_Cases)) +
+print(
+  ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_roll_Cases)) +
 		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkred', low='white') +
+		scale_fill_gradient(high=case_col, low='white') +
+		coord_cartesian(ylim=c(-60,80)) +
 		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
+		theme(panel.background = element_rect(fill='#BBFFFF'))
+)
 
-p2 <-	ggplot(subDT2, aes(x=long, y=lat, group=group, fill=roll_Deaths)) +
+print(
+  ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_roll_Deaths)) +
 		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkgreen', low='white') +
+		scale_fill_gradient(high=death_col, low='white') +
+		coord_cartesian(ylim=c(-60,80)) +
 		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
-
-print( p1 )
-print( p2 )
-```
-
-```{r, fig.width=8, fig.height=6}
-p1 <-	ggplot(subDT1[continent=='Europe',], aes(x=long, y=lat, group=group, fill=roll_Cases)) +
-		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkred', low='white') +
-	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
-		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
-
-p2 <-	ggplot(subDT2[continent=='Europe',], aes(x=long, y=lat, group=group, fill=roll_Deaths)) +
-		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkgreen', low='white') +
-	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
-		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
-
-print( p1 )
-print( p2 )
-```
-
-### Normalized per `r P` residents.
-
-```{r, fig.width=10, fig.height=5}
-subDT1 <- merge(world_df, DT[past_Days==0, .(countryCode, continent, norm_roll_Cases)], by.x='id', by.y='countryCode')
-setorder(subDT1, ord)
-
-subDT2 <- merge(world_df, DT[past_Days==0, .(countryCode, continent, norm_roll_Deaths)], by.x='id', by.y='countryCode')
-setorder(subDT2, ord)
-
-p1 <-	ggplot(subDT1, aes(x=long, y=lat, group=group, fill=norm_roll_Cases)) +
-		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkred', low='white') +
-		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
-
-p2 <-	ggplot(subDT2, aes(x=long, y=lat, group=group, fill=norm_roll_Deaths)) +
-		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkgreen', low='white') +
-		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
-
-print( p1 )
-print( p2 )
+		theme(panel.background = element_rect(fill='#BBFFFF'))
+)
 ```
 
 ```{r, fig.width=7, fig.height=6}
-p1 <-	ggplot(subDT1[continent=='Europe',], aes(x=long, y=lat, group=group, fill=norm_roll_Cases)) +
+print(
+  ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_roll_Cases)) +
 		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkred', low='white') +
+		scale_fill_gradient(high=case_col, low='white') +
 	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
 		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
+		theme(panel.background = element_rect(fill='#BBFFFF'))
+)
 
-p2 <-	ggplot(subDT2[continent=='Europe',], aes(x=long, y=lat, group=group, fill=norm_roll_Deaths)) +
+print(
+  ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_roll_Deaths)) +
 		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkgreen', low='white') +
+		scale_fill_gradient(high=death_col, low='white') +
 	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
 		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
+		theme(panel.background = element_rect(fill='#BBFFFF'))
+)
 
-print( p1 )
-print( p2 )
+if(any(!is.na(subDT$norm_roll_Tests) & subDT$norm_roll_Tests > 0)){
+  print(
+    ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_roll_Tests)) +
+  		geom_polygon(colour='black', size=0.2) +
+  		scale_fill_gradient(high=test_col, low='white') +
+  	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
+  		theme_void() +
+  		theme(panel.background = element_rect(fill='#BBFFFF'))
+  )
+}
+
+if(any(!is.na(subDT$norm_roll_Hosp) & subDT$norm_roll_Hosp > 0)){
+  print(
+    ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_roll_Hosp)) +
+  		geom_polygon(colour='black', size=0.2) +
+  		scale_fill_gradient(high=hosp_col, low='white') +
+  	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
+  		theme_void() +
+  		theme(panel.background = element_rect(fill='#BBFFFF'))
+  )
+}
+
+if(any(!is.na(subDT$norm_roll_ICU) & subDT$norm_roll_ICU > 0)){
+  print(
+    ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_roll_ICU)) +
+  		geom_polygon(colour='black', size=0.2) +
+  		scale_fill_gradient(high=icu_col, low='white') +
+  	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
+  		theme_void() +
+  		theme(panel.background = element_rect(fill='#BBFFFF'))
+  )
+}
 ```
 
-
-## Rate of change since the day before.
-
-This looks at how the `r W`-day rolling totals changed from yesterday to today.
-
-```{r, fig.width=10, fig.height=5}
-subDT1 <- merge(world_df, DT[past_Days==0, .(countryCode, continent, roll_Cases_Rate)], by.x='id', by.y='countryCode')
-setorder(subDT1, ord)
-
-subDT2 <- merge(world_df, DT[past_Days==0, .(countryCode, continent, roll_Deaths_Rate)], by.x='id', by.y='countryCode')
-setorder(subDT2, ord)
-
-p1 <-	ggplot(subDT1, aes(x=long, y=lat, group=group, fill=roll_Cases_Rate)) +
-		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkred', low='white') +
-		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
-
-p2 <-	ggplot(subDT2, aes(x=long, y=lat, group=group, fill=roll_Deaths_Rate)) +
-		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkgreen', low='white') +
-		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
-
-print( p1 )
-print( p2 )
-```
-
-```{r, fig.width=7, fig.height=6}
-p1 <-	ggplot(subDT1[continent=='Europe',], aes(x=long, y=lat, group=group, fill=roll_Cases_Rate)) +
-		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkred', low='white') +
-	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
-		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
-
-p2 <-	ggplot(subDT2[continent=='Europe',], aes(x=long, y=lat, group=group, fill=roll_Deaths_Rate)) +
-		geom_polygon(colour='black', size=0.2) +
-		scale_fill_gradient(high='darkgreen', low='white') +
-	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
-		theme_void() +
-		theme(panel.background = element_rect(fill='#BBDDFF'))
-
-print( p1 )
-print( p2 )
-```
 
 
 ## Countries of personal interest
 
 ```{r}
 topInterest <- c('Austria', 'Italy', 'Greece', 'Luxembourg', 'Germany')
-setorder(DT, Country, past_Days)
+setorder(DT, Country, Date)
 ```
 
 Normalized to `r P` residents.
@@ -392,31 +391,31 @@ Normalized to `r P` residents.
 ### In last `r W` days
 
 ```{r}
-DT[past_Days==0 & Country %in% topInterest, .(Country, norm_roll_Cases, roll_Cases, norm_roll_Deaths, roll_Deaths)]
+DT[Date==current & Country %in% topInterest, .(Country, norm_roll_Cases, norm_roll_Deaths, norm_roll_Tests, norm_roll_Hosp, norm_roll_ICU)]
 ```
 
 ### Since the beginning
 
 ```{r}
-DT[past_Days==0 & Country %in% topInterest, .(Country, norm_tot_Cases, total_Cases, norm_tot_Deaths, total_Deaths)]
+DT[Date==current & Country %in% topInterest, .(Country, norm_tot_Cases, norm_tot_Deaths, norm_tot_Tests, norm_tot_Hosp, norm_tot_ICU)]
 ```
-
-
-
 
 # Timeline
 
 ```{r}
-case_col = '#FF0000'
-death_col = '#0088FF'
-homecountry = 'Austria'
-
 # Numbers over time
-tidyDT <- melt(DT[, .(Date, Country, norm_new_Cases, norm_new_Deaths, norm_tot_Cases, norm_tot_Deaths, norm_roll_Cases, norm_roll_Deaths)],
+tidyDT <- melt(DT[, .(Date, Country, 
+                      norm_new_Cases, norm_new_Deaths, norm_new_Tests, #norm_new_Hosp, norm_new_ICU,
+                      norm_tot_Cases, norm_tot_Deaths, norm_tot_Tests, #norm_tot_Hosp, norm_tot_ICU,
+                      norm_roll_Cases, norm_roll_Deaths, norm_roll_Tests#, norm_roll_Hosp, norm_roll_ICU
+                      )],
 								id.vars = c('Date', 'Country'), variable.name = 'Type', value.name = 'Normalized_count')
 tidyDT[grepl('Death', Type), vsplit := 'Deaths']
-tidyDT[!grepl('Death', Type), vsplit := 'Cases']
-tidyDT[, hsplit := sub('_Cases|_Deaths', '', sub('norm_', '', Type), perl=TRUE)]
+tidyDT[grepl('Cases', Type), vsplit := 'Cases']
+tidyDT[grepl('Tests', Type), vsplit := 'Tests']
+# tidyDT[grepl('Hosp', Type), vsplit := 'Hosp']
+# tidyDT[grepl('ICU', Type), vsplit := 'ICU']
+tidyDT[, hsplit := sub('_Cases|_Deaths|_Tests|_Hosp|_ICU', '', sub('norm_', '', Type), perl=TRUE)]
 setkey(tidyDT, Country)
 
 # Rolling VS Total (exponential-ness)
@@ -447,7 +446,7 @@ relative_plot <- function(df=expDT, sel_country, title='') {
 		geom_line(data=df[sel_country,], size=0.8) +
 		scale_x_log10() +
 		scale_y_log10() +
-		scale_colour_manual(values=c(Deaths=death_col, Cases=case_col)) +
+		scale_colour_manual(values=c(Deaths=death_col, Cases=case_col, Tests=test_col, Hosp=hosp_col, ICU=icu_col)) +
 		coord_cartesian(xlim=c(1,NA), ylim=c(1,NA)) +
 		annotation_logticks(sides='lrbt') +
 		labs(title=title) +
@@ -461,7 +460,7 @@ numbers_plot <- function(df=tidyDT, sel_country, title='') {
 		geom_line(colour='#000000', alpha=0.1, size=0.2) +
 		geom_line(data=df[sel_country,], size=0.8) +
 		scale_y_log10() +
-		scale_colour_manual(values=c(Deaths=death_col, Cases=case_col)) +
+		scale_colour_manual(values=c(Deaths=death_col, Cases=case_col, Tests=test_col, Hosp=hosp_col, ICU=icu_col)) +
 		coord_cartesian(ylim=c(1,NA)) +
 		annotation_logticks(sides='lr') +
 		labs(title=title, y='', x='') +
@@ -489,8 +488,8 @@ ratio_plot <- function(df=tidyDT, sel_country, ref_country=homecountry, title=''
 		geom_hline(yintercept = 1, size=0.15) +
 		geom_point(size=0.5) +
 	  geom_smooth(span=0.3, size=0.75) +
-		scale_y_continuous(trans='log2', breaks=c(1/32,1/16,1/8,1/4,1/2,1,4,8,16,32)) +
-		scale_colour_manual(values=c(Deaths=death_col, Cases=case_col)) +
+		scale_y_continuous(trans='log2', breaks=c(1/32,1/8,1/4,1,4,8,32)) +
+		scale_colour_manual(values=c(Deaths=death_col, Cases=case_col, Tests=test_col, Hosp=hosp_col, ICU=icu_col)) +
 		coord_cartesian(ylim=c(1/33, 33)) +
 		# annotation_logticks(sides='lr') +
 		labs(title=title, y='', x='') +
@@ -527,7 +526,7 @@ fewer_plots <- function(numbers=tidyDT[hsplit=='roll',], exponential=expDT, rate
 	p3 <- rate_plot(rates, sel_country,
 	                title=paste(sel_country, ': Daily change rate of', W, '-day roll. sum'))
 	
-	print( p1 / p2 / p3 )
+	print( p1 / p2 )
 }
 
 ```
@@ -558,21 +557,24 @@ subDT <- unique(DT[, .(Date, gRoll_Cases_Rate, gRoll_Deaths_Rate, gMortality)])
 
 p3 <- ggplot(subDT, aes(x=Date, y=gRoll_Cases_Rate)) +
 	geom_hline(yintercept = 1, size=0.1) +
-	geom_line(colour=case_col, size=0.5) +
-	coord_cartesian(ylim=c(0.9, 1.1)) +
+  geom_point(colour=case_col, size=0.5) +
+	geom_smooth(span=0.2, colour=case_col, size=0.5) +
+	coord_cartesian(ylim=c(0.8, 1.2)) +
 	labs(title=paste('Daily change rate of ', W, '-day rolling sum')) +
 	theme_bw()
 
 p4 <- ggplot(subDT, aes(x=Date, y=gRoll_Deaths_Rate)) +
 	geom_hline(yintercept = 1, size=0.1) +
-	geom_line(colour=death_col, size=0.5) +
-	coord_cartesian(ylim=c(0.9, 1.1)) +
+  geom_point(colour=death_col, size=0.5) +
+	geom_smooth(span=0.2, colour=death_col, size=0.5) +
+	coord_cartesian(ylim=c(0.8, 1.2)) +
 	labs(title='') +
 		theme_bw()
 
 p5 <- ggplot(subDT, aes(x=Date, y=gMortality)) +
 	geom_hline(yintercept = 0, size=0.1) +
-	geom_line(colour=death_col, size=0.5) +
+  geom_point(colour=death_col, size=0.5) +
+	geom_smooth(span=0.3, colour=death_col, size=0.5) +
 	labs(title='') +
 		theme_bw()
 
