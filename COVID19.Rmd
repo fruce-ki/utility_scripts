@@ -41,7 +41,7 @@ Source: https://opendata.ecdc.europa.eu/covid19/
 
 ```{r}
 tf <- "~/covid/global.csv"
-# GET("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", authenticate(":", ":", type="ntlm"), write_disk(tf, overwrite = TRUE))
+GET("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", authenticate(":", ":", type="ntlm"), write_disk(tf, overwrite = TRUE))
 globcases <- fread(tf)
 setnames(globcases, c('dateRep', 'day', 'month', 'year', 'new_Cases', 'new_Deaths', 'Country', 'geoId', 'countryCode', 'population', 'continent', 'roll_norm_Cases'))
 globcases[, Date := as.Date(dmy(dateRep))]
@@ -75,7 +75,7 @@ message(paste('Last entry date used:', current, '.'))
 
 
 tf <- "~/covid/testing.csv"
-# GET("https://opendata.ecdc.europa.eu/covid19/testing/csv", authenticate(":", ":", type="ntlm"), write_disk(tf, overwrite = TRUE))
+GET("https://opendata.ecdc.europa.eu/covid19/testing/csv", authenticate(":", ":", type="ntlm"), write_disk(tf, overwrite = TRUE))
 tests <- fread(tf)
 setnames(tests, c('Country', 'countryCode', 'year_week', 'test_Cases', 'new_Tests', 'population', 'test_Rate', 'pos_Rate', 'source'))
 tests <- tests[, .(Country, year_week, new_Tests)]
@@ -86,7 +86,7 @@ tests[Country=='United Kingdom', Country := 'United_Kingdom']
 tests[, year_week:= sub('W0', 'W', year_week)]
 
 tf <- "~/covid/hospitalizations.csv"
-# GET("https://opendata.ecdc.europa.eu/covid19/hospitalicuadmissionrates/csv", authenticate(":", ":", type="ntlm"), write_disk(tf, overwrite = TRUE))
+GET("https://opendata.ecdc.europa.eu/covid19/hospitalicuadmissionrates/csv", authenticate(":", ":", type="ntlm"), write_disk(tf, overwrite = TRUE))
 icu <- fread(tf)
 setnames(icu, c('Country', 'Type', 'Date', 'year_week', 'Value', 'source', 'URL'))
 ## The UK has been mistyped in some entries, so that needs fixing to enable better correct merging of the tables.
@@ -251,9 +251,6 @@ hosp_col = '#555500'
 icu_col = '#995500'
 test_col = '#005500'
 
-subDT <- merge(world_df, DT[Date==current, ], by.x='id', by.y='countryCode', all=TRUE)
-setorder(subDT, ord)
-
 print( data.frame(DaysTracked = length(unique(DT$Date)),
 					CountriesTracked = length(unique(DT$Country)) ) )
 
@@ -262,8 +259,47 @@ print( data.frame( Global_Cases = sum(DT$new_Cases, na.rm = TRUE),
 					Global_Mortality = sum(DT$new_Deaths, na.rm = TRUE) / sum(DT$new_Cases, na.rm = TRUE) ) )
 ```
 
+## World worst and best
+
+```{r}
+subDT <- DT[Date==current, , by=Country][, .(Country, norm_roll_Cases)]
+# Worst
+tail(subDT, n=10)
+# Best
+head(subDT, n=10)
+
+subDT <- DT[Date==current, , by=Country][, norm_roll_Deaths]
+# Worst
+tail(subDT, n=10)
+# Best
+head(subDT, n=10)
+
+```
+
+## Europe worst and best
+
+```{r}
+subDT <- DT[continent=='Europe', max(norm_roll_Cases, na.rm=TRUE), by=Country][order(V1),]
+setnames(subDT, c('Country', 'norm_roll_Cases'))
+# Worst
+tail(subDT, n=10)
+# Best
+head(subDT, n=10)
+```
+
 
 ## Reported events in last `r W` days
+
+```{r}
+case_col = '#FF0000'
+death_col = '#0055FF'
+hosp_col = '#555500'
+icu_col = '#995500'
+test_col = '#005500'
+
+subDT <- merge(world_df, DT[Date==current, ], by.x='id', by.y='countryCode', all=TRUE)
+setorder(subDT, ord)
+```
 
 Per `r P/1e6`M residents.
 
@@ -515,8 +551,11 @@ fewer_plots <- function(numbers=tidyDT[hsplit=='roll',], exponential=expDT, rate
 	                   title=paste(sel_country, ': new, total &', W, '-day rolling sum, normalized to', P/1e6, 'M residents'))
 	# p3 <- rate_plot(rates, sel_country,
 	                # title=paste(sel_country, ': Daily change rate of', W, '-day roll. sum'))
-
-	print( p1 / p2 )
+  
+	p4 <- ratio_plot(numbers, sel_country, ref_country, 
+	                 title=paste(sel_country,':', W, '-day norm.roll. sum, relative to', ref_country))
+  
+	print( p1 / p2 / p4)
 }
 
 # Easier comparison plots. Many countries by info type.
@@ -539,7 +578,8 @@ compare_numbers <- function(df=tidyDT, info, countries) {
     annotation_logticks(side='lr') +
     coord_cartesian(ylim=c(1,NA))
   
-  print(p1 + p2)  
+  print((p1 + labs(y=paste(info, '(linear scale)'))) + 
+        (p2 + labs(y=paste(info, '(log scale)'))))  
 }
 
 compare_exp <- function(df, type, info_x, info_y, countries) {
@@ -563,7 +603,8 @@ compare_exp <- function(df, type, info_x, info_y, countries) {
     annotation_logticks(side='lb') +
     coord_cartesian(ylim=c(1,NA), xlim=c(1,NA))
   
-  print(p1 + p2)  
+  print((p1 + labs(y=paste(info_y, type, '(linear scale)'), x=paste(info_x, type, '(linear scale)') )) + 
+        (p2 + labs(y=paste(info_y, type, '(log scale)'), x=paste(info_x, type, '(linear scale)') )))  
 }
 
 ```
@@ -651,7 +692,7 @@ for (i in topInterest) {
 ```{r, fig.height=20, fig.width=10, warning=FALSE}
 countries <- c(topInterest, other_countries, neighbour_countries)
 
-for (j in c('norm_roll_Cases', 'norm_roll_Deaths', 'norm_roll_Tests')) {
+for (j in c('norm_roll_Cases', 'norm_roll_Deaths', 'norm_new_Tests')) {
 	compare_numbers(tidyDT, j, countries)
   
   ggsave(paste0('~/covid/', j, '_comp.png'), plot = last_plot(), scale = 1,
