@@ -365,7 +365,7 @@ if(any(is.finite(subDT$norm_roll_Tests) & subDT$norm_roll_Tests > 0)){
 }
 ```
 
-```{r, fig.width=14, fig.height=6}
+```{r, fig.width=7, fig.height=6}
 if(any(!is.na(subDT$norm_roll_Hosp) & subDT$norm_roll_Hosp > 0)){
   print(
     ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_roll_Hosp)) +
@@ -465,7 +465,7 @@ relative_plot <- function(df=expDT, sel_country, title='') {
 		scale_x_log10() +
 		scale_y_log10() +
 		coord_cartesian(xlim=c(1,NA), ylim=c(1,NA)) +
-		annotation_logticks(sides='lb') +
+		annotation_logticks(sides='lrb') +
 		labs(title=title) +
 		theme_bw() +
     theme(panel.grid=element_blank(),
@@ -479,11 +479,11 @@ numbers_plot <- function(df=tidyDT, sel_country, title='', linear=FALSE) {
                                                           ## demands too much memory and crashes.
 		geom_line(data=df[sel_country,], size=0.8) +
 		scale_colour_manual(values=c(Deaths=death_col, Cases=case_col, Tests=test_col, Hosp=hosp_col, ICU=icu_col)) +
-		# coord_cartesian(ylim=c(1,NA)) +
+    # coord_cartesian(ylim=c(1,NA)) +
 		labs(title=title, y='', x='') +
 		theme_bw() + 
 		theme(legend.position = 'none',
-					panel.grid = element_blank())
+					panel.grid.minor = element_blank())
   
   if (linear) {
     p1
