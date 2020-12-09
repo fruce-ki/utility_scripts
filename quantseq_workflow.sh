@@ -131,6 +131,11 @@ threads=4                       # also
 memory='40G'
 
 if [ "$dunk" -eq 1 ]; then
+    if ! [ -x "$(command -v slamdunk)" ]; then
+        echo "Error: slamdunk could not be found. Did you load the module?" >&2
+        exit 3
+    fi
+
     fqdir="${outdir}/fastq_trimmed"
 
     fileutilities.py T $fqdir --dir 'fastq.gz$|fq.gz$' | perl -e 'while(<>){~s/\.fastq$|\.fq$/\tdummy\t0/; print}' > ${outdir}/dunk/samplesheet.tsv
