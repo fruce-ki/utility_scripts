@@ -66,7 +66,14 @@ deobj <- readRDS(params$derds)
 rpm <- readRDS(params$rmrds)
 # ctsmat <- counts(deobj)
 message(params$derds)
-vstmat <- assay(vst(deobj, blind=FALSE))     # Variance stabisized counts
+
+vstmat = NULL
+tryCatch(vstmat <- assay(vst(deobj, blind=FALSE)),     # Variance stabisized counts,
+         error = function(e) {
+           stop("WARNING: Only one replicate per condition is available! DESeq2 no longer allows or supports estimating variances by pooling samples across conditions.")
+         }
+)
+
 cD <- colData(deobj)[, 1:length(colData(deobj)), drop=FALSE]  # before model building, there in no size factor as last column
 
 cat(paste("min allowed sum of raw counts across relevant samples:", params$minCount))
@@ -519,16 +526,16 @@ Correlations of the samples, based on the raw and the Variance-Stabilisation-Tra
 
 ```{r correlations, fig.height=7, fig.width=8}
 corels1 <- my_pairwise_internal_corels(method='spearman')
-print( corels1[['drnc']] )
-print( corels1[['frc']] )
+print( corels1[['frnc']] )
+print( corels1[['drc']] )
 ```
 
 ## RPM counts
 
 ```{r correlations2, fig.height=7, fig.width=8}
 corels2 <- my_pairwise_internal_corels(mat=rpm)
-print( corels2[['drnc']] )
-print( corels2[['frc']] )
+print( corels2[['frnc']] )
+print( corels2[['drc']] )
 ```
 
 
@@ -536,8 +543,8 @@ print( corels2[['frc']] )
 
 ```{r correlations3, fig.height=7, fig.width=8}
 corels3 <- my_pairwise_internal_corels(mat = vstmat)
-print( corels3[['drnc']] )
-print( corels3[['frc']] )
+print( corels3[['frnc']] )
+print( corels3[['drc']] )
 ```
 
 
