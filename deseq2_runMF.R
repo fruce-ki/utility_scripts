@@ -29,7 +29,7 @@ spec = matrix(c(
 ), byrow=TRUE, ncol=5)
 
 opt = getopt(spec)
-# opt <- list(baseDir='/Volumes/groups/zuber/zubarchive/USERS/Kimon/anja/M9186_quantseq', countsFile='process_quant/all_counts_xref.txt', resultsDir='results_quant/DE', RDSoutdir='process_quant/DE', samplesFile='description/covars.txt', control='Ren,empty,24h,K562-wt-Bulk', designFormula='~ protein', forvar='time', selvar='cells', sellev='K562_wt_Bulk', minCount=10, lfcthreshold=1, nidcols=3, idcol=2, ntop=50, bmF=FALSE, pcutoff=0.05, all=FALSE)
+# opt <- list(baseDir='/Volumes/groups/zuber/zubarchive/USERS/Kimon/jakub/M10716_slamseq', countsFile='process/slam/all_collapsed_readCount-only_xref.txt', resultsDir='results/DE', RDSoutdir='process/DE', samplesFile='description/covars.txt', control='THP1,WT,DMSO', designFormula='~ treatment', forvar='host', minCount=1, lfcthreshold=1, nidcols=3, idcol=2, ntop=50, bmF=FALSE, pcutoff=0.05, all=FALSE)
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -87,13 +87,17 @@ if ( !is.null(opt$resultsDir ) ) {
 
 
 # Input
-covars <- as.data.frame(read.csv(file.path(opt$baseDir, opt$samplesFile), sep="\t", header=TRUE, row.names='sample'))
-cts <- read.csv(file.path(opt$baseDir, opt$countsFile), sep="\t", header=TRUE)
+covars <- as.data.frame(read.csv(file.path(opt$baseDir, opt$samplesFile), sep="\t", header=TRUE, row.names='sample', check.names = FALSE))
+cts <- read.csv(file.path(opt$baseDir, opt$countsFile), sep="\t", header=TRUE, check.names = FALSE) 
+# cts <- cts[, c(names(counts)[1:opt$nidcols], covars$sample)]    # Only samples specified in covars. ## It is handled somewhere in the RMD. If done here it causes a crash!
 
 # Cut out extra annotation/id columns
 xref <- cts[, 1:opt$nidcols]
 cts <- round(as.matrix(cts[, (opt$nidcols+1):ncol(cts)]), digits=0)
 rownames(cts) <- xref[, opt$idcol]
+
+# R adds 'X' to the begininng fo matric colnames that start with a digit, regardless of whether they can be misinterpreted as a number or not.
+# That breaks the association with the names in covars and DESeq2 crashes. So the X needs to be added in covars too.
 
 # Calculate RPMs. 
 # (for 3'seq like quantseq and slamseq, length normalisation is not approriate)
@@ -154,7 +158,7 @@ for (V in names(subcovars)){
   # and ensure the rest are in the same order as the covariates table.
   cdn <- rownames(coldata)
   ctsn <- colnames(cts)
-  subcts <- cts[, match(cdn, ctsn)]
+  subcts <- cts[, ctsn[match(cdn, ctsn)]]
   subcts[is.na(subcts)] <- 0
   subrpm <- RPMs[, match(cdn, colnames(RPMs))]
   subrpm[is.na(subrpm)] <- 0
