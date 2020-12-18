@@ -384,6 +384,7 @@ do_pca <- function(countsmat, covars, center = TRUE, scale = TRUE, loadthresh = 
 covars <- fread(params$covars)
 
 counts <- fread(params$cts)
+counts <- counts[, c(names(counts)[1:params$nidcols], covars$sample), with=FALSE]    # Only samples specified in covars.
 n <- counts[, params$idcol, with=FALSE]
 counts <- as.matrix(counts[, (params$nidcols+1):length(counts)])
 rownames(counts) <- n[[1]]
