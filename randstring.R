@@ -1,24 +1,27 @@
 #!/usr/bin/env Rscript
 
-# LETTERS is a built-in
-# letters is a built-in
-numbers <- as.character(c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9))
-symbols <- c('~', '`', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '-', '+', '=', '{', '[', '}', ']', '|', '\\', ':', ';', '"', '<', ',', '>', '.', '?', '/')
 
 library(getopt)
 
 spec <- matrix(c(
   'length'      , 'l', 1, "numeric", "password length",
   'include'     , 'i', 1, "character", "something to include",
+  'limited'     , 'm', 0, "logical", "limited symbol range",
   'incsymb'     , 's', 0, "logical", "include symbols",
   'seed'        , 'r', 1, "numeric", "seed the randomizer"
 ), byrow=TRUE, ncol=5)
 opt <- getopt(spec)
 
-# opt <- list(length=18, include='foobar', incsymb=TRUE)
+
+# opt <- list(length=32, include='foobar', incsymb=TRUE, limited=FALSE)
 
 if (!is.null(opt$seed))
-  set.seed(opt$seed) 
+  set.seed(opt$seed)
+
+# LETTERS is a built-in
+# letters is a built-in
+numbers <- as.character(c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9))
+symbols <- ifelse(opt$limited, c('_', '-'), c('~', '`', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '-', '+', '=', '{', '[', '}', ']', '|', '\\', ':', ';', '"', '<', ',', '>', '.', '?', '/'))
 
 
 # Cover the character rules
