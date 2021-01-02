@@ -602,6 +602,7 @@ def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=3
 
     # Parse SAM
     seen = dict()           # Keep track of seen fragment names (for paired-end, where only the first read may have a BC tag)
+    seen2 = dict()
     counter = Counter()     # Report the numbers of reads
     for r in samin:
         counter.update(['total'])
@@ -615,12 +616,15 @@ def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=3
         b2 = None
         if r.has_tag('BC'):         # probably first read of the fragment.
             bc = r.get_tag('BC')
+            seen[name] = bc
         else:
             bc = seen[name]        # second/later read. Use BC from first read.
-        if r.has_tag('B2'):       # secondary barcode, from dual indexing
-            b2 = r.get_tag('B2')
-        elif dual:                  # only try to fetch prexisting secondary barcode if dual indexing
-            b2 = seen[name]
+        if dual:
+            if r.has_tag('B2'):       # secondary barcode, from dual indexing
+                b2 = r.get_tag('B2')
+                seen2[name] = b2
+            else:                  # only try to fetch prexisting secondary barcode if dual indexing
+                b2 = seen2[name]
         # Sample assigned to 2nd barcode, for comparison to 1st barcode.
         sample = None
         if dual:
@@ -628,7 +632,7 @@ def demuxBC(bam, barcodes, outputdir='./process/fastq', tally=None, qualOffset=3
                 if b in b2:
                     sample = demuxS2[b]
         # Print BAM entry
-        for b in demuxS1.keys():     # Allow for the annotated barcode in the table to be truncated relative to the actual barcode recorded in the BAM. No mismatches.
+        for b in demuxS1:     # Allow for the annotated barcode in the table to be truncated relative to the actual barcode recorded in the BAM. No mismatches.
             if b in bc and ((not dual) or (dual and sample == demuxS1[b])):  # in dual, both barcodes must point to the same sample, thus excluding barcode drifts.
                 samOut[demuxS1[b]].write(r)
                 # Keep count

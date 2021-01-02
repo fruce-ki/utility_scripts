@@ -36,6 +36,7 @@ library(htmltools)
 library(patchwork)
 library(matrixStats)
 library(ggExtra)
+library(ggrepel)
 
 options(scipen=2)
 
@@ -283,7 +284,9 @@ do_pca <- function(countsmat, covars, center = TRUE, scale = TRUE, loadthresh = 
   pcmax=15
   pimp <- ggplot(pcaimp[(PC<pcmax),], aes(x=PC, y=Proportion)) +
     facet_grid(type ~ ., scales="free_y") +
-    geom_bar(aes(fill=type), stat="identity", width=0.6) +
+    geom_bar(aes(fill=type), stat="identity", width=0.5) +
+    geom_text_repel(aes(x=PC-0.4, label=paste0(round(Proportion*100, 1),"%"), colour=rev(type)), ylim=c(0,max(pcaimp[type=='Proportion of Variance', Proportion])), angle=90, vjust=0, size=rel(3)) +
+    geom_text_repel(aes(label=paste0(round(Proportion*100, 1),"%"), colour=type), ylim=c(0, max(pcaimp[type=='Cumulative Proportion', Proportion])), angle=90, vjust=0, direction= 'y', size=rel(3)) +
     geom_line(aes(colour=type)) +
     scale_fill_manual(values = c("grey50", "transparent")) +
     scale_colour_manual(values = c("transparent", "grey25")) +
@@ -317,19 +320,19 @@ do_pca <- function(countsmat, covars, center = TRUE, scale = TRUE, loadthresh = 
                        StDev = colSds(countsmat) )
   genevar[, istop:= rowID %in% sel]
 
-  pvar1 <- ggMarginal(ggplot(genevar) +
-      geom_point(aes(x=Mean, y=StDev, label=rowID, colour=istop), shape=16, size=0.8, alpha=0.5) +
+  pvar1 <- ggMarginal(ggplot(genevar, aes(x=Mean, y=StDev, label=rowID, colour=istop)) +
+      geom_point(shape=16, size=0.8, alpha=0.5) +
       scale_x_log10() +
       scale_colour_manual(values=c("black", "violetred")) +
       scale_y_log10() +
-      labs(x="Mean", y="Standard Deviation", title="All features") +
+      labs(x="Mean", y="Standard Deviation", title=paste0("All features (", nvars, ")")) +
       theme(legend.position = "none"),
     type = "histogram")
 
-  pvar2 <- ggplot(genevar[(istop),]) +
-      geom_point(aes(x=Mean, y=StDev, label=rowid), shape=16, size=0.8, alpha=0.5, colour="purple") +
+  pvar2 <- ggplot(genevar[(istop),], aes(x=Mean, y=StDev, label=rowID)) +
+      geom_point(shape=16, size=0.8, alpha=0.5, colour="purple") +
       labs(x="Mean", y="Standard Deviation",
-           title="Top-loading features", subtitle = "in the first 3 PCs") +
+           title=paste0("High-loading features (", length(sel), ")"), subtitle = paste0("( >", loadthresh, ") in any of the first 3 PCs")) +
       scale_x_log10() +
       scale_y_log10()
 
@@ -343,21 +346,24 @@ do_pca <- function(countsmat, covars, center = TRUE, scale = TRUE, loadthresh = 
     return(
       ggplot(pc, aes_string(x="PC1", y="PC2", label="sample", colour=varname)) +
         geom_point(alpha=0.8, size=rel(1.5)) +
-        coord_fixed()
+        coord_fixed() +
+        labs(x=paste0("PC1 (", round(pcaimp[1,4]*100, 1), "%)"), y=paste0("PC2 (", round(pcaimp[2,4]*100, 1), "%)"))
     )})
 
   pc13 <- lapply(ig, function(varname) {
     return(
       ggplot(pc, aes_string(x="PC1", y="PC3", label="sample", colour=varname)) +
         geom_point(alpha=0.8, size=rel(1.5)) +
-        coord_fixed()
+        coord_fixed() +
+        labs(x=paste0("PC1 (", round(pcaimp[1,4]*100, 1), "%)"), y=paste0("PC3 (", round(pcaimp[3,4]*100, 1), "%)"))
     )})
 
   pc32 <- lapply(ig, function(varname) {
     return(
       ggplot(pc, aes_string(x="PC3", y="PC2", label="sample", colour=varname)) +
         geom_point(alpha=0.8, size=rel(1.5)) +
-        coord_fixed()
+        coord_fixed() +
+        labs(x=paste0("PC3 (", round(pcaimp[3,4]*100, 1), "%)"), y=paste0("PC2 (", round(pcaimp[2,4]*100, 1), "%)"))
     )})
 
   return(list(pca=pca,
@@ -378,6 +384,7 @@ do_pca <- function(countsmat, covars, center = TRUE, scale = TRUE, loadthresh = 
 covars <- fread(params$covars)
 
 counts <- fread(params$cts)
+counts <- counts[, c(names(counts)[1:params$nidcols], covars$sample), with=FALSE]    # Only samples specified in covars.
 n <- counts[, params$idcol, with=FALSE]
 counts <- as.matrix(counts[, (params$nidcols+1):length(counts)])
 rownames(counts) <- n[[1]]
@@ -397,7 +404,6 @@ print(corels[["drc"]])
 
 # PCA
 
-Based on the RPM counts.
 
 ## Plots
 
@@ -431,6 +437,14 @@ htmltools::tagList(lapply(all_pca[["pc_3_2"]], function(x) { ggplotly(x) }))
 # lapply(all_pca[["pc_3_2"]], function(x) { x })
 ```
 
+## High loading features
+
+Features with loading >= `r params$minL`.
+
+```{r}
+print( all_pca["pvar1"] )
+print( all_pca["pvar2"] )
+```
 
 ## Top high-loading features in the first 3 PCs
 
@@ -464,20 +478,20 @@ print( all_pca[["pcor2"]] )
 ```
 
 
-
+# Write plots to PDF
 
 ```{r pdf}
 ## Plots to PDF ##
 
 
 pdf(params$pdf,
-    width=max(6, ceiling(nrow(covars) / 3)), height=max(6, ceiling(nrow(covars) / 3))) # Scale up when many samples, but don't scale down when few.
+    width=max(12, ceiling(nrow(covars) / 3)), height=max(12, ceiling(nrow(covars) / 3))) # Scale up when many samples, but don't scale down when few.
 
 # Correlation plots
-print(corels[[1]])
-print(corels[[2]])
-print(corels[[3]])
-print(corels[[4]])
+print(corels[['sfrnc']])
+print(corels[['tfrnc']])
+print(corels[['sdrc']])
+print(corels[['tdrc']])
 
 # PCA plots
 print(all_pca$pimp)
@@ -492,8 +506,10 @@ for (x in all_pca[["pc_3_2"]]) {
 }
 print(all_pca[["pcor1"]])
 print(all_pca[["pcor2"]])
-print(all_pca[["pcor3"]])
-print(all_pca[["pcor4"]])
+
+print( ggplot() + geom_point() + theme_void()) # The ggmargin plot in pvar1 doesn't create its own page
+print( all_pca["pvar1"] )
+print( all_pca["pvar2"] )
 
 dev.off()
 ```
