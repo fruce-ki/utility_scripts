@@ -616,7 +616,7 @@ Values are all increased by 1/10th of the smallest non-zero expression value, th
 
 When there are 2 or more replicates, the smaller plots on the right will show a 2D density of the mean-scaled StDev vs the mean expression. If there is only one replicate StDev cannot be calculated so, instead, the 1D density plot of the expression will be shown.
 
-* Red triangles for top `params$ntop` (or fewer) hits.
+* Red triangles for top `r params$ntop` (or fewer) hits.
 * Black tiles for everything else. Density of points indicated by fade/transparency of the tiles.
 * Blue for genes that were not assigned a  p-value (filtered out before testing).
 
@@ -706,7 +706,7 @@ pexp <- lapply (resall, function(res) {
 
 ## Static Volcanos and MAs
 
-* Red triangles for the top `params$ntop` (or fewer) hits.
+* Red triangles for the top `r params$ntop` (or fewer) hits.
 * Black dots for everything else.
 * Solid black dots (in MA plots) for signicant FDRs.
 * Faded/transparent black dots (in MA plots) for non-significant FDRs.
