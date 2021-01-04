@@ -10,7 +10,7 @@ spec = matrix(c(
   'help'         , 'h', 0, "logical",   "Help",
   'resultsDir'   , 'o', 1, "character", "Directory in which to save the contrast results. If omitted, only the RDS will be output.",
   'RDSoutdir'    , 'r', 1, "character", "Directory in which to save the raw DESeq2 object (./process)",
-  'samplesFile'  , 's', 1, "character", "Tab-separated table with `sample` column followed by the variable columns",
+  'samplesFile'  , 's', 1, "character", "Tab-separated table with `sample` column followed by the variable columns. Values must NOT contain punctuation other than '_' !!!",
   'control'      , 'x', 1, "character", "Comma separated value for each variable to use as reference for all comparisons, in the order variables are listed in samplesfile",
   'designFormula', 'd', 1, "character", "Design formula",
   'reducedFormula','R', 1, "character", "Reduced formula for LR test",
@@ -29,7 +29,7 @@ spec = matrix(c(
 ), byrow=TRUE, ncol=5)
 
 opt = getopt(spec)
-# opt <- list(baseDir='/Volumes/groups/zuber/zubarchive/USERS/Kimon/jakub/M10716_slamseq', countsFile='process/slam/all_collapsed_readCount-only_xref.txt', resultsDir='results/DE', RDSoutdir='process/DE', samplesFile='description/covars.txt', control='THP1,WT,DMSO', designFormula='~ treatment', forvar='host', minCount=1, lfcthreshold=1, nidcols=3, idcol=2, ntop=50, bmF=FALSE, pcutoff=0.05, all=FALSE)
+# opt <- list(baseDir='/Volumes/groups/zuber/zubarchive/USERS/Kimon/jakub/M10716_slamseq', countsFile='process_nonmerged/slam/all_collapsed_readCount-only_xref.txt', resultsDir='results_nonmerged/DE', RDSoutdir='process_nonmerged/DE', samplesFile='description/covars_nonmerged.txt', control='THP1,WT,DMSO,HNWTTDRXX,HNWTTDRXX_2', designFormula='~ treatment', forvar='host', minCount=10, lfcthreshold=1, nidcols=3, idcol=2, ntop=50, bmF=FALSE, pcutoff=0.05, bmF=FALSE, all=FALSE)
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
