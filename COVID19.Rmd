@@ -9,7 +9,7 @@ output:
     toc_float: yes
     toc_depth: 4
 editor_options: 
-  chunk_output_type: inline
+  chunk_output_type: console
 ---
 
 
@@ -23,27 +23,83 @@ knitr::opts_chunk$set(echo = TRUE, warning=FALSE)
 library(httr)
 library(lubridate)
 library(ggplot2)
-library(gganimate)
 library(ggrepel)
 library(patchwork)
 library(data.table)
-library(broom)
-library(rgdal)
-require(maptools)
-require(rgeos)
+require(bit64)
 
 options(scipen=2)
 ```
 
 Source: https://opendata.ecdc.europa.eu/covid19/
 
-# Load and process map and current data
+# Load current data
 
 ```{r}
-tf <- "~/covid/global.csv"
-GET("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", authenticate(":", ":", type="ntlm"), write_disk(tf, overwrite = TRUE))
-globcases <- fread(tf)
-setnames(globcases, c('dateRep', 'day', 'month', 'year', 'new_Cases', 'new_Deaths', 'Country', 'geoId', 'countryCode', 'population', 'continent', 'roll_norm_Cases'))
+# # Download files
+# GET("https://opendata.ecdc.europa.eu/covid19/agecasesnational/csv", authenticate(":", ":", type="ntlm"), write_disk('agecasesnational.csv', overwrite = TRUE))
+
+# GET("https://opendata.ecdc.europa.eu/covid19/agecasesubnational/csv", authenticate(":", ":", type="ntlm"), write_disk('agecasesubnational.csv', overwrite = TRUE))
+
+# GET("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", authenticate(":", ":", type="ntlm"), write_disk('casedistribution.csv', overwrite = TRUE))
+
+# GET("https://opendata.ecdc.europa.eu/covid19/hospitalicuadmissionrates/csv", authenticate(":", ":", type="ntlm"), write_disk('hospitalicuadmissionrates.csv', overwrite = TRUE))
+
+# GET("https://opendata.ecdc.europa.eu/covid19/movementindicators/csv", authenticate(":", ":", type="ntlm"), write_disk('movementindicators.csv', overwrite = TRUE))
+
+# GET("https://opendata.ecdc.europa.eu/covid19/nationalcasedeath/csv", authenticate(":", ":", type="ntlm"), write_disk('nationalcasedeath.csv', overwrite = TRUE))
+
+# GET("https://opendata.ecdc.europa.eu/covid19/subnationalcasedaily/csv", authenticate(":", ":", type="ntlm"), write_disk('subnationalcasedaily.csv', overwrite = TRUE))
+
+# GET("https://opendata.ecdc.europa.eu/covid19/subnationalcaseweekly/csv", authenticate(":", ":", type="ntlm"), write_disk('subnationalcaseweekly.csv', overwrite = TRUE))
+
+# GET("https://opendata.ecdc.europa.eu/covid19/testing/csv", authenticate(":", ":", type="ntlm"), write_disk('testing.csv', overwrite = TRUE))
+
+
+# Load data
+agecasenat <- fread('agecasesnational.csv')
+# agecasesubnat <- fread('agecasesubnational.csv')       # NA
+casedist <- fread('casedistribution.csv')
+hosprate <- fread('hospitalicuadmissionrates.csv')
+movement <- fread('movementindicators.csv')
+natcasedeath <- fread('nationalcasedeath.csv')
+subnatcaseday <- fread('subnationalcasedaily.csv')
+subnatcaseweek <- fread('subnationalcaseweekly.csv')
+testing <- fread('testing.csv')
+
+
+# Verify no new changes to data format
+stopifnot(names(agecasenat) == c('country', 'country_code', 'year_week', 'age_group', 'new_cases', 'population', 'rate_14_day_per_100k', 'source'))
+
+# stopifnot(names(agecasesubnat) != c())
+
+stopifnot(names(casedist) == c('dateRep', 'year_week', 'cases_weekly', 'deaths_weekly', 'countriesAndTerritories', 'geoId', 'countryterritoryCode', 'popData2019', 'continentExp', 'notification_rate_per_100000_population_14-days'))
+
+stopifnot(names(hosprate) == c('country', 'indicator', 'date', 'year_week', 'value', 'source', 'url'))
+
+stopifnot(names(movement) == c('col0', 'country', 'country_code', 'geo_id_final', 'region', 'subnational_cases_7', 'subnational_cases_14', 'subnational_population', 'subnational_rate_14', 'national_cases_7', 'national_population', 'national_testing_rate', 'national_positivity_rate', 'subnational_testing_data', 'positivity_rate_combined', 'testing_rate_combined', 'colour', 'week'))
+
+stopifnot(names(natcasedeath) == c('country', 'country_code', 'continent', 'population', 'indicator', 'weekly_count', 'year_week', 'rate_14_day', 'cumulative_count', 'source'))
+
+stopifnot(names(subnatcaseday) == c('country', 'region_name', 'nuts_code', 'date', 'rate_14_day_per_100k', 'source'))
+
+stopifnot(names(subnatcaseweek) == c('country', 'region_name', 'nuts_code', 'year_week', 'rate_14_day_per_100k', 'source'))
+
+stopifnot(names(testing) == c('country', 'country_code', 'year_week', 'new_cases', 'tests_done', 'population', 'testing_rate', 'positivity_rate', 'testing_data_source'))
+
+
+
+
+
+
+
+
+
+
+
+
+
+setnames(globcases, c('Country', 'info_type', 'Date', ))
 globcases[, Date := as.Date(dmy(dateRep))]
 globcases <- globcases[, .(Country, countryCode, continent, population, Date, new_Cases, new_Deaths)]
 # str(globcases)
@@ -75,7 +131,7 @@ message(paste('Last entry date used:', current, '.'))
 
 
 tf <- "~/covid/testing.csv"
-GET("https://opendata.ecdc.europa.eu/covid19/testing/csv", authenticate(":", ":", type="ntlm"), write_disk(tf, overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/testing/csv", authenticate(":", ":", type="ntlm"), write_disk(tf, overwrite = TRUE))
 tests <- fread(tf)
 setnames(tests, c('Country', 'countryCode', 'year_week', 'test_Cases', 'new_Tests', 'population', 'test_Rate', 'pos_Rate', 'source'))
 tests <- tests[, .(Country, year_week, new_Tests)]
@@ -86,7 +142,7 @@ tests[Country=='United Kingdom', Country := 'United_Kingdom']
 tests[, year_week:= sub('W0', 'W', year_week)]
 
 tf <- "~/covid/hospitalizations.csv"
-GET("https://opendata.ecdc.europa.eu/covid19/hospitalicuadmissionrates/csv", authenticate(":", ":", type="ntlm"), write_disk(tf, overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/hospitalicuadmissionrates/csv", authenticate(":", ":", type="ntlm"), write_disk(tf, overwrite = TRUE))
 icu <- fread(tf)
 setnames(icu, c('Country', 'Type', 'Date', 'year_week', 'Value', 'source', 'URL'))
 ## The UK has been mistyped in some entries, so that needs fixing to enable better correct merging of the tables.
@@ -142,7 +198,7 @@ DT[, roll_Deaths := frollsum(new_Deaths, n=W, align='right', na.rm=TRUE), by=Cou
 DT[, roll_Tests := frollsum(new_Tests, n=W, align='right', na.rm=TRUE), by=Country]
 
 # Population normalisations to P citizens
-P <- 1e6
+P <- 0.1e6
 DT[, norm_new_Cases := new_Cases / population * P, by=Country]
 DT[, norm_new_Deaths := new_Deaths / population * P, by=Country]
 DT[, norm_new_Tests := new_Tests / population * P, by=Country]
@@ -259,32 +315,40 @@ print( data.frame( Global_Cases = sum(DT$new_Cases, na.rm = TRUE),
 					Global_Mortality = sum(DT$new_Deaths, na.rm = TRUE) / sum(DT$new_Cases, na.rm = TRUE) ) )
 ```
 
-## World worst and best
+## World's worst
 
 ```{r}
-subDT <- DT[Date==current, , by=Country][, .(Country, norm_roll_Cases)]
+subDT <- DT[order(norm_roll_Cases), ][Date==current & !is.na(norm_roll_Cases), ][, .(Country, norm_roll_Cases)]
 # Worst
-tail(subDT, n=10)
-# Best
-head(subDT, n=10)
+tail(subDT, 10)
+# # Best
+# n=max(10, nrow(subDT[sapply(subDT$norm_roll_Cases, function(x) {all.equal(subDT$norm_roll_Cases[1], x)})==TRUE, ]))
+# head(subDT, n=n)
 
-subDT <- DT[Date==current, , by=Country][, norm_roll_Deaths]
+subDT <- DT[order(norm_roll_Deaths), ][Date==current & !is.na(norm_roll_Deaths), ][, .(Country, norm_roll_Deaths)]
 # Worst
-tail(subDT, n=10)
-# Best
-head(subDT, n=10)
-
+tail(subDT, 10)
+# # Best
+# n=max(10, nrow(subDT[sapply(subDT$norm_roll_Deaths, function(x) {all.equal(subDT$norm_roll_Deaths[1], x)})==TRUE, ]))
+# head(subDT, n)
 ```
 
-## Europe worst and best
+## Europe's worst and best
 
 ```{r}
-subDT <- DT[continent=='Europe', max(norm_roll_Cases, na.rm=TRUE), by=Country][order(V1),]
-setnames(subDT, c('Country', 'norm_roll_Cases'))
+subDT <- DT[order(norm_roll_Cases), ][Date==current & continent=='Europe' & !is.na(norm_roll_Cases), ][, .(Country, norm_roll_Cases)]
 # Worst
-tail(subDT, n=10)
+tail(subDT, 10)
 # Best
-head(subDT, n=10)
+n=max(10, nrow(subDT[sapply(subDT$norm_roll_Cases, function(x) {all.equal(subDT$norm_roll_Cases[1], x)})==TRUE, ]))
+head(subDT, n=n)
+
+subDT <- DT[order(norm_roll_Deaths), ][Date==current & continent=='Europe' & !is.na(norm_roll_Deaths), ][, .(Country, norm_roll_Deaths)]
+# Worst
+tail(subDT, 10)
+# Best
+n=max(10, nrow(subDT[sapply(subDT$norm_roll_Deaths, function(x) {all.equal(subDT$norm_roll_Deaths[1], x)})==TRUE, ]))
+head(subDT, n)
 ```
 
 
@@ -297,21 +361,25 @@ hosp_col = '#555500'
 icu_col = '#995500'
 test_col = '#005500'
 
-subDT <- merge(world_df, DT[Date==current, ], by.x='id', by.y='countryCode', all=TRUE)
+setkey(DT, countryCode)
+setkey(world_df, id)
+subDT <- merge(world_df, DT, by.x='id', by.y='countryCode', all.x=FALSE, all.y=TRUE, allow.cartesian=TRUE)
 setorder(subDT, ord)
 ```
 
 Per `r P/1e6`M residents.
 
+### Global
+
 ```{r, fig.width=10, fig.height=10}
-p1 <- ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_roll_Cases)) +
+p1 <- ggplot(subDT[Date==current, ], aes(x=long, y=lat, group=group, fill=norm_roll_Cases)) +
 	geom_polygon(colour='black', size=0.2) +
 	scale_fill_gradient(high=case_col, low='white') +
 	coord_cartesian(ylim=c(-60,80)) +
 	theme_void() +
 	theme(panel.background = element_rect(fill='#BBFFFF'))
 
-p2 <- ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_roll_Deaths)) +
+p2 <- ggplot(subDT[Date==current, ], aes(x=long, y=lat, group=group, fill=norm_roll_Deaths)) +
 	geom_polygon(colour='black', size=0.2) +
 	scale_fill_gradient(high=death_col, low='white') +
 	coord_cartesian(ylim=c(-60,80)) +
@@ -420,8 +488,6 @@ DT[Date==current & Country %in% topInterest, .(Country, norm_tot_Cases, norm_tot
 # Timeline
 
 ```{r}
-## TODO: Add ICU/Hosp to tidyDT
-
 # Numbers over time
 tidyDT <- melt(DT[, .(Date, Country, 
                       norm_new_Cases, norm_new_Deaths, norm_new_Tests, #norm_new_Hosp, norm_new_ICU,
@@ -432,8 +498,6 @@ tidyDT <- melt(DT[, .(Date, Country,
 tidyDT[grepl('Death', Type), vsplit := 'Deaths']
 tidyDT[grepl('Cases', Type), vsplit := 'Cases']
 tidyDT[grepl('Tests', Type), vsplit := 'Tests']
-# tidyDT[grepl('Hosp', Type), vsplit := 'Hosp']
-# tidyDT[grepl('ICU', Type), vsplit := 'ICU']
 tidyDT[, hsplit := sub('_Cases|_Deaths|_Tests|_Hosp|_ICU', '', sub('norm_', '', Type), perl=TRUE)]
 setkey(tidyDT, Country)
 

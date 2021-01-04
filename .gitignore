@@ -8,3 +8,4 @@ __pycache__/*
 .ipynb_checkpoints/slamseq_workflow-checkpoint.sh
 conda.env.py27.txt
 vbcf_download.sh
+COVID19.html
