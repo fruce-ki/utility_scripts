@@ -115,7 +115,7 @@ if [ "$dunk" -eq 1 ]; then
         mv ${outdir}/dunk/filter ${outdir}/dunk/filter_presplit
         mkdir -p ${outdir}/dunk/filter
         mkdir -p ${outdir}/dunk/filter_split
-        rm ${outdir}/dunk/count/* ${outdir}/dunk/filter_split/* 
+        rm ${outdir}/dunk/count/* ${outdir}/dunk/filter_split/*
         # De-spike
         fileutilities.py T ${outdir}/dunk/filter_presplit --dir 'bam$' | fileutilities.py P --loop sbatch ,--qos=medium ,-o /dev/null ,-e /dev/null ,--mem=$memory ,-J slamspik Split_BAM_Spikein.py ,-a {abs} ,-o ${outdir}/dunk/filter_split
         wait_for_jobs slamspik
@@ -124,7 +124,7 @@ if [ "$dunk" -eq 1 ]; then
 
         echo "$bam - requantify"
         # Quantify features.
-        # Yes I could split apart `slamdunk all` into its constituent steps and insert the de-spiking in between and quantify only once on the correct files, 
+        # Yes I could split apart `slamdunk all` into its constituent steps and insert the de-spiking in between and quantify only once on the correct files,
         # but that would add failure opportunitiess that I don't want to deal with at the moment.
         fileutilities.py T ${outdir}/dunk/filter --dir 'bam$' | fileutilities.py P --loop sbatch ,-J samidx ,-o /dev/null ,-e /dev/null ,--wrap "'samtools index {abs}'"
         wait_for_jobs samidx
@@ -133,7 +133,7 @@ if [ "$dunk" -eq 1 ]; then
         fileutilities.py T ${outdir}/dunk/filter_split --dir 'spikein.bam$' | fileutilities.py P --loop printf '"%s\t"' '"{cor}"' '>>' ${outdir}/dunk/filter_split/spike_counts.txt \&\& samtools view ,-F 4 ,-c {abs} '>>' ${outdir}/dunk/filter_split/spike_counts.txt
         fileutilities.py T ${outdir}/dunk/filter_split --dir 'ambiguous.bam$' | fileutilities.py P --loop printf '"%s\t"' '"{cor}"' '>>' ${outdir}/dunk/filter_split/ambiguous_counts.txt \&\& samtools view ,-F 4 ,-c {abs} '>>' ${outdir}/dunk/filter_split/ambiguous_counts.txt
         fileutilities.py T ${outdir}/dunk/filter_split --dir 'subject.bam$' | fileutilities.py P --loop printf '"%s\t"' '"{cor}"' '>>' ${outdir}/dunk/filter_split/subject_counts.txt \&\& samtools view ,-F 4 ,-c {abs} '>>' ${outdir}/dunk/filter_split/subject_counts.txt
-        fileutilities.py T ${outdir}/dunk/filter_split/*counts.txt --appnd -i | perl -e 'while(<>){~s/_\|1//g;print}' > ${outdir}/dunk/count/spike_summary_counts.txt
+        fileutilities.py T ${outdir}/dunk/filter_split/*counts.txt --appnd -i | perl -e 'while(<>){~s/_\|1//g;print}' > ${outdir}/spike_summary_counts.txt
         wait_for_jobs slamcnt
         # rm ${outdir}/dunk/filter_split/*ambiguous.bam
     fi
