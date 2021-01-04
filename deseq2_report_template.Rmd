@@ -699,8 +699,8 @@ pexp <- lapply (resall, function(res) {
       theme(panel.grid.minor = element_blank()) 
   }
   
-  print (p1 | (p2 / p3) + plot_layout(guides = "collect"))
-  return(p1 | (p2 / p3) + plot_layout(guides = "collect"))
+  print (p1 | (p2 / p3))
+  return(p1 | (p2 / p3))
 })
 ```
 
