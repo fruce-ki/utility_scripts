@@ -404,6 +404,10 @@ print(corels[["drc"]])
 
 # PCA
 
+For this report, the values (ie. expression) of the variables (ie. genes) have been standardized. This compensates for large differences in magnitude range among variables and gives every variable equal weight. Otherwise the variance from high-value variables (ie, high expression genes) would dominate in the determination of principal components. This is typically used when combining variables with different value ranges, such as variables with different measurement units.
+
+NOTE: In the case that the variables are gene expressions, there is some debate on whether high expression genes should be allowed to contribute more than low expression genes or not. My personal judgement and choice is that, although the measurement units are the same across genes, the value ranges are different (some gene products are needed in large quantities, others are effective in small quantities) and therefore standardization is appropriate and preferable.
+
 
 ## Plots
 
