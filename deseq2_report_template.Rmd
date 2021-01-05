@@ -616,6 +616,10 @@ Values are all increased by 1/10th of the smallest non-zero expression value, th
 
 When there are 2 or more replicates, the smaller plots on the right will show a 2D density of the mean-scaled StDev vs the mean expression. If there is only one replicate StDev cannot be calculated so, instead, the 1D density plot of the expression will be shown.
 
+* Red triangles for top `r params$ntop` (or fewer) hits.
+* Black tiles for everything else. Density of points indicated by fade/transparency of the tiles.
+* Blue for genes that were not assigned a  p-value (filtered out before testing).
+
 ```{r expov, fig.height=8, fig.width=12}
 pexp <- lapply (resall, function(res) {
   # res <- resall[[1]]
@@ -647,7 +651,7 @@ pexp <- lapply (resall, function(res) {
   
   # StDev is NA when there is only one replicate. So there are no values for Y-axis.
   if (!all( is.na(DT$refStDev) )) {
-    p2 <- ggplot(DT, aes(x=refMeanRPM + zeros, y=(refStDev / refMeanRPM) + zeros, colour=colour)) +
+    p2 <- ggplot(DT, aes(x=refMeanRPM + zeros, y=refStDev / (refMeanRPM + zeros), colour=colour)) +
         # geom_point(data=DT[colour=='black', ], shape=16, alpha=0.2, size=0.8) +
         geom_hex(data=DT[colour=='general', ], bins=50, size=0.5, colour='transparent') +
         geom_point(data=DT[colour=='pNA', ], shape=20, alpha=0.2, size=0.8) +
@@ -672,7 +676,7 @@ pexp <- lapply (resall, function(res) {
   
   # Again, StDev is NA when there is only one replicate.
   if (!all( is.na(DT$treatStDev) )) {
-    p3 <- ggplot(DT, aes(x=treatMeanRPM + zeros, y=(treatStDev / treatMeanRPM) + zeros, colour=colour)) +
+    p3 <- ggplot(DT, aes(x=treatMeanRPM + zeros, y=treatStDev / (treatMeanRPM + zeros), colour=colour)) +
       # geom_point(data=DT[colour=='black', ], shape=16, alpha=0.2, size=0.8) +
       geom_hex(data=DT[colour=='general', ], bins=50, size=0.5, colour='transparent') +
       geom_point(data=DT[colour=='pNA', ], shape=20, alpha=0.2, size=0.8) +
@@ -695,12 +699,17 @@ pexp <- lapply (resall, function(res) {
       theme(panel.grid.minor = element_blank()) 
   }
   
-  print (p1 + (p2 / p3))
-  return(p1 + (p2 / p3))
+  print (p1 | (p2 / p3))
+  return(p1 | (p2 / p3))
 })
 ```
 
 ## Static Volcanos and MAs
+
+* Red triangles for the top `r params$ntop` (or fewer) hits.
+* Black dots for everything else.
+* Solid black dots (in MA plots) for signicant FDRs.
+* Faded/transparent black dots (in MA plots) for non-significant FDRs.
 
 ```{r volcanos, fig.height=6, fig.width=12, warning=FALSE}
 # These plots have two side-by-side facets and need more width to display nicely
