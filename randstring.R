@@ -8,20 +8,36 @@ spec <- matrix(c(
   'include'     , 'i', 1, "character", "something to include",
   'limited'     , 'm', 0, "logical", "limited symbol range",
   'incsymb'     , 's', 0, "logical", "include symbols",
-  'seed'        , 'r', 1, "numeric", "seed the randomizer"
+  'seed'        , 'r', 1, "numeric", "seed the randomizer",
+  'altseed'     , 'p', 1, "character", "character-based alternative seed",
+  'readable'    , 'h', 0, "logical", "exclude similar characters, to reduce human reading errors"
+  
 ), byrow=TRUE, ncol=5)
 opt <- getopt(spec)
 
 
-# opt <- list(length=32, include='foobar', incsymb=TRUE, limited=FALSE)
+# opt <- list(length=32, include='ORC', incsymb=TRUE, limited=FALSE, altseed='test phrase', readable=TRUE)
 
-if (!is.null(opt$seed))
+
+if (!is.null(opt$seed)) {
   set.seed(opt$seed)
+} else if (!is.null(opt$altseed)) {
+  set.seed(sum(as.integer(as.character(charToRaw(opt$altseed)))))
+} else {
+  set.seed(as.integer(Sys.time()))
+}
+
 
 # LETTERS is a built-in
 # letters is a built-in
-numbers <- as.character(c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9))
-symbols <- ifelse(opt$limited, c('_', '-'), c('~', '`', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '-', '+', '=', '{', '[', '}', ']', '|', '\\', ':', ';', '"', '<', ',', '>', '.', '?', '/'))
+numbers <- as.character(ifelse(opt$readable,
+                               c(1, 2, 3, 4, 5, 6, 7, 8, 9),
+                               c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)))
+symbols <- ifelse(opt$limited, 
+                  c('_', '-', '.'), 
+                  ifelse(opt$readable,
+                         c('!', '@', '#', '$', '%', '^', '&', '*', ')', '_', '-', '+', '=', '{', '[', '}', ']', '|', '\\', ':', ';', '<', ',', '>', '.', '?', '/'),
+                         c('~', '`', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '-', '+', '=', '{', '[', '}', ']', '|', '\\', ':', ';', '"', '<', ',', '>', '.', '?', '/')) )
 
 
 # Cover the character rules
