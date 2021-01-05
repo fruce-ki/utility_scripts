@@ -133,9 +133,12 @@ if [ "$dunk" -eq 1 ]; then
         fileutilities.py T ${outdir}/dunk/filter_split --dir 'spikein.bam$' | fileutilities.py P --loop printf '"%s\t"' '"{cor}"' '>>' ${outdir}/dunk/filter_split/spike_counts.txt \&\& samtools view ,-F 4 ,-c {abs} '>>' ${outdir}/dunk/filter_split/spike_counts.txt
         fileutilities.py T ${outdir}/dunk/filter_split --dir 'ambiguous.bam$' | fileutilities.py P --loop printf '"%s\t"' '"{cor}"' '>>' ${outdir}/dunk/filter_split/ambiguous_counts.txt \&\& samtools view ,-F 4 ,-c {abs} '>>' ${outdir}/dunk/filter_split/ambiguous_counts.txt
         fileutilities.py T ${outdir}/dunk/filter_split --dir 'subject.bam$' | fileutilities.py P --loop printf '"%s\t"' '"{cor}"' '>>' ${outdir}/dunk/filter_split/subject_counts.txt \&\& samtools view ,-F 4 ,-c {abs} '>>' ${outdir}/dunk/filter_split/subject_counts.txt
-        fileutilities.py T ${outdir}/dunk/filter_split/*counts.txt --appnd -i | perl -e 'while(<>){~s/_\|1//g;print}' > ${outdir}/spike_summary_counts.txt
+        fileutilities.py T ${outdir}/dunk/filter_split/*counts.txt --appnd -i | perl -e 'while(<>){~s/_\|1//g;~s/_trimmed//;print}' > ${outdir}/spike_summary_counts.txt
         wait_for_jobs slamcnt
         # rm ${outdir}/dunk/filter_split/*ambiguous.bam
+
+        # Calculate spike-in scaling factors
+        scaleFactors_from_spikeSummary.R ${outdir}/spike_summary_counts.txt
     fi
 fi
 
@@ -172,7 +175,23 @@ if [ "$post" -eq 1 ]; then
       slamseq_xref.R ${outdir} 'all_utr_rpmu.txt' $xref 1 1
       slamseq_xref.R ${outdir} 'all_collapsed_rpmu.txt' $xref 1 1     # could have use fileutilities here, but consistency is simpler.
     fi
+
+    # Extract the data slices needed for subsequent PCA and DE analyses.
+    fileutilities.py T ${outdir}/all_collapsed_rpmu_xref.txt -r --cols $(head ${outdir}/all_collapsed_rpmu_xref.txt -n 1 | fileutilities.py D -s $'\t' --swap "\n" | perl -e '$i=0; while($_=<>) {if($_=~/RPM(?!u)|Entrez|Id|Name/) {print $i."\n"}; $i++}' | fileutilities.py D -s "\n" --swap , | perl -e 'while(<>){chomp;chop; print}') | fileutilities.py D -s '.RPM' --swap '' > ${outdir}/all_collapsed_RPM-only_xref.txt
+
+    fileutilities.py T ${outdir}/all_collapsed_rpmu_xref.txt -r --cols $(head ${outdir}/all_collapsed_rpmu_xref.txt -n 1 | fileutilities.py D -s $'\t' --swap "\n" | perl -e '$i=0; while($_=<>) {if($_=~/RPMu|Entrez|Id|Name/) {print $i."\n"}; $i++}' | fileutilities.py D -s "\n" --swap , | perl -e 'while(<>){chomp;chop; print}') | fileutilities.py D -s '.RPMu' --swap '' > ${outdir}/all_collapsed_RPMu-only_xref.txt
+
+    fileutilities.py T ${outdir}/all_collapsed_rpmu_xref.txt -r --cols $(head ${outdir}/all_collapsed_rpmu_xref.txt -n 1 | fileutilities.py D -s $'\t' --swap "\n" | perl -e '$i=0; while($_=<>) {if($_=~/readCount|Entrez|Id|Name/) {print $i."\n"}; $i++}' | fileutilities.py D -s "\n" --swap , | perl -e 'while(<>){chomp;chop; print}') | fileutilities.py D -s '.readCount' --swap '' > ${outdir}/all_collapsed_readCount-only_xref.txt
+
+    fileutilities.py T ${outdir}/all_collapsed_rpmu_xref.txt -r --cols $(head ${outdir}/all_collapsed_rpmu_xref.txt -n 1 | fileutilities.py D -s $'\t' --swap "\n" | perl -e '$i=0; while($_=<>) {if($_=~/tcReadCount|Entrez|Id|Name/) {print $i."\n"}; $i++}' | fileutilities.py D -s "\n" --swap , | perl -e 'while(<>){chomp;chop; print}') | fileutilities.py D -s '.tcReadCount' --swap '' > ${outdir}/all_collapsed_tcReadCount-only_xref.txt
+
+    # Apply scaling factors
+    if [ "$spikes" -eq 1 ]; then
+        scaleFactors_apply.R -c ${outdir}/all_collapsed_tcReadCount-only_xref.txt -f ${outdir}/spike_summary_counts.factors.txt -i 3 -o ${outdir}/all_collapsed_tcReadCount-only_xref
+        scaleFactors_apply.R -c ${outdir}/all_collapsed_readCount-only_xref.txt -f ${outdir}/spike_summary_counts.factors.txt -i 3 -o ${outdir}/all_collapsed_readCount-only_xref 
+    fi
 fi
+
 
 # Clean up file pollution
 # rm ./slurm*
