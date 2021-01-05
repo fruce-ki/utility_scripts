@@ -5,31 +5,32 @@ library(DESeq2)
 
 
 spec = matrix(c(
-  'baseDir'      , 'b', 1, "character", "Base directory for everything (.)",
-  'countsFile'   , 'f', 1, "character", "Tab-separated table of counts with `row_ID` and all the samples",
-  'help'         , 'h', 0, "logical",   "Help",
-  'resultsDir'   , 'o', 1, "character", "Directory in which to save the contrast results. If omitted, only the RDS will be output.",
-  'RDSoutdir'    , 'r', 1, "character", "Directory in which to save the raw DESeq2 object (./process)",
-  'samplesFile'  , 's', 1, "character", "Tab-separated table with `sample` column followed by the variable columns. Values must NOT contain punctuation other than '_' !!!",
-  'control'      , 'x', 1, "character", "Comma separated value for each variable to use as reference for all comparisons, in the order variables are listed in samplesfile",
-  'designFormula', 'd', 1, "character", "Design formula",
-  'reducedFormula','R', 1, "character", "Reduced formula for LR test",
-  'forvar',        'F', 1, "character", "Looping variable (ie. carry out the design formula for each level of this var, separately).",
-  'selvar',        'S', 1, "character", "Selection variable (always together with sellev). It is applied BEFORE forvar.",
-  'sellev',        'L', 1, "character", "Selection variable level. Together with selvar, it is used to reduce the samplesFile to just the rows having that value in that variable.",
-  'minCount'     , 'M', 1, "numeric",   "Minimum number of reads across all samples combined for a gene to be considered (10).",
-  'reportTemplate','T', 1, "character", "Template Rmd file for DE report.",
-  'pcutoff',       'p', 1, "numeric",   "P-value cutoff (0.05)",
-  'ntop',          'n', 1, "numeric",   "Number of hits to highlight (50)",
-  'lfcthreshold',  'c', 1, "numeric",   "Log2 fold-change threshold (1)",
-  'nidcols',       'I', 1, "numeric",   "Number of ID columns at the start of the table (1). see also -i",
-  'idcol',         'i', 1, "numeric",   "ID column to use (1). The others will be removed. See also -I.",
+  'all',           'A', 0, "logical",   "Enable round-robin-style pairwise comparisons. Otherwise only comparisons only against reference. (False)", 
   'bmF',           'B', 0, "logical",   "Disable baseMean filtering. (False)",
-  'all',           'A', 0, "logical",   "Enable round-robin-style pairwise comparisons. Otherwise only comparisons only against reference. (False)" 
+  'baseDir'      , 'b', 1, "character", "Base directory for everything (.)",
+  'lfcthreshold',  'c', 1, "numeric",   "Log2 fold-change threshold (1)",
+  'designFormula', 'd', 1, "character", "Design formula",
+  'countsFile'   , 'f', 1, "character", "Tab-separated table of counts with `row_ID` and all the samples.",
+  'forvar',        'F', 1, "character", "Looping variable (ie. carry out the design formula for each level of this var, separately).",
+  'help'         , 'h', 0, "logical",   "Help",
+  'idcol',         'i', 1, "numeric",   "ID column to use (1). The others will be removed. See also -I.",
+  'nidcols',       'I', 1, "numeric",   "Number of ID columns at the start of the table (1). See also -i.",
+  'prescaled',     'k', 0, "logical",   "Don't let Deseq2 rescale the libraries. (False)",
+  'sellev',        'L', 1, "character", "Selection variable level. Used together with -S, to reduce the samplesFile to just the rows having that value in that variable.",
+  'ntop',          'n', 1, "numeric",   "Number of hits to highlight (50)",
+  'minCount'     , 'M', 1, "numeric",   "Minimum number of reads across all samples combined for a gene to be considered (10).",
+  'resultsDir'   , 'o', 1, "character", "Directory in which to save the contrast results. If omitted, only the RDS will be output.",
+  'pcutoff',       'p', 1, "numeric",   "P-value cutoff (0.05)",
+  'RDSoutdir'    , 'r', 1, "character", "Directory in which to save the raw DESeq2 object (./process)",
+  'reducedFormula','R', 1, "character", "Reduced formula for LR test",
+  'samplesFile'  , 's', 1, "character", "Tab-separated table with `sample` column followed by the variable columns. Values must NOT contain punctuation other than '_' !!!",
+  'selvar',        'S', 1, "character", "Selection variable (always together with sellev). It is used together with -L. It is applied before -F.",
+  'reportTemplate','T', 1, "character", "Template Rmd file for DE report.",
+  'control'      , 'x', 1, "character", "Comma separated value for each variable to use as reference for all comparisons, in the order variables are listed in samplesfile"
 ), byrow=TRUE, ncol=5)
 
 opt = getopt(spec)
-# opt <- list(baseDir='/Volumes/groups/zuber/zubarchive/USERS/Kimon/jakub/M10716_slamseq', countsFile='process_nonmerged/slam/all_collapsed_readCount-only_xref.txt', resultsDir='results_nonmerged/DE', RDSoutdir='process_nonmerged/DE', samplesFile='description/covars_nonmerged.txt', control='THP1,WT,DMSO,HNWTTDRXX,HNWTTDRXX_2', designFormula='~ treatment', forvar='host', minCount=10, lfcthreshold=1, nidcols=3, idcol=2, ntop=50, bmF=FALSE, pcutoff=0.05, bmF=FALSE, all=FALSE)
+# opt <- list(baseDir='/Volumes/groups/zuber/zubarchive/USERS/Kimon/anja/M10716_slamseq', countsFile='process/slam/all_collapsed_readCount-only_xref_scaled.txt', resultsDir='results/DE_rc_scaled', RDSoutdir='process/DE_rc_scaled', samplesFile='description/covars_KMAB.txt', control='h0,C03,dmso', designFormula='~ time', forvar='cell', minCount=10, lfcthreshold=1, nidcols=3, idcol=2, ntop=50, bmF=FALSE, pcutoff=0.05, all=FALSE, prescaled=TRUE)
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -38,6 +39,10 @@ if ( !is.null(opt$help) ) {
 
 if ( is.null(opt$reportFile) ) {
   opt$reportFile <- '~/utility_scripts/deseq2_report_template.Rmd'
+}
+
+if ( is.null(opt$prescaled) ) {
+  opt$prescaled <- FALSE
 }
 
 if ( is.null(opt$baseDir    ) ) { 
@@ -170,6 +175,11 @@ for (V in names(subcovars)){
   # Set reference condition(s)
   for (n in vars){
     DDS[[n]] <- relevel(DDS[[n]], ref=refs[n])
+  }
+  if (opt$prescaled) {
+    factors <- rep(1, times=length(cdn))
+    names(factors) <- cdn
+    sizeFactors(DDS) <- factors
   }
   
   # Prefilter out genes with very poor coverage.
