@@ -9,6 +9,7 @@
 #SBATCH --output=mageck-wf.out
 #SBATCH --error=mageck-wf.err
 
+set -x
 
 ## Parameters ##
 function usage() {
