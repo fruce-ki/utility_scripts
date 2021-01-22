@@ -11,6 +11,7 @@
 #SBATCH --qos=medium
 #SBATCH --time=1-0:00:00       # one day
 
+set -x
 
 ## Parameters ##
 function usage() {
@@ -188,7 +189,7 @@ if [ "$post" -eq 1 ]; then
     # Apply scaling factors
     if [ "$spikes" -eq 1 ]; then
         scaleFactors_apply.R -c ${outdir}/all_collapsed_tcReadCount-only_xref.txt -f ${outdir}/spike_summary_counts.factors.txt -i 3 -o ${outdir}/all_collapsed_tcReadCount-only_xref
-        scaleFactors_apply.R -c ${outdir}/all_collapsed_readCount-only_xref.txt -f ${outdir}/spike_summary_counts.factors.txt -i 3 -o ${outdir}/all_collapsed_readCount-only_xref 
+        scaleFactors_apply.R -c ${outdir}/all_collapsed_readCount-only_xref.txt -f ${outdir}/spike_summary_counts.factors.txt -i 3 -o ${outdir}/all_collapsed_readCount-only_xref
     fi
 fi
 
