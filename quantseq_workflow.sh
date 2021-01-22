@@ -1,17 +1,6 @@
 #!/bin/bash
-#
-#SBATCH --get-user-env
-#SBATCH -J qntSeq
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=20000
-#SBATCH --output=qntSeq.out
-#SBATCH --error=qntSeq.err
-#SBATCH --qos=medium
-#SBATCH --time=1-0:00:00       # one day
 
-set -e
+set -x
 
 ## Parameters ##
 function usage() {
@@ -96,11 +85,6 @@ if [ "$pre" -eq 1 ]; then
 
     fqdir="${outdir}/fastq/"
 
-    echo "$bam - QC"
-    fileutilities.py T ${fqdir} --dir 'fastq.gz$|fq.gz$' | fileutilities.py P --loop sbatch ,-J fastQC ,-o /dev/null ,-e /dev/null ,--get-user-env ,--wrap "'fastqc -o ${outdir}/fastqc_pre {abs}'"
-    # wait_for_jobs fastQC
-    sbatch -J multiqc -o /dev/null -e /dev/null multiqc -f -o ${outdir}/multiqc_pre ${outdir}/fastqc_pre
-
     echo "$bam - UMI"
     if [ "$umilen" -gt 0 ]; then
         mkdir -p ${outdir}/dedup
@@ -116,14 +100,15 @@ if [ "$pre" -eq 1 ]; then
     fi
 
     echo "$bam - TRIM"
-    fileutilities.py T ${fqdir} --dir 'fastq.gz$|fq.gz$' | fileutilities.py P --loop sbatch ,-J cutadapt ,-o /dev/null ,-e /dev/null ,--get-user-env cutadapt ,-a A{18} ,-g T{18} $trim5 $trim3 ,-q $minq3 ,-m $minlen ,-o ${outdir}/fastq_trimmed/{cor}_trimmed.fastq.gz {abs} \> ${outdir}/fastq_trimmed/{cor}.cutadapt.log
+    fileutilities.py T ${fqdir} --dir 'fastq.gz$|fq.gz$' | fileutilities.py P --loop sbatch ,-J cutadapt ,-o ${outdir}/fastq_trimmed/{cor}.cutadapt.log ,-e ${outdir}/fastq_trimmed/{cor}.cutadapt.log ,--get-user-env cutadapt ,-a A{18} ,-g T{18} $trim5 $trim3 ,-q $minq3 ,-m $minlen ,-o ${outdir}/fastq_trimmed/{cor}_trimmed.fastq.gz {abs}
     wait_for_jobs cutadapt
 
     echo "$bam - QC"
+    fileutilities.py T ${fqdir} --dir 'fastq.gz$|fq.gz$' | fileutilities.py P --loop sbatch ,-J fastQC ,-o /dev/null ,-e /dev/null ,--get-user-env ,--wrap "'fastqc -o ${outdir}/fastqc_pre {abs}'"
     fileutilities.py T ${fqdir} --dir 'fastq.gz$|fq.gz$' | fileutilities.py P --loop sbatch ,-J fastQC ,-o /dev/null ,-e /dev/null ,--get-user-env ,--wrap "'fastqc -o ${outdir}/fastqc_post {abs}'"
     wait_for_jobs fastQC
+    sbatch -J multiqc -o /dev/null -e /dev/null multiqc -f -o ${outdir}/multiqc_pre ${outdir}/fastqc_pre
     sbatch -J multiqc -o /dev/null -e /dev/null multiqc -f -o ${outdir}/multiqc_post ${outdir}/fastqc_post
-
 fi
 
 bamdir="${outdir}/dunk/filter"  # need it accessible outside the block
@@ -150,7 +135,7 @@ if [ "$dunk" -eq 1 ]; then
     wait_for_jobs slamaln
 
     echo "$bam - FILTER"
-    sbatch -J slamfltr -c $threads --mem=$memory --wrap "slamdunk filter -t $threads -o ${outdir}/dunk/filter -b $bed ${outdir}/dunk/map/*.bam"
+    sbatch -J slamfltr -c $threads --mem=$memory -o /dev/null -e /dev/null --wrap "slamdunk filter -t $threads -o ${outdir}/dunk/filter -b $bed ${outdir}/dunk/map/*.bam"
     wait_for_jobs slamfltr
 
     if [ "$umilen" -gt 0 ]; then
