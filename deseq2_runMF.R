@@ -30,7 +30,7 @@ spec = matrix(c(
 ), byrow=TRUE, ncol=5)
 
 opt = getopt(spec)
-# opt <- list(baseDir='/Volumes/groups/zuber/zubarchive/USERS/Kimon/anja/M10716_slamseq', countsFile='process/slam/all_collapsed_readCount-only_xref_scaled.txt', resultsDir='results/DE_rc_scaled', RDSoutdir='process/DE_rc_scaled', samplesFile='description/covars_KMAB.txt', control='h0,C03,dmso', designFormula='~ time', forvar='cell', minCount=10, lfcthreshold=1, nidcols=3, idcol=2, ntop=50, bmF=FALSE, pcutoff=0.05, all=FALSE, prescaled=TRUE)
+# opt <- list(baseDir='/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/OTI_vivo_pdac', countsFile='process/all_counts_xref.txt', resultsDir='results/DE', RDSoutdir='process/DE', samplesFile='description/covars.txt', control='sgCtrl,no', designFormula='~ treatment', forvar='condition', selvar='lost', sellev='no', minCount=10, lfcthreshold=1, nidcols=3, idcol=2, ntop=50, bmF=FALSE, pcutoff=0.05, all=FALSE, prescaled=FALSE)
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -93,11 +93,17 @@ if ( !is.null(opt$resultsDir ) ) {
 
 # Input
 covars <- as.data.frame(read.csv(file.path(opt$baseDir, opt$samplesFile), sep="\t", header=TRUE, row.names='sample', check.names = FALSE))
-cts <- read.csv(file.path(opt$baseDir, opt$countsFile), sep="\t", header=TRUE, check.names = FALSE) 
-# cts <- cts[, c(names(counts)[1:opt$nidcols], covars$sample)]    # Only samples specified in covars. ## It is handled somewhere in the RMD. If done here it causes a crash!
+cts <- read.csv(file.path(opt$baseDir, opt$countsFile), sep="\t", header=TRUE, check.names = FALSE, colClasses="character") 
+# Setting all columns to character prevents numeric IDs at the top of the ID columns from auto-defining these columns as numeric when there could be character IDs further down that would otherwise become NaN.
+
+# cts <- cts[, c(names(counts)[1:opt$nidcols], covars$sample)]    # Only samples specified in covars. 
+## It is handled somewhere in the RMD. If done here it causes a CRASH!
 
 # Cut out extra annotation/id columns
 xref <- cts[, 1:opt$nidcols]
+
+# Now that the IDs are handled, convert the rest to numbers in a matrix
+cts[, (opt$nidcols+1):ncol(cts)] <- lapply(cts[, (opt$nidcols+1):ncol(cts)], as.numeric)
 cts <- round(as.matrix(cts[, (opt$nidcols+1):ncol(cts)]), digits=0)
 rownames(cts) <- xref[, opt$idcol]
 
@@ -195,7 +201,11 @@ for (V in names(subcovars)){
     autoname <- paste(opt$selvar, opt$sellev, sep="-")
   }
   if (!is.null(opt$forvar)) {
-    autoname <- paste(autoname, paste(opt$forvar, V, sep="-"), sep="_")
+    if (! is.null(autoname)){
+      autoname <- paste(autoname, paste(opt$forvar, V, sep="-"), sep="_")
+    } else {
+      autoname <- paste(opt$forvar, V, sep="-")
+    }
   }
   
   ddsrds <- file.path(opt$baseDir, opt$RDSoutdir, paste0(paste(autoname, gsub(' |~', '', opt$designFormula), sep='_'), '_deseq2data.RDS'))
@@ -208,7 +218,8 @@ for (V in names(subcovars)){
                     # output_file = paste0(paste(autoname, name, sep='_'), '_deseq2.html'), 
                     output_file = paste0(paste(autoname, gsub(' |~', '', opt$designFormula), sep='_'), '_deseq2.html'),
                     output_dir = file.path(opt$baseDir, opt$resultsDir),
-                    params=list(ntop = opt$ntop,
+                    params=list(selfname = paste0(paste(autoname, gsub(' |~', '', opt$designFormula), sep='_'), '_deseq2.html'),
+                                ntop = opt$ntop,
                                 pcutoff = opt$pcutoff,
                                 lfcthreshold = opt$lfcthreshold,
                                 baseDir = opt$baseDir,

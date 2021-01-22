@@ -9,6 +9,7 @@ output:
     toc_float: true
     collapsed: false
 params:
+  selfname: ""
   derds: "null.RDS"     # MUST be specified, DESeq2 Dataset object file (before model creation)
   rmrds: "null.RDS"     # MUST be specified, RPM matrix object
   prefix: ""
@@ -38,10 +39,7 @@ library(data.table)
 library(ggplot2)
 library(plotly)
 library(htmltools)
-# library(topGO)
-# library(org.Mm.eg.db)
 library(patchwork)
-# library(ggExtra)
 library(ggrepel)
 
 # ggplot2 base theme
@@ -51,8 +49,9 @@ data.table::setDTthreads(1L)
 
 options(scipen=2)
 
-# params <- list(derds = ddsrds, rmrds = rpmrds, ntop = opt$ntop, pcutoff = opt$pcutoff, lfcthreshold = opt$lfcthreshold, baseDir = opt$baseDir, resultsDir = opt$resultsDir, prefix = autoname, ppen = 5, minL=0.75, minCount=opt$minCount, filterBaseMean=opt$bmF, reducedFormula = opt$reducedFormula, roundrobin = opt$all)
+# params <- list(selfname = paste0(paste(autoname, gsub(' |~', '', opt$designFormula), sep='_'), '_deseq2.html'), derds = ddsrds, rmrds = rpmrds, ntop = opt$ntop, pcutoff = opt$pcutoff, lfcthreshold = opt$lfcthreshold, baseDir = opt$baseDir, resultsDir = opt$resultsDir, prefix = autoname, ppen = 5, minL=0.75, minCount=opt$minCount, filterBaseMean=opt$bmF, reducedFormula = opt$reducedFormula, roundrobin = opt$all)
 
+nflag <- 20
 
 if (!is.null(params$reducedFormula)){
   if (params$reducedFormula == 'NULL') {
@@ -76,12 +75,15 @@ tryCatch(vstmat <- assay(vst(deobj, blind=FALSE)),     # Variance stabisized cou
 
 cD <- colData(deobj)[, 1:length(colData(deobj)), drop=FALSE]  # before model building, there in no size factor as last column
 
-cat(paste("min allowed sum of raw counts across relevant samples:", params$minCount))
+cat(paste("Report: ", sub('.html', '', params$selfname, fixed=TRUE)))
+
+cat(paste("Min allowed sum of raw counts across relevant samples:", params$minCount))
+cat(paste("DESeq2 independent filtering:", params$filterBaseMean))
 cat(paste("Significance level:", params$pcutoff))
-cat(paste("independent filtering:", params$filterBaseMean))
-cat(paste("log2FC threshold:", params$lfcthreshold, ", (i.e.", 2 ^ params$lfcthreshold, "-fold change)"))
-cat(paste("max # of top hits to highlight:", params$ntop))
-cat(paste("Expand contrasts to include pairs without the assigned reference:", params$roundrobin))
+cat(paste0("log2FC threshold: ", params$lfcthreshold, " , (i.e. ", 2 ^ params$lfcthreshold, "-fold change)"))
+cat(paste("Max number of top hits to highlight:", params$ntop))
+cat(paste("Max number of top hits to label in plots:", nflag))
+cat(paste("Round-robin comparisons between treatments:", params$roundrobin))
 ```
 
 ```{r functionDE}
@@ -98,12 +100,15 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, p
   lfc[, mlog10p := -log10(padj)] [, type := "raw_L2FC"]
   shrink <- cbind(data.table(name=rownames(shrink)), as.data.table(shrink))
   shrink[, mlog10p := -log10(padj)] [, type := "shrunken_L2FC"] [, absl2fc := abs(log2FoldChange)]
-  
   shrink[, meetthresh := absl2fc >= lfcthreshold & padj < pcutoff]
+  
+  # Heuristic selection, by eukledian distance, of top hits to highlight when there are more hits than the given limit
   shrink[complete.cases(shrink), dist := sqrt((mlog10p/ppen)^2 + log2FoldChange^2)]  # logp is usually much bigger than logfc, so down-weight it a little
   setorder(shrink, -dist, -mlog10p, -absl2fc, na.last = TRUE)
   shrink[, istop := FALSE]
+  lfc[, istop := FALSE]
   shrink[1:ntop, istop := meetthresh]  # The top N hits, must first be hits.
+  lfc[name %in% shrink[(istop), name], istop := TRUE]
   
   # if (!any(shrink$meetthresh)) {
   #   warning(paste("WARNING -", contrast, "- No points meet the L2FC and Padj criteria!"))
@@ -127,37 +132,37 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, p
   }
   
   
+  # Choose subset of top genes to flag, by order of shrunken LFC
+  if (any(shrink$istop)){
+    flags <- head(shrink[(istop), ][order(dist, decreasing=TRUE)][, name], n=nflag)
+  } else {
+    flags <- head(shrink[, ][order(abs(log2FoldChange), decreasing=TRUE)][, name], n=5)
+  }
+  
+  # Combine shrunken and non-shrunk LFC tables for output.
   outtab <- rbind(lfc, shrink, fill=TRUE)
+  outtab[, addflag := FALSE]
+  outtab[, addflag := name %in% flags]
+  outtab[(addflag), flag := name]
   
   # Volcanos
   
   # Static image.
-  pv1 <- ggplot(outtab, 
+  pv1 <- ggplot(NULL, 
                 aes(x=log2FoldChange, y=mlog10p, 
                     shape= name %in% subfc[(istop), name], 
-                    colour=name %in% subfc[(istop), name])) + 
+                    colour=name %in% subfc[(istop), name], 
+                    label=flag)) + 
             facet_grid( . ~ type) +
-            geom_point(size=rel(0.8), alpha=0.5) +
+            geom_point(data=outtab, size=rel(0.8), alpha=0.5) +
             geom_vline(xintercept = lfcthreshold, linetype="dotted",  colour="steelblue1") + 
             geom_vline(xintercept = -lfcthreshold, linetype="dotted",  colour="steelblue1") + 
             geom_hline(yintercept = -log10(pcutoff), linetype="dotted",  colour="steelblue1") + 
+            geom_text_repel(data=outtab[(addflag),], size=rel(2.5), segment.size = 0.3, min.segment.length=0, arrow = arrow(length = unit(0.008, "npc")), max.overlaps=1e4, force=1, force_pull=1) +
             scale_colour_manual(values=c("black", "red")) +
             scale_shape_manual(values=c(16, 17)) +
             labs(x='log2( FC )', y='-log10( Padj )', title=contrast) +
             theme(legend.position = "none", panel.grid = element_blank())
-  # pv1a <- ggplot(outtab, 
-  #               aes(x=log2FoldChange, y=mlog10p, 
-  #                   shape= name %in% subfc[(istop), name], 
-  #                   colour=name %in% subfc[(istop), name])) + 
-  #           facet_grid( type ~ . ) +
-  #           geom_point(size=0.8, alpha=0.5) +
-  #           geom_vline(xintercept = lfcthreshold, linetype="dotted",  colour="steelblue1") + 
-  #           geom_vline(xintercept = -lfcthreshold, linetype="dotted",  colour="steelblue1") + 
-  #           geom_hline(yintercept = -log10(pcutoff), linetype="dotted",  colour="steelblue1") + 
-  #           scale_colour_manual(values=c("black", "red")) +
-  #           scale_shape_manual(values=c(16, 17)) +
-  #           labs(x='log2( FC )', y='-log10( Padj )', title=contrast) +
-  #           theme(legend.position = "none", panel.grid = element_blank())
   
   # Lighter image for interactive plotly. Only points that pass thresholds.
   pv2 <- ggplot(subfc, 
@@ -179,12 +184,14 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, p
   pma1 <- ggplot(outtab, 
                 aes(x=baseMean, y=log2FoldChange, alpha=padj < pcutoff, 
                     shape= name %in% subfc[(istop), name],
-                    colour=name %in% subfc[(istop), name])) + 
+                    colour=name %in% subfc[(istop), name],
+                    label=name)) + 
             facet_grid( . ~ type) +
             geom_hline(yintercept = 0,  colour="grey50") + 
             geom_point(size=rel(0.8)) +
             geom_hline(yintercept = lfcthreshold, linetype="dotted",  colour="steelblue1") + 
             geom_hline(yintercept = -lfcthreshold, linetype="dotted",  colour="steelblue1") + 
+            geom_text_repel(data=outtab[(addflag),], size=rel(2.5), segment.size = 0.3, min.segment.length=0, arrow = arrow(length = unit(0.008, "npc")), max.overlaps=1e4, force=1, force_pull=1) +
             scale_x_log10() +
             annotation_logticks(base=10, sides='b') +
             scale_colour_manual(values=c("black", "red")) +
@@ -192,22 +199,6 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, p
             scale_alpha_manual(values=c(0.25, 0.8), na.value=0.05) +
             labs(y='log2( FC )', y='baseMean', title=contrast) +
             theme(legend.position = "none", panel.grid = element_blank())
-  # pma1a <- ggplot(outtab, 
-  #               aes(x=baseMean, y=log2FoldChange, alpha=padj < pcutoff, 
-  #                   shape= name %in% subfc[(istop), name],
-  #                   colour=name %in% subfc[(istop), name])) + 
-  #           facet_grid( type ~ . ) +
-  #           geom_hline(yintercept = 0,  colour="grey50") + 
-  #           geom_point(size=0.8) +
-  #           geom_hline(yintercept = lfcthreshold, linetype="dotted",  colour="steelblue1") + 
-  #           geom_hline(yintercept = -lfcthreshold, linetype="dotted",  colour="steelblue1") + 
-  #           scale_x_log10() +
-  #           annotation_logticks(base=10, sides='b') +
-  #           scale_colour_manual(values=c("black", "red")) +
-  #           # scale_alpha_continuous(na.value=0.05) +
-  #           scale_alpha_manual(values=c(0.25, 0.8), na.value=0.05) +
-  #           labs(y='log2( FC )', y='baseMean', title=contrast) +
-  #           theme(legend.position = "none", panel.grid = element_blank())
   
   # Lighter image for interactive plotly. Only points that pass thresholds.
   pma2 <- ggplot(subfc, 
@@ -269,6 +260,20 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, p
     selvst[, sample := factor(sample, ordered=TRUE, levels=cn)]
   }
 
+  # Cluster the genes and plot the heatmaps
+  mat <- dcast(selcnt, name ~ sample, value.var='RPM')
+  rn <- mat[[1]]
+  cn <- names(mat)
+  mat <- as.matrix(mat[,2:length(mat), with=FALSE])
+  colnames(mat) <- cn[2:length(cn)]
+  rownames(mat) <- rn
+  hcfit <- hclust(dist(scale(mat, center=TRUE)))
+  selcnt[, name := factor(name, ordered=TRUE, levels=rn[hcfit$order])]
+  selcnt[, sample := factor(sample, ordered=TRUE, levels=rownames(coldata))]
+  # Keep the same gene order
+  selvst[, name := factor(name, ordered=TRUE, levels=rn[hcfit$order])]
+  selvst[, sample := factor(sample, ordered=TRUE, levels=rownames(coldata))]
+  
   pe1 <- ggplot(selcnt, aes(x=sample, y=name, fill=log10(RPM))) +
             geom_tile() +
             facet_grid(. ~ type) +
@@ -287,7 +292,9 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, p
   
   # Table
   
-  # Add shrunken LFC column to normal LFC table. dcast is a glorified rename, but without changing the original (it made more sense when this block located earlier in the function)
+  # Add shrunken LFC column to normal LFC table. 
+  # Previously the tables were joined in long format, which is great for facetting in plots. For human use, wide format is preferable.
+  # dcast is used here as a glorified rename, but without changing the original (it made more sense when this block was located earlier in the function)
   outtab <- merge(dcast(lfc, ... ~ type, value.var = 'log2FoldChange'),
                   dcast(shrink, ... ~ type, value.var = 'log2FoldChange')[, .(name, shrunken_L2FC)], 
                   by='name')
@@ -610,36 +617,64 @@ if (length(cD) == 1 && params$roundrobin) {
 }
 ```
 
-## Expression overview
+## Results by comparison
 
 Values are all increased by 1/10th of the smallest non-zero expression value, thus allowing zero values to be represented on log-scale.
 
 When there are 2 or more replicates, the smaller plots on the right will show a 2D density of the mean-scaled StDev vs the mean expression. If there is only one replicate StDev cannot be calculated so, instead, the 1D density plot of the expression will be shown.
 
-* Red triangles for top `r params$ntop` (or fewer) hits.
+* Red triangles for the top `r params$ntop` (or fewer) hits.
 * Black tiles for everything else. Density of points indicated by fade/transparency of the tiles.
 * Blue for genes that were not assigned a  p-value (filtered out before testing).
+* Labels added only to a subset of the top genes by order of "shrunken" Log2FC, to avoid excessive clutter.
 
-```{r expov, fig.height=8, fig.width=12}
+```{r expov, warning=FALSE, fig.height=8, fig.width=12}
 pexp <- lapply (resall, function(res) {
   # res <- resall[[1]]
+  
+  # Are there any hits?
+  # message(paste(res$contrast, res$hashits))
+  if (res$hashits) {
+    message(paste("No hits meeting criteria in ", res$contrast,"! Listing outermost points instead."))
+  }
+
+  # Hit list
+  ##########
+  
+  cat("\nComparison: ")
+  cat(res[["contrast"]])
+  cat("\n\nTop hits (or, if no hits exist, nearest to being hits):\n")
+  cat(as.character(res[["tophits"]]))
+  cat("\n")
+  
+  # Hit expression
+  ################
+  
+  print(res[["pe1"]])
+
+  # Expression and variance densities
+  ###################################
+  
   DT <- res$outtab
   names(DT) <- vapply(strsplit(names(DT), '.', fixed=TRUE), function(x) x[4], character(1))
   DT[, colour := 'general']
   DT[is.na(padj), colour :='pNA']
-  DT[name %in% res$tophits, colour := 'top']
+  DT[(istop), colour := 'top']
+  DT[, addflag := FALSE]
+  flags <- head(DT[(istop), ][order(shrunken_L2FC, decreasing=TRUE), name], n=nflag)
+  DT[name %in% flags, addflag := TRUE]
+  DT[(addflag), flag := name]
   
-  # Increment the 0z so they survive the log=transformation, but in a way they don;t mix with non-zero data.
+  # Increment the 0s so they survive the log=transformation, but in a way they don't mix with non-zero data.
   zeros <- min(DT[refMeanRPM > 0, refMeanRPM], DT[treatMeanRPM > 0, treatMeanRPM]) / 10
   cat(paste("zeros =", zeros))
   
-  p1 <- ggplot(DT, aes(x=refMeanRPM + zeros, y=treatMeanRPM + zeros, colour=colour, label=name)) +
-      # geom_point(data=DT[colour=='general', ], shape=16, alpha=0.3, size=0.8) +
+  p1 <- ggplot(NULL, aes(x=refMeanRPM + zeros, y=treatMeanRPM + zeros, colour=colour, label=flag)) +
       geom_hex(data=DT[colour=='general', ], size=0.5, colour='transparent', bins=100) +
       geom_point(data=DT[colour=='pNA', ], shape=20, alpha=0.2, size=0.8) +
-      geom_abline(intercept = 0, slope = 1, colour='grey75', alpha=0.5) +
-      geom_point(data=DT[colour=='top', ], shape=17, size=1.8) +
-      geom_label_repel(data=DT[colour=='top', ], size=3, segment.size = 0.2,) +
+      geom_abline(intercept = 0, slope = 1, colour='grey75', alpha=0.3) +
+      geom_point(data=DT[(istop), ], shape=17, size=1.8) +
+      geom_label_repel(data=DT[(istop), ], size=rel(2.5), segment.size = 0.3, min.segment.length=0, arrow = arrow(length = unit(0.008, "npc")), max.overlaps=1e4, force=10, force_pull=5) +
       scale_colour_manual(values=c(general='black', top='red', pNA='steelblue')) +  
       scale_fill_gradient2(high='black') +
       scale_x_log10() + 
@@ -651,12 +686,13 @@ pexp <- lapply (resall, function(res) {
   
   # StDev is NA when there is only one replicate. So there are no values for Y-axis.
   if (!all( is.na(DT$refStDev) )) {
-    p2 <- ggplot(DT, aes(x=refMeanRPM + zeros, y=refStDev / (refMeanRPM + zeros), colour=colour)) +
+    p2 <- ggplot(NULL, aes(x=refMeanRPM + zeros, y=refStDev / (refMeanRPM + zeros), colour=colour, label=flag)) +
         # geom_point(data=DT[colour=='black', ], shape=16, alpha=0.2, size=0.8) +
         geom_hex(data=DT[colour=='general', ], bins=50, size=0.5, colour='transparent') +
         geom_point(data=DT[colour=='pNA', ], shape=20, alpha=0.2, size=0.8) +
-        geom_point(data=DT[colour=='top', ], shape=17, size=1.8) +
-        scale_colour_manual(values=c(general='black', top='red', pNA='steelblue')) +  
+        geom_point(data=DT[(istop), ], shape=17, size=1.8) +
+        geom_label_repel(data=DT[(istop), ], size=rel(2.5), segment.size = 0.3, min.segment.length=0, arrow = arrow(length = unit(0.008, "npc")), max.overlaps=1e4, force=10) +
+      scale_colour_manual(values=c(general='black', top='red', pNA='steelblue')) +  
         scale_fill_gradient2(high='black') +
         scale_x_log10() + 
         scale_y_log10() + 
@@ -676,11 +712,12 @@ pexp <- lapply (resall, function(res) {
   
   # Again, StDev is NA when there is only one replicate.
   if (!all( is.na(DT$treatStDev) )) {
-    p3 <- ggplot(DT, aes(x=treatMeanRPM + zeros, y=treatStDev / (treatMeanRPM + zeros), colour=colour)) +
+    p3 <- ggplot(NULL, aes(x=treatMeanRPM + zeros, y=treatStDev / (treatMeanRPM + zeros), colour=colour, label=flag)) +
       # geom_point(data=DT[colour=='black', ], shape=16, alpha=0.2, size=0.8) +
       geom_hex(data=DT[colour=='general', ], bins=50, size=0.5, colour='transparent') +
       geom_point(data=DT[colour=='pNA', ], shape=20, alpha=0.2, size=0.8) +
-      geom_point(data=DT[colour=='top', ], shape=17, size=1.8) +
+      geom_point(data=DT[(istop), ], shape=17, size=1.8) +
+      geom_label_repel(data=DT[(istop), ], size=rel(2.5), segment.size = 0.3, min.segment.length=0, arrow = arrow(length = unit(0.008, "npc")), max.overlaps=1e4, force=10) +
       scale_colour_manual(values=c(general='black', top='red', pNA='steelblue')) +  
       scale_fill_gradient2(high='black') +
       scale_x_log10() + 
@@ -699,29 +736,17 @@ pexp <- lapply (resall, function(res) {
       theme(panel.grid.minor = element_blank()) 
   }
   
-  print (p1 | (p2 / p3))
-  return(p1 | (p2 / p3))
+  print( p1 )
+  print( (p2 + theme(legend.position="none")) | (p3 + theme(legend.position="none")) )
+
+  # Static Volcano and MA
+  print(res[["pv1"]])
+  print(res[["pma1"]])
+  
+  return(p1 | (p2 / p3)) # for the PDF
 })
 ```
 
-## Static Volcanos and MAs
-
-* Red triangles for the top `r params$ntop` (or fewer) hits.
-* Black dots for everything else.
-* Solid black dots (in MA plots) for signicant FDRs.
-* Faded/transparent black dots (in MA plots) for non-significant FDRs.
-
-```{r volcanos, fig.height=6, fig.width=12, warning=FALSE}
-# These plots have two side-by-side facets and need more width to display nicely
-
-for (res in resall){
-  cat(res[["contrast"]])
-  cat("\n")  
-  print(res[["pv1"]])
-  print(res[["pma1"]])
-  cat("\n\n")  
-}
-```
 
 ## Interactive filtered Volcanos and MAs
 
@@ -735,36 +760,13 @@ ly <- lapply(resall, function(res) {
 htmltools::tagList(ly)
 ```
 
-## Top hits
-
-```{r hits, fig.height=10, fig.width=8, warning=FALSE}
-allhits <- list()
-
-for (res  in resall){
-  # Are there any hits?
-  # message(paste(res$contrast, res$hashits))
-  if (res$hashits) {
-    warning(paste("No hits meeting criteria in ", res$contrast,"! Listing outermost points instead."))
-  }
-
-  # Hit expression
-  print(res[["pe1"]])
-
-  # Hit list
-  cat(res[["contrast"]])
-  print(res[["tophits"]])
-  allhits <- c(allhits, res[["tophits"]])
-
-  cat("\n\n")
-}
-```
-
-## Expression of all top hits
-
-Top hits from all the individual comparisons.
+## Expression heatmap of all top hits from all comparisons
 
 ```{r dexp, fig.height=15, fig.width=7}
-allhits <- unique(unlist(allhits))
+# Collect all the top50s
+allhits <- Reduce(union, lapply(resall, function(res) {
+  return(res[["tophits"]])
+}))
 
 # Counts
 mat1 <- vstmat[allhits, ]
