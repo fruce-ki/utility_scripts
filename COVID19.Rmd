@@ -26,7 +26,7 @@ library(ggplot2)
 library(ggrepel)
 library(patchwork)
 library(data.table)
-require(bit64)
+library(maps)
 
 options(scipen=2)
 ```
@@ -36,301 +36,180 @@ Source: https://opendata.ecdc.europa.eu/covid19/
 # Load current data
 
 ```{r}
-# # Download files
+# Load data
+###########
+
+## Download latest data
 # GET("https://opendata.ecdc.europa.eu/covid19/agecasesnational/csv", authenticate(":", ":", type="ntlm"), write_disk('agecasesnational.csv', overwrite = TRUE))
-
 # GET("https://opendata.ecdc.europa.eu/covid19/agecasesubnational/csv", authenticate(":", ":", type="ntlm"), write_disk('agecasesubnational.csv', overwrite = TRUE))
-
 # GET("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", authenticate(":", ":", type="ntlm"), write_disk('casedistribution.csv', overwrite = TRUE))
-
 # GET("https://opendata.ecdc.europa.eu/covid19/hospitalicuadmissionrates/csv", authenticate(":", ":", type="ntlm"), write_disk('hospitalicuadmissionrates.csv', overwrite = TRUE))
-
 # GET("https://opendata.ecdc.europa.eu/covid19/movementindicators/csv", authenticate(":", ":", type="ntlm"), write_disk('movementindicators.csv', overwrite = TRUE))
-
 # GET("https://opendata.ecdc.europa.eu/covid19/nationalcasedeath/csv", authenticate(":", ":", type="ntlm"), write_disk('nationalcasedeath.csv', overwrite = TRUE))
-
 # GET("https://opendata.ecdc.europa.eu/covid19/subnationalcasedaily/csv", authenticate(":", ":", type="ntlm"), write_disk('subnationalcasedaily.csv', overwrite = TRUE))
-
 # GET("https://opendata.ecdc.europa.eu/covid19/subnationalcaseweekly/csv", authenticate(":", ":", type="ntlm"), write_disk('subnationalcaseweekly.csv', overwrite = TRUE))
-
 # GET("https://opendata.ecdc.europa.eu/covid19/testing/csv", authenticate(":", ":", type="ntlm"), write_disk('testing.csv', overwrite = TRUE))
 
+# Import data.
+# Don't need the cruiseship.
+agecasenat <- fread('agecasesnational.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
+agecasesubnat <- fread('agecasesubnational.csv') # [country != 'Cases_on_an_international_conveyance_Japan',] # Still blank
+casedist <- fread('casedistribution.csv')[countriesAndTerritories != 'Cases_on_an_international_conveyance_Japan', ]
+hosprate <- fread('hospitalicuadmissionrates.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
+movement <- fread('movementindicators.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
+natcasedeath <- fread('nationalcasedeath.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
+subnatcaseday <- fread('subnationalcasedaily.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
+subnatcaseweek <- fread('subnationalcaseweekly.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
+testing <- fread('testing.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
 
-# Load data
-agecasenat <- fread('agecasesnational.csv')
-# agecasesubnat <- fread('agecasesubnational.csv')       # NA
-casedist <- fread('casedistribution.csv')
-hosprate <- fread('hospitalicuadmissionrates.csv')
-movement <- fread('movementindicators.csv')
-natcasedeath <- fread('nationalcasedeath.csv')
-subnatcaseday <- fread('subnationalcasedaily.csv')
-subnatcaseweek <- fread('subnationalcaseweekly.csv')
-testing <- fread('testing.csv')
-
-
-# Verify no new changes to data format
+# Verify that the data format wasn't changed again
 stopifnot(names(agecasenat) == c('country', 'country_code', 'year_week', 'age_group', 'new_cases', 'population', 'rate_14_day_per_100k', 'source'))
-
-# stopifnot(names(agecasesubnat) != c())
-
+stopifnot(names(agecasesubnat) == c('Test'))
 stopifnot(names(casedist) == c('dateRep', 'year_week', 'cases_weekly', 'deaths_weekly', 'countriesAndTerritories', 'geoId', 'countryterritoryCode', 'popData2019', 'continentExp', 'notification_rate_per_100000_population_14-days'))
-
 stopifnot(names(hosprate) == c('country', 'indicator', 'date', 'year_week', 'value', 'source', 'url'))
-
 stopifnot(names(movement) == c('col0', 'country', 'country_code', 'geo_id_final', 'region', 'subnational_cases_7', 'subnational_cases_14', 'subnational_population', 'subnational_rate_14', 'national_cases_7', 'national_population', 'national_testing_rate', 'national_positivity_rate', 'subnational_testing_data', 'positivity_rate_combined', 'testing_rate_combined', 'colour', 'week'))
-
 stopifnot(names(natcasedeath) == c('country', 'country_code', 'continent', 'population', 'indicator', 'weekly_count', 'year_week', 'rate_14_day', 'cumulative_count', 'source'))
-
 stopifnot(names(subnatcaseday) == c('country', 'region_name', 'nuts_code', 'date', 'rate_14_day_per_100k', 'source'))
-
 stopifnot(names(subnatcaseweek) == c('country', 'region_name', 'nuts_code', 'year_week', 'rate_14_day_per_100k', 'source'))
-
-stopifnot(names(testing) == c('country', 'country_code', 'year_week', 'new_cases', 'tests_done', 'population', 'testing_rate', 'positivity_rate', 'testing_data_source'))
-
+stopifnot(names(testing) == c('country', 'country_code', 'year_week', 'level', 'region', 'region_name', 'new_cases', 'tests_done', 'population', 'testing_rate', 'positivity_rate', 'testing_data_source'))
 
 
+# Countries to highlight
+########################
 
-
-
-
-
-
-
-
-
-
-setnames(globcases, c('Country', 'info_type', 'Date', ))
-globcases[, Date := as.Date(dmy(dateRep))]
-globcases <- globcases[, .(Country, countryCode, continent, population, Date, new_Cases, new_Deaths)]
-# str(globcases)
-
-## Create year-week field, to enable smoother merging with the other tables, as they can have NA dates.
-# Start with separate fields, in case I need to add tweaks to them.
-globcases[, year := strftime(globcases$Date, format='%Y')]
-globcases[, week := as.integer(strftime(globcases$Date, format='%V'))]
-globcases[, year_week := paste0(year, '-W', week)]
-globcases[, year := NULL]
-globcases[, week := NULL]
-
-# Remove the cruise ship entry
-globcases <- globcases[Country != 'Cases_on_an_international_conveyance_Japan', ]
-
-# Some countries lag by a day in entering their data. So if I use the latest date I miss some countries,
-# if I use the latest available entry, the countries are out of sync. Determine range, and as long as it's less than a couple days, take the latest common date as the "current" date.
-end_dates <- globcases[, max(Date), by=Country]
-
-if ( min(unique(end_dates$V1)) - today() >= -3) { # allow for lack of updates over weekends
-  message('Entries for some countries lag by a couple days. Continuing with last common date.')
-  current <- min(unique(end_dates$V1))
-} else {
-  message('Entries for some countries seem to have stopped. Continuing with latest available entry date.')
-  current <- max(unique(end_dates$V1))
-}
-
-message(paste('Last entry date used:', current, '.'))
-
-
-tf <- "~/covid/testing.csv"
-# GET("https://opendata.ecdc.europa.eu/covid19/testing/csv", authenticate(":", ":", type="ntlm"), write_disk(tf, overwrite = TRUE))
-tests <- fread(tf)
-setnames(tests, c('Country', 'countryCode', 'year_week', 'test_Cases', 'new_Tests', 'population', 'test_Rate', 'pos_Rate', 'source'))
-tests <- tests[, .(Country, year_week, new_Tests)]
-# str(tests)
-## The UK has been mistyped in some entries, so that needs fixing to enable better correct merging of the tables.
-tests[Country=='United Kingdom', Country := 'United_Kingdom']
-## Fix inconsistent formatting that is messing up the mergers
-tests[, year_week:= sub('W0', 'W', year_week)]
-
-tf <- "~/covid/hospitalizations.csv"
-# GET("https://opendata.ecdc.europa.eu/covid19/hospitalicuadmissionrates/csv", authenticate(":", ":", type="ntlm"), write_disk(tf, overwrite = TRUE))
-icu <- fread(tf)
-setnames(icu, c('Country', 'Type', 'Date', 'year_week', 'Value', 'source', 'URL'))
-## The UK has been mistyped in some entries, so that needs fixing to enable better correct merging of the tables.
-icu[Country=='United Kingdom', Country := 'United_Kingdom']
-icu[, Date := as.Date(Date)]
-## Fix inconsistent formatting that is messing up the mergers
-icu[, year_week:= sub('W0', 'W', year_week)]
-
-## Split daily and weekly metrics that are wreaking havoc on my mergers.
-occup <- unique(icu[grepl('occupancy', Type, fixed=TRUE), .(Country, Date, Type, Value)])
-occup <- dcast(occup, Country + Date ~ Type, value.var = 'Value')
-setnames(occup, c('Country', 'Date', 'occup_ICU', 'occup_Hosp'))
-admit <- unique(icu[grepl('admissions', Type, fixed=TRUE), .(Country, year_week, Type, Value)])
-admit <- dcast(admit, Country + year_week ~ Type, value.var = 'Value')
-setnames(admit, c('Country', 'year_week', 'norm_new_ICU', 'norm_new_Hosp'))
-admit[, norm_new_ICU := norm_new_ICU * 10 ]   # re-normalize to 1M instead of 100K, to be same as my other norms
-admit[, norm_new_Hosp := norm_new_Hosp * 10 ]
-# str(icu)
-```
-
-```{r}
-# Marry the tables
-DT <- merge(merge(globcases, occup, by=c('Country', 'Date'), all=TRUE), 
-            merge(admit, tests, by=c('Country', 'year_week'), all=TRUE), 
-            by=c('Country', 'year_week'), all=TRUE)
-# View(merge(globcases, occup, by=c('Country', 'Date'), all=TRUE)[Country=='Denmark',])
-# View(merge(admit, tests, by=c('Country', 'year_week'), all=TRUE)[Country=='Denmark',])
-# View(DT[Country=='Denmark',])
-# str(DT)
-
-## Some country codes are NA in some rows. Try to fill in the missing values.
-DT[, countryCode := .SD$countryCode[!is.na(.SD$countryCode)][1], by=Country]
-
-# Sort newest last, for cumulative metrics.
-setorder(DT, Country, Date)
-
-## Missing days break the cumulative sums
-DT[is.na(new_Cases), new_Cases := 0]
-DT[is.na(new_Deaths), new_Deaths := 0]
-DT[is.na(new_Tests), new_Tests := 0]
-DT[is.na(norm_new_Hosp), norm_new_Hosp := 0]
-DT[is.na(norm_new_ICU), norm_new_ICU := 0]
-
-# Total Cases and Deaths
-DT[, total_Cases := cumsum(new_Cases), by=Country]
-DT[, total_Deaths := cumsum(new_Deaths), by=Country]
-DT[, total_Tests := cumsum(new_Tests), by=Country]
-
-# Sliding window cumulative cases in a W-days window.
-W <- 7
-DT[, roll_Cases := frollsum(new_Cases, n=W, align='right', na.rm=TRUE), by=Country]
-DT[, roll_Deaths := frollsum(new_Deaths, n=W, align='right', na.rm=TRUE), by=Country]
-DT[, roll_Tests := frollsum(new_Tests, n=W, align='right', na.rm=TRUE), by=Country]
-
-# Population normalisations to P citizens
-P <- 0.1e6
-DT[, norm_new_Cases := new_Cases / population * P, by=Country]
-DT[, norm_new_Deaths := new_Deaths / population * P, by=Country]
-DT[, norm_new_Tests := new_Tests / population * P, by=Country]
-# DT[is.na(norm_new_Cases), norm_new_Cases := 0]
-# DT[is.na(norm_new_Deaths), norm_new_Deaths := 0]
-# DT[is.na(norm_new_Tests), norm_new_Tests := 0]
-
-DT[, norm_tot_Cases := total_Cases / population * P, by=Country]
-DT[, norm_tot_Deaths := total_Deaths / population * P, by=Country]
-DT[, norm_tot_Tests := total_Tests / population * P, by=Country]
-DT[, norm_tot_ICU := cumsum(norm_new_ICU), by=Country]
-DT[, norm_tot_Hosp := cumsum(norm_new_Hosp), by=Country]
-# DT[is.na(norm_tot_Cases), norm_tot_Cases := 0]
-# DT[is.na(norm_tot_Deaths), norm_tot_Deaths := 0]
-# DT[is.na(norm_tot_Tests), norm_tot_Tests := 0]
-# DT[is.na(norm_tot_ICU), norm_tot_ICU := 0]
-# DT[is.na(norm_tot_Hosp), norm_tot_Hosp := 0]
-
-DT[, norm_roll_Cases := roll_Cases / population * P, by=Country]
-DT[, norm_roll_Deaths := roll_Deaths / population * P, by=Country]
-DT[, norm_roll_Tests := roll_Tests / population * P, by=Country]
-DT[, norm_roll_ICU := frollsum(norm_new_ICU, n=W, align='right', na.rm=TRUE), by=Country]
-DT[, norm_roll_Hosp := frollsum(norm_new_Hosp, n=W, align='right', na.rm=TRUE), by=Country]
-
-# Severity rates
-DT[, Mortality := total_Deaths / total_Cases]
-
-DT[, roll_TestCase_Rate := norm_roll_Cases / norm_roll_Tests]
-DT[, roll_HospICU_Rate := norm_roll_ICU / norm_roll_Hosp]
-DT[, roll_ICUDeath_Rate := norm_roll_Deaths / norm_roll_ICU]
-
-# Global
-DT[, gNew_Cases := sum(new_Cases, na.rm=TRUE), by=Date]
-DT[, gNew_Deaths := sum(new_Deaths, na.rm=TRUE), by=Date]
-DT[, gNew_Tests := sum(new_Tests, na.rm=TRUE), by=Date]
-DT[, gTotal_Cases := sum(total_Cases, na.rm=TRUE), by=Date]
-DT[, gTotal_Deaths := sum(total_Deaths, na.rm=TRUE), by=Date]
-DT[, gTotal_Tests := sum(total_Tests, na.rm=TRUE), by=Date]
-DT[, gRoll_Cases := sum(roll_Cases, na.rm=TRUE), by=Date]
-DT[, gRoll_Deaths := sum(roll_Deaths, na.rm=TRUE), by=Date]
-DT[, gRoll_Tests := sum(roll_Tests, na.rm=TRUE), by=Date]
-DT[, gMortality := gTotal_Deaths / gTotal_Cases]
-
-# Rates of daily change
-DT[, roll_Cases_Rate := frollapply(roll_Cases, n=2, FUN = function(x){x[2] / x[1]}, align="right"), by=Country]
-DT[, roll_Deaths_Rate := frollapply(roll_Deaths, n=2, FUN = function(x){x[2] / x[1]}, align="right"), by=Country]
-DT[, roll_Tests_Rate := frollapply(norm_roll_Tests, n=2, FUN = function(x){x[2] / x[1]}, align="right"), by=Country]
-DT[, roll_Hosp_Rate := frollapply(norm_roll_Hosp, n=2, FUN = function(x){x[2] / x[1]}, align="right"), by=Country]
-DT[, roll_ICU_Rate := frollapply(norm_roll_ICU, n=2, FUN = function(x){x[2] / x[1]}, align="right"), by=Country]
-DT[!is.finite(roll_Cases_Rate), roll_Cases_Rate := 0]
-DT[!is.finite(roll_Deaths_Rate), roll_Deaths_Rate := 0]
-DT[!is.finite(roll_Tests_Rate), roll_Tests_Rate := 0]
-DT[!is.finite(roll_Hosp_Rate), roll_Hosp_Rate := 0]
-DT[!is.finite(roll_ICU_Rate), roll_ICU_Rate := 0]
-
-DT[, gRoll_Cases_Rate := frollapply(gRoll_Cases, n=2, FUN = function(x){x[2] / x[1]}, align="right"), by=Country]
-DT[, gRoll_Deaths_Rate := frollapply(gRoll_Deaths, n=2, FUN = function(x){x[2] / x[1]}, align="right"), by=Country]
-DT[!is.finite(gRoll_Cases_Rate), gRoll_Cases_Rate := 0]
-DT[!is.finite(gRoll_Deaths_Rate), gRoll_Deaths_Rate := 0]
-
-# Compare severity to one country.
 homecountry = 'Austria'
-# Select countries
-topInterest <- c('Austria', 'Italy', 'Greece', 'Luxembourg', 'Germany')
+# Selected countries
+family_countries <- c('Austria', 'Italy', 'Greece', 'Luxembourg', 'Germany')
 neighbour_countries <- c('Switzerland', 'Slovakia', 'Slovenia', 'Czechia', 'Hungary')
 other_countries <- c('United_Kingdom', 'Spain', 'France', 'Belgium', 'United_States_of_America', 'Sweden', 'South_Korea')
-```
-
-```{r}
-# Download the shape file from the web and unzip it:
-# download.file("http://thematicmapping.org/downloads/TM_WORLD_BORDERS_SIMPL-0.3.zip", destfile="~/covid/shape_files/world_shape_file.zip")
-# system("unzip ~/covid/shape_files/world_shape_file.zip")
-world_spdf <- readOGR(dsn='~/covid/shape_files/world_shape_file', layer='TM_WORLD_BORDERS_SIMPL-0.3')
-
-# Dataframe-ize map.
-world_df <- as.data.table(tidy(world_spdf, region="ISO3"))
-# For plottting, the order of rows is super important. 
-# Merge operations later can change the order, so I need to be able to recover it.
-world_df[, ord := 1:nrow(world_df)]
-```
-
-The Covid19 dataset from ECDC comes without geospacial data. The geospacial data available from other sources may not be the most up-to-date with recognised countries and names.
-
-```{r}
-message(paste(sum(!(world_spdf$ISO3 %in% DT$countryCode)), 
-							"countries in the map file do not correspond to an entry in the Covid19 data."))
-
-print(world_spdf$ISO3[! world_spdf$ISO3 %in% DT$countryCode])
 
 
-outgroup <- unique(DT[!(countryCode %in% world_spdf$ISO3), .(Country, countryCode)])
-message(paste(nrow(outgroup),
-							"countries in the Covid19 data do not correspond to an entity in the map file:"))
-print(outgroup)
-```
+# Make dates workable and uniform
+#################################
 
-I think for a global overview map, the missing countries will not make a big difference.
+# str(agecasenat)
+##str(agecasesubnat)
+# str(casedist)
+casedist[, dateRep := dmy(dateRep)]
+# str(hosprate)
+hosprate[, date := as.Date(date)]
+hosprate[, year_week := sub('W', '', year_week)]
+# str(movement)
+# str(natcasedeath)
+# str(subnatcaseday)
+subnatcaseday[, date := as.Date(date)]
+# str(subnatcaseweek)
+subnatcaseweek[, year_week := sub('W', '', year_week)]
+# str(testing)
+testing[, year_week := sub('W', '', year_week)]
 
 
-# Status
+# Map outlines
+##############
 
-```{r}
+seablue <- '#0077FF'
+world_map <- as.data.table(map_data('world'))
+
+## Code template
+# ggplot(world_map, aes(x=long, y=lat, group=group)) +
+#   geom_polygon(fill='white', colour='black', size=0.01) +
+#   coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
+#   theme(panel.background=element_rect(fill=seablue),
+#         panel.grid=element_line(colour='white', size=0.1))
+
+
+# Sanitize country names
+
+# Map data names allow spaces, ECDC uses underscores.
+# Spaces are nice, but ECDC tables out-number the coordinates table, so it makes sense to keep the ECDC convention.
+world_map[, region := gsub(' ', '_', region,)]
+
+# More mismatched spellings.
+world_map[region=='Antigua', region := 'Antigua_and_Barbuda']
+world_map[region=='Bonaire', region := 'Bonaire, Saint Eustatius and Saba']
+world_map[region=='Sint_Eustatius', region := 'Bonaire, Saint Eustatius and Saba']
+world_map[region=='Saba', region := 'Bonaire, Saint Eustatius and Saba']
+# world_map[region=='Virgin_Islands', region := 'British_Virgin_Islands']       # 
+# world_map[region=='Virgin_Islands', region := 'United_States_Virgin_Islands'] # 
+world_map[region=='Brunei', region := 'Brunei_Darussalam']
+world_map[region=='Republic_of_Congo', region := 'Congo']
+world_map[region=='Ivory_Coast', region := 'Cote_dIvoire']
+world_map[region=='Curacao', region := 'CuraÃ§ao']
+world_map[region=='Czech_Republic', region := 'Czechia']
+world_map[region=='Falkland_Islands', region := 'Falkland_Islands_(Malvinas)']
+world_map[region=='Guinea-Bissau', region := 'Guinea_Bissau']
+world_map[region=='Vatican', region := 'Holy_See']
+world_map[region=='Micronesia', region := 'Micronesia_(Federated_States_of)']
+world_map[region=='Nevis', region := 'Saint_Kitts_and_Nevis']
+world_map[region=='Saint_Kitts', region := 'Saint_Kitts_and_Nevis']
+world_map[region=='Grenadines', region := 'Saint_Vincent_and_the_Grenadines']
+world_map[region=='Saint_Vincent', region := 'Saint_Vincent_and_the_Grenadines']
+world_map[region=='Macedonia', region := 'North_Macedonia']
+world_map[region=='Timor-Leste', region := 'Timor_Leste']
+world_map[region=='Trinidad', region := 'Trinidad_and_Tobago']
+world_map[region=='Tobago', region := 'Trinidad_and_Tobago']
+world_map[region=='Turks_and_Caicos_Islands', region := 'Turks_and_Caicos_islands']
+world_map[region=='UK', region := 'United_Kingdom']
+world_map[region=='Tanzania', region := 'United_Republic_of_Tanzania']
+world_map[region=='USA', region := 'United_States_of_America']
+world_map[region=='Swaziland', region := 'Eswatini']
+
+# Countries that still don't match
+print( data.frame(Only_in_the_data = setdiff(
+  unique(casedist$countriesAndTerritories), 
+  unique(world_map$region)) ) )
+print( data.frame(Only_in_the_map = setdiff(
+  unique(world_map$region), 
+  unique(casedist$countriesAndTerritories)) ) )
+
+ 
+# Add coordinates to the data tables
+####################################
+
+mapify <- function(dt, country1='country', country2='region') {
+  merge(dt, world_map, by.x=country1, by.y=country2, all.x=TRUE, all.y=FALSE, allow.cartesian=TRUE)
+}
+
+# Code templates
+## Don't merge data with the coordinates yet. Leave it until after any calculations.
+# agecasenat <- mapify(agecasenat)
+# casedist <- mapify(casedist, 'countriesAndTerritories')
+# hosprate <- mapify(hosprate)
+# natcasedeath <- mapify(natcasedeath)
+# testingnat <- mapify(testing[level == 'national',])
+## These tables include subregional detail. Neither the data nor the coordinates have subregional info for all countries. So, merging on subregions is problematic, and merging on countries is not sensible for the kind of data.
+# movement
+# subnatcaseday
+# subnatcaseweek
+testingsubnat <- testing[level != 'national',]
+
+# Colours
+#########
 case_col = '#FF0000'
 death_col = '#0055FF'
 hosp_col = '#555500'
 icu_col = '#995500'
 test_col = '#005500'
 
-print( data.frame(DaysTracked = length(unique(DT$Date)),
-					CountriesTracked = length(unique(DT$Country)) ) )
-
-print( data.frame( Global_Cases = sum(DT$new_Cases, na.rm = TRUE),
-					Global_Deaths = sum(DT$new_Deaths, na.rm = TRUE),
-					Global_Mortality = sum(DT$new_Deaths, na.rm = TRUE) / sum(DT$new_Cases, na.rm = TRUE) ) )
 ```
+
+
+
+# Status
+
+```{r}
+endday <- unique(casedist[dateRep == max(dateRep), dateRep])
+startday <- unique(casedist[dateRep == min(dateRep), dateRep])
+endweek <- unique(casedist[year_week == max(year_week), year_week])
+startweek <- unique(casedist[year_week == max(year_week), year_week])
+
+str(casedist)
+```
+
 
 ## World's worst
 
 ```{r}
-subDT <- DT[order(norm_roll_Cases), ][Date==current & !is.na(norm_roll_Cases), ][, .(Country, norm_roll_Cases)]
-# Worst
-tail(subDT, 10)
-# # Best
-# n=max(10, nrow(subDT[sapply(subDT$norm_roll_Cases, function(x) {all.equal(subDT$norm_roll_Cases[1], x)})==TRUE, ]))
-# head(subDT, n=n)
-
-subDT <- DT[order(norm_roll_Deaths), ][Date==current & !is.na(norm_roll_Deaths), ][, .(Country, norm_roll_Deaths)]
-# Worst
-tail(subDT, 10)
-# # Best
-# n=max(10, nrow(subDT[sapply(subDT$norm_roll_Deaths, function(x) {all.equal(subDT$norm_roll_Deaths[1], x)})==TRUE, ]))
-# head(subDT, n)
 ```
 
 ## Europe's worst and best
