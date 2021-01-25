@@ -839,13 +839,15 @@ pdf(file.path(params$baseDir,
     title=paste(params$prefix, paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(deobj), perl=TRUE), collapse=''), 'deseq2', sep='.'),
     width=15, height=15)
 
+
+
 # Correlation plots
-print(corels1[[1]] + labs(substitle='raw count'))
-print(corels1[[2]] + labs(substitle='raw count'))
-print(corels2[[1]] + labs(substitle='RPM'))
-print(corels2[[2]] + labs(substitle='RPM'))
-print(corels3[[1]] + labs(substitle='VST count'))
-print(corels3[[2]] + labs(substitle='VST count'))
+print(corels1[['sfrnc']] + labs(substitle='raw counts'))
+print(corels1[['tdrc']] + labs(substitle='raw counts'))
+print(corels2[['sfrnc']] + labs(substitle='RPM'))
+print(corels2[['tdrc']] + labs(substitle='RPM'))
+print(corels3[['sfrnc']] + labs(substitle='VST counts'))
+print(corels3[['tdrc']] + labs(substitle='VST counts'))
 
 # DE plots
 for (x in pexp) {
