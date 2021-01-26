@@ -40,27 +40,27 @@ Source: https://opendata.ecdc.europa.eu/covid19/
 ###########
 
 ## Download latest data
-# GET("https://opendata.ecdc.europa.eu/covid19/agecasesnational/csv", authenticate(":", ":", type="ntlm"), write_disk('agecasesnational.csv', overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/agecasesubnational/csv", authenticate(":", ":", type="ntlm"), write_disk('agecasesubnational.csv', overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", authenticate(":", ":", type="ntlm"), write_disk('casedistribution.csv', overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/hospitalicuadmissionrates/csv", authenticate(":", ":", type="ntlm"), write_disk('hospitalicuadmissionrates.csv', overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/movementindicators/csv", authenticate(":", ":", type="ntlm"), write_disk('movementindicators.csv', overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/nationalcasedeath/csv", authenticate(":", ":", type="ntlm"), write_disk('nationalcasedeath.csv', overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/subnationalcasedaily/csv", authenticate(":", ":", type="ntlm"), write_disk('subnationalcasedaily.csv', overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/subnationalcaseweekly/csv", authenticate(":", ":", type="ntlm"), write_disk('subnationalcaseweekly.csv', overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/testing/csv", authenticate(":", ":", type="ntlm"), write_disk('testing.csv', overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/agecasesnational/csv", authenticate(":", ":", type="ntlm"), write_disk('D:/Documents/covid/agecasesnational.csv', overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/agecasesubnational/csv", authenticate(":", ":", type="ntlm"), write_disk('D:/Documents/covid/agecasesubnational.csv', overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", authenticate(":", ":", type="ntlm"), write_disk('D:/Documents/covid/casedistribution.csv', overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/hospitalicuadmissionrates/csv", authenticate(":", ":", type="ntlm"), write_disk('D:/Documents/covid/hospitalicuadmissionrates.csv', overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/movementindicators/csv", authenticate(":", ":", type="ntlm"), write_disk('D:/Documents/covid/movementindicators.csv', overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/nationalcasedeath/csv", authenticate(":", ":", type="ntlm"), write_disk('D:/Documents/covid/nationalcasedeath.csv', overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/subnationalcasedaily/csv", authenticate(":", ":", type="ntlm"), write_disk('D:/Documents/covid/subnationalcasedaily.csv', overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/subnationalcaseweekly/csv", authenticate(":", ":", type="ntlm"), write_disk('D:/Documents/covid/subnationalcaseweekly.csv', overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/testing/csv", authenticate(":", ":", type="ntlm"), write_disk('D:/Documents/covid/testing.csv', overwrite = TRUE))
 
 # Import data.
 # Don't need the cruiseship.
-agecasenat <- fread('agecasesnational.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
-agecasesubnat <- fread('agecasesubnational.csv') # [country != 'Cases_on_an_international_conveyance_Japan',] # Still blank
-casedist <- fread('casedistribution.csv')[countriesAndTerritories != 'Cases_on_an_international_conveyance_Japan', ]
-hosprate <- fread('hospitalicuadmissionrates.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
-movement <- fread('movementindicators.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
-natcasedeath <- fread('nationalcasedeath.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
-subnatcaseday <- fread('subnationalcasedaily.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
-subnatcaseweek <- fread('subnationalcaseweekly.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
-testing <- fread('testing.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
+agecasenat <- fread('D:/Documents/covid/agecasesnational.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
+agecasesubnat <- fread('D:/Documents/covid/agecasesubnational.csv') # [country != 'Cases_on_an_international_conveyance_Japan',] # Still blank
+casedist <- fread('D:/Documents/covid/casedistribution.csv')[countriesAndTerritories != 'Cases_on_an_international_conveyance_Japan', ]
+hosprate <- fread('D:/Documents/covid/hospitalicuadmissionrates.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
+movement <- fread('D:/Documents/covid/movementindicators.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
+natcasedeath <- fread('D:/Documents/covid/nationalcasedeath.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
+subnatcaseday <- fread('D:/Documents/covid/subnationalcasedaily.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
+subnatcaseweek <- fread('D:/Documents/covid/subnationalcaseweekly.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
+testing <- fread('D:/Documents/covid/testing.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
 
 # Verify that the data format wasn't changed again
 stopifnot(names(agecasenat) == c('country', 'country_code', 'year_week', 'age_group', 'new_cases', 'population', 'rate_14_day_per_100k', 'source'))
@@ -122,6 +122,7 @@ world_map <- as.data.table(map_data('world'))
 
 # Map data names allow spaces, ECDC uses underscores.
 # Spaces are nice, but ECDC tables out-number the coordinates table, so it makes sense to keep the ECDC convention.
+# Also, ECDC groups some of these territories together, whereas the map doesn't (except for the Virgin Islands, where it is the other way around)/
 world_map[, region := gsub(' ', '_', region,)]
 
 # More mismatched spellings.
@@ -129,8 +130,8 @@ world_map[region=='Antigua', region := 'Antigua_and_Barbuda']
 world_map[region=='Bonaire', region := 'Bonaire, Saint Eustatius and Saba']
 world_map[region=='Sint_Eustatius', region := 'Bonaire, Saint Eustatius and Saba']
 world_map[region=='Saba', region := 'Bonaire, Saint Eustatius and Saba']
-# world_map[region=='Virgin_Islands', region := 'British_Virgin_Islands']       # 
-# world_map[region=='Virgin_Islands', region := 'United_States_Virgin_Islands'] # 
+## world_map[region=='Virgin_Islands', region := 'British_Virgin_Islands']       # I could try to sum the ECDC data, but more trouble than it's worth. 
+## world_map[region=='Virgin_Islands', region := 'United_States_Virgin_Islands'] # Fixing the report structure is the priority.
 world_map[region=='Brunei', region := 'Brunei_Darussalam']
 world_map[region=='Republic_of_Congo', region := 'Congo']
 world_map[region=='Ivory_Coast', region := 'Cote_dIvoire']
@@ -178,10 +179,10 @@ mapify <- function(dt, country1='country', country2='region') {
 # natcasedeath <- mapify(natcasedeath)
 # testingnat <- mapify(testing[level == 'national',])
 ## These tables include subregional detail. Neither the data nor the coordinates have subregional info for all countries. So, merging on subregions is problematic, and merging on countries is not sensible for the kind of data.
-# movement
-# subnatcaseday
-# subnatcaseweek
-testingsubnat <- testing[level != 'national',]
+# testingsubnat <- testing[level != 'national',]
+## movement
+## subnatcaseday
+## subnatcaseweek
 
 # Colours
 #########
@@ -191,6 +192,8 @@ hosp_col = '#555500'
 icu_col = '#995500'
 test_col = '#005500'
 
+# Normalization
+popnorm= 1e6
 ```
 
 
@@ -202,48 +205,179 @@ endday <- unique(casedist[dateRep == max(dateRep), dateRep])
 startday <- unique(casedist[dateRep == min(dateRep), dateRep])
 endweek <- unique(casedist[year_week == max(year_week), year_week])
 startweek <- unique(casedist[year_week == max(year_week), year_week])
+```
 
-str(casedist)
+Based on the latest available date in the table. Some countries may be slower at releasing/entering their data.
+
+## World's current worst
+
+### By cases
+
+```{r}
+# Worse 10 (or more) by weekly cases
+subDT <- casedist[dateRep==endday & !is.na(cases_weekly), 
+                  .(countriesAndTerritories, dateRep, cases_weekly, population_normalized = cases_weekly / popData2019 * popnorm)] [order(cases_weekly, decreasing=TRUE), ]
+
+n <- max(10, nrow(subDT[sapply(subDT$cases_weekly, 
+                               function(x) { 
+                                 all.equal(subDT$cases_weekly[min(10, nrow(subDT))], x)
+                               }) == TRUE, ]))
+
+print( head(subDT, n) )
+
+# Worse 10 (or more) by weekly cases normalized
+setorder(subDT, -population_normalized, na.last=TRUE)
+
+n <- max(10, nrow(subDT[sapply(subDT$population_normalized, 
+                               function(x) { 
+                                 all.equal(subDT$population_normalized[min(10, nrow(subDT))], x)
+                               }) == TRUE, ]))
+print( head(subDT, n) )
+```
+
+### By deaths
+
+```{r}
+# Worse 10 (or more) by weekly deaths
+subDT <- casedist[dateRep==endday & !is.na(deaths_weekly), 
+                  .(countriesAndTerritories, dateRep, deaths_weekly, population_normalized = deaths_weekly / popData2019 * popnorm)] [order(deaths_weekly, decreasing=TRUE), ]
+
+n <- max(10, nrow(subDT[sapply(subDT$deaths_weekly, 
+                               function(x) { 
+                                 all.equal(subDT$deaths_weekly[min(10, nrow(subDT))], x)
+                               }) == TRUE, ]))
+print( head(subDT, n) )
+
+# Worse 10 (or more) by weekly deaths normalized
+setorder(subDT, -population_normalized, na.last=TRUE)
+
+n <- max(10, nrow(subDT[sapply(subDT$population_normalized, 
+                               function(x) { 
+                                 all.equal(subDT$population_normalized[min(10, nrow(subDT))], x)
+                               }) == TRUE, ]))
+print( head(subDT, n) )
+```
+
+## Europe's current worst
+
+### By cases
+
+```{r}
+# Worse 10 (or more) by weekly cases
+subDT <- casedist[dateRep==endday & !is.na(cases_weekly) & continentExp == 'Europe', 
+                  .(countriesAndTerritories, dateRep, cases_weekly, population_normalized = cases_weekly / popData2019 * popnorm)] [order(cases_weekly, decreasing=TRUE), ]
+
+n <- max(10, nrow(subDT[sapply(subDT$cases_weekly, 
+                               function(x) { 
+                                 all.equal(subDT$cases_weekly[min(10, nrow(subDT))], x)
+                               }) == TRUE, ]))
+
+print( head(subDT, n) )
+
+# Worse 10 (or more) by weekly cases normalized
+setorder(subDT, -population_normalized, na.last=TRUE)
+
+n <- max(10, nrow(subDT[sapply(subDT$population_normalized, 
+                               function(x) { 
+                                 all.equal(subDT$population_normalized[min(10, nrow(subDT))], x)
+                               }) == TRUE, ]))
+print( head(subDT, n) )
+```
+
+### By deaths
+
+```{r}
+# Worse 10 (or more) by weekly deaths
+subDT <- casedist[dateRep==endday & !is.na(deaths_weekly) & continentExp == 'Europe', 
+                  .(countriesAndTerritories, dateRep, deaths_weekly, population_normalized = deaths_weekly / popData2019 * popnorm)] [order(deaths_weekly, decreasing=TRUE), ]
+
+n <- max(10, nrow(subDT[sapply(subDT$deaths_weekly, 
+                               function(x) { 
+                                 all.equal(subDT$deaths_weekly[min(10, nrow(subDT))], x)
+                               }) == TRUE, ]))
+print( head(subDT, n) )
+
+# Worse 10 (or more) by weekly deaths normalized
+setorder(subDT, -population_normalized, na.last=TRUE)
+
+n <- max(10, nrow(subDT[sapply(subDT$population_normalized, 
+                               function(x) { 
+                                 all.equal(subDT$population_normalized[min(10, nrow(subDT))], x)
+                               }) == TRUE, ]))
+print( head(subDT, n) )
+```
+
+## Europe's current best
+
+### By cases
+
+```{r}
+# Worse 10 (or more) by weekly cases
+subDT <- casedist[dateRep==endday & !is.na(cases_weekly) & continentExp == 'Europe', 
+                  .(countriesAndTerritories, dateRep, cases_weekly, population_normalized = cases_weekly / popData2019 * popnorm)] [order(cases_weekly, decreasing=FALSE), ]
+
+n <- max(10, nrow(subDT[sapply(subDT$cases_weekly, 
+                               function(x) { 
+                                 all.equal(subDT$cases_weekly[min(10, nrow(subDT))], x)
+                               }) == TRUE, ]))
+
+print( head(subDT, n) )
+
+# Worse 10 (or more) by weekly cases normalized
+setorder(subDT, population_normalized, na.last=TRUE)
+
+n <- max(10, nrow(subDT[sapply(subDT$population_normalized, 
+                               function(x) { 
+                                 all.equal(subDT$population_normalized[min(10, nrow(subDT))], x)
+                               }) == TRUE, ]))
+print( head(subDT, n) )
+```
+
+### By deaths
+
+```{r}
+# Worse 10 (or more) by weekly deaths
+subDT <- casedist[dateRep==endday & !is.na(deaths_weekly) & continentExp == 'Europe', 
+                  .(countriesAndTerritories, dateRep, deaths_weekly, population_normalized = deaths_weekly / popData2019 * popnorm)] [order(deaths_weekly, decreasing=FALSE), ]
+
+n <- max(10, nrow(subDT[sapply(subDT$deaths_weekly, 
+                               function(x) { 
+                                 all.equal(subDT$deaths_weekly[min(10, nrow(subDT))], x)
+                               }) == TRUE, ]))
+print( head(subDT, n) )
+
+# Worse 10 (or more) by weekly deaths normalized
+setorder(subDT, population_normalized, na.last=TRUE)
+
+n <- max(10, nrow(subDT[sapply(subDT$population_normalized, 
+                               function(x) { 
+                                 all.equal(subDT$population_normalized[min(10, nrow(subDT))], x)
+                               }) == TRUE, ]))
+print( head(subDT, n) )
 ```
 
 
-## World's worst
+
+
+
+
+
+
+
+
+## Reported weekly events
 
 ```{r}
-```
-
-## Europe's worst and best
-
-```{r}
-subDT <- DT[order(norm_roll_Cases), ][Date==current & continent=='Europe' & !is.na(norm_roll_Cases), ][, .(Country, norm_roll_Cases)]
-# Worst
-tail(subDT, 10)
-# Best
-n=max(10, nrow(subDT[sapply(subDT$norm_roll_Cases, function(x) {all.equal(subDT$norm_roll_Cases[1], x)})==TRUE, ]))
-head(subDT, n=n)
-
-subDT <- DT[order(norm_roll_Deaths), ][Date==current & continent=='Europe' & !is.na(norm_roll_Deaths), ][, .(Country, norm_roll_Deaths)]
-# Worst
-tail(subDT, 10)
-# Best
-n=max(10, nrow(subDT[sapply(subDT$norm_roll_Deaths, function(x) {all.equal(subDT$norm_roll_Deaths[1], x)})==TRUE, ]))
-head(subDT, n)
-```
+# Snapshot of the last date entered for each country
+subDT <- merge(world_map, 
+               natcasedeath[year_week == endweek, .(country, dateRep, cases_weekly, deaths_weekly, popData2019)], 
+               by.x='region', by.y='countriesAndTerritories', all.x=TRUE, all.y=FALSE)
 
 
-## Reported events in last `r W` days
 
-```{r}
-case_col = '#FF0000'
-death_col = '#0055FF'
-hosp_col = '#555500'
-icu_col = '#995500'
-test_col = '#005500'
+casedist[countriesAndTerritories == 'Austria' & year_week==endweek,]
+natcasedeath[country == 'Austria' & year_week==endweek,]
 
-setkey(DT, countryCode)
-setkey(world_df, id)
-subDT <- merge(world_df, DT, by.x='id', by.y='countryCode', all.x=FALSE, all.y=TRUE, allow.cartesian=TRUE)
-setorder(subDT, ord)
 ```
 
 Per `r P/1e6`M residents.
