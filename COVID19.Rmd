@@ -107,7 +107,6 @@ testing[, year_week := sub('W', '', year_week)]
 # Map outlines
 ##############
 
-seablue <- '#0077FF'
 world_map <- as.data.table(map_data('world'))
 
 ## Code template
@@ -186,11 +185,12 @@ mapify <- function(dt, country1='country', country2='region') {
 
 # Colours
 #########
-case_col = '#FF0000'
-death_col = '#0055FF'
-hosp_col = '#555500'
-icu_col = '#995500'
-test_col = '#005500'
+seablue <- '#CCEEFF'
+case_col <- '#FF0000'
+death_col <- '#0055FF'
+hosp_col <- '#555500'
+icu_col <- '#995500'
+test_col <- '#005500'
 
 # Normalization
 popnorm= 1e6
@@ -207,11 +207,107 @@ endweek <- unique(casedist[year_week == max(year_week), year_week])
 startweek <- unique(casedist[year_week == max(year_week), year_week])
 ```
 
-Based on the latest available date in the table. Some countries may be slower at releasing/entering their data.
+Based on the latest available date in the table. Some countries may be slower at releasing/entering their data, and not have current data to show.
 
-## World's current worst
+## Maps
 
-### By cases
+### Global
+
+```{r, fig.height=12, fig.width=12}
+subDT <- merge(world_map[, .(region, long, lat, group, order)], 
+               casedist[year_week==endweek, .(countriesAndTerritories, popData2019, cases_weekly, deaths_weekly)], 
+               by.x='region', by.y='countriesAndTerritories', all.x=TRUE, all.y=FALSE, allow.cartesian=TRUE)
+
+p1 <- ggplot(subDT, 
+       aes(x=long, y=lat, group=group, fill=cases_weekly)) +
+  geom_polygon(colour='black', size=0.01) +
+  coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
+  scale_fill_gradient(low='white', high=case_col, na.value='grey50') +
+  theme(panel.background=element_rect(fill=seablue),
+        panel.grid=element_line(colour='white', size=0.1))
+
+p2 <- ggplot(subDT, 
+       aes(x=long, y=lat, group=group, fill=cases_weekly / popData2019 * popnorm)) +
+  geom_polygon(colour='black', size=0.01) +
+  coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
+  scale_fill_gradient(low='white', high=case_col, na.value='grey50', name=paste('cases_weekly\nper', popnorm)) +
+  theme(panel.background=element_rect(fill=seablue),
+        panel.grid=element_line(colour='white', size=0.1))
+
+print( p1 / p2 )
+
+p3 <- ggplot(subDT, 
+       aes(x=long, y=lat, group=group, fill=deaths_weekly)) +
+  geom_polygon(colour='black', size=0.01) +
+  coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
+  scale_fill_gradient(low='white', high=death_col, na.value='grey50') +
+  theme(panel.background=element_rect(fill=seablue),
+        panel.grid=element_line(colour='white', size=0.1))
+
+p4 <- ggplot(subDT, 
+       aes(x=long, y=lat, group=group, fill=deaths_weekly / popData2019 * popnorm)) +
+  geom_polygon(colour='black', size=0.01) +
+  coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
+  scale_fill_gradient(low='white', high=death_col, na.value='grey50', name=paste('deaths_weekly\nper', popnorm)) +
+  theme(panel.background=element_rect(fill=seablue),
+        panel.grid=element_line(colour='white', size=0.1))
+
+
+print( p3 / p4 )
+```
+
+### Europe
+
+```{r, fig.height=12, fig.width=10}
+subDT <- merge(world_map[, .(region, long, lat, group, order)], 
+               casedist[year_week==endweek & continentExp=='Europe', .(countriesAndTerritories, popData2019, cases_weekly, deaths_weekly)], 
+               by.x='region', by.y='countriesAndTerritories', all.x=TRUE, all.y=FALSE, allow.cartesian=TRUE)
+
+p1 <- ggplot(subDT, 
+       aes(x=long, y=lat, group=group, fill=cases_weekly)) +
+  geom_polygon(colour='black', size=0.01) +
+  coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) + # Crop giant Antarctica and empty Arctic
+  scale_fill_gradient(low='white', high=case_col, na.value='grey50') +
+  theme(panel.background=element_rect(fill=seablue),
+        panel.grid=element_line(colour='white', size=0.1))
+
+p2 <- ggplot(subDT, 
+       aes(x=long, y=lat, group=group, fill=cases_weekly / popData2019 * popnorm)) +
+  geom_polygon(colour='black', size=0.01) +
+  coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) + # Crop giant Antarctica and empty Arctic
+  scale_fill_gradient(low='white', high=case_col, na.value='grey50', name=paste('cases_weekly\nper', popnorm)) +
+  theme(panel.background=element_rect(fill=seablue),
+        panel.grid=element_line(colour='white', size=0.1))
+
+print( p1 / p2 )
+
+p3 <- ggplot(subDT, 
+       aes(x=long, y=lat, group=group, fill=deaths_weekly)) +
+  geom_polygon(colour='black', size=0.01) +
+  coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) + # Crop giant Antarctica and empty Arctic
+  scale_fill_gradient(low='white', high=death_col, na.value='grey50') +
+  theme(panel.background=element_rect(fill=seablue),
+        panel.grid=element_line(colour='white', size=0.1))
+
+p4 <- ggplot(subDT, 
+       aes(x=long, y=lat, group=group, fill=deaths_weekly / popData2019 * popnorm)) +
+  geom_polygon(colour='black', size=0.01) +
+  coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) + # Crop giant Antarctica and empty Arctic
+  scale_fill_gradient(low='white', high=death_col, na.value='grey50', name=paste('deaths_weekly\nper', popnorm)) +
+  theme(panel.background=element_rect(fill=seablue),
+        panel.grid=element_line(colour='white', size=0.1))
+
+
+print( p3 / p4 )
+```
+
+
+
+## Top 10s
+
+### World's current worst
+
+#### By cases
 
 ```{r}
 # Worse 10 (or more) by weekly cases
@@ -235,7 +331,7 @@ n <- max(10, nrow(subDT[sapply(subDT$population_normalized,
 print( head(subDT, n) )
 ```
 
-### By deaths
+#### By deaths
 
 ```{r}
 # Worse 10 (or more) by weekly deaths
@@ -258,9 +354,9 @@ n <- max(10, nrow(subDT[sapply(subDT$population_normalized,
 print( head(subDT, n) )
 ```
 
-## Europe's current worst
+### Europe's current worst
 
-### By cases
+#### By cases
 
 ```{r}
 # Worse 10 (or more) by weekly cases
@@ -284,7 +380,7 @@ n <- max(10, nrow(subDT[sapply(subDT$population_normalized,
 print( head(subDT, n) )
 ```
 
-### By deaths
+#### By deaths
 
 ```{r}
 # Worse 10 (or more) by weekly deaths
@@ -307,9 +403,9 @@ n <- max(10, nrow(subDT[sapply(subDT$population_normalized,
 print( head(subDT, n) )
 ```
 
-## Europe's current best
+### Europe's current best
 
-### By cases
+#### By cases
 
 ```{r}
 # Worse 10 (or more) by weekly cases
@@ -333,7 +429,7 @@ n <- max(10, nrow(subDT[sapply(subDT$population_normalized,
 print( head(subDT, n) )
 ```
 
-### By deaths
+##]# By deaths
 
 ```{r}
 # Worse 10 (or more) by weekly deaths
@@ -356,335 +452,34 @@ n <- max(10, nrow(subDT[sapply(subDT$population_normalized,
 print( head(subDT, n) )
 ```
 
-
-
-
-
-
-
-
-
-
-## Reported weekly events
+### Countries of personal interest
 
 ```{r}
-# Snapshot of the last date entered for each country
-subDT <- merge(world_map, 
-               natcasedeath[year_week == endweek, .(country, dateRep, cases_weekly, deaths_weekly, popData2019)], 
-               by.x='region', by.y='countriesAndTerritories', all.x=TRUE, all.y=FALSE)
+print( 
+  casedist[dateRep==endday & countriesAndTerritories %in% family_countries,
+           .(countriesAndTerritories, dateRep, year_week, cases_weekly, population_normalized = cases_weekly / popData2019 * popnorm)] )
+
+print( 
+  casedist[dateRep==endday & countriesAndTerritories %in% family_countries,
+           .(countriesAndTerritories, dateRep, year_week, deaths_weekly, population_normalized = cases_weekly / popData2019 * popnorm)] )
 
 
+print( unique(
+  movement[country %in% family_countries & week==endweek, 
+           .(country, national_cases_7, national_positivity_rate)] ) )
 
-casedist[countriesAndTerritories == 'Austria' & year_week==endweek,]
-natcasedeath[country == 'Austria' & year_week==endweek,]
-
-```
-
-Per `r P/1e6`M residents.
-
-### Global
-
-```{r, fig.width=10, fig.height=10}
-p1 <- ggplot(subDT[Date==current, ], aes(x=long, y=lat, group=group, fill=norm_roll_Cases)) +
-	geom_polygon(colour='black', size=0.2) +
-	scale_fill_gradient(high=case_col, low='white') +
-	coord_cartesian(ylim=c(-60,80)) +
-	theme_void() +
-	theme(panel.background = element_rect(fill='#BBFFFF'))
-
-p2 <- ggplot(subDT[Date==current, ], aes(x=long, y=lat, group=group, fill=norm_roll_Deaths)) +
-	geom_polygon(colour='black', size=0.2) +
-	scale_fill_gradient(high=death_col, low='white') +
-	coord_cartesian(ylim=c(-60,80)) +
-	theme_void() +
-	theme(panel.background = element_rect(fill='#BBFFFF'))
-
-print( p1 / p2 )
-
-ggsave('~/covid/global_roll.png', plot = last_plot(), scale = 1,
-       width = 30, height = 30, units = "cm", dpi = 300, limitsize = TRUE)
-```
-
-```{r, fig.width=7, fig.height=11}
-p1 <- ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_roll_Cases)) +
-	geom_polygon(colour='black', size=0.2) +
-	scale_fill_gradient(high=case_col, low='white') +
-  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
-	theme_void() +
-	theme(panel.background = element_rect(fill='#BBFFFF'))
-
-p2 <- ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_roll_Deaths)) +
-	geom_polygon(colour='black', size=0.2) +
-	scale_fill_gradient(high=death_col, low='white') +
-  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
-	theme_void() +
-	theme(panel.background = element_rect(fill='#BBFFFF'))
-
-print( p1 / p2 )
-
-ggsave('~/covid/eu_roll.png', plot = last_plot(), scale = 1,
-       width = 21, height = 36, units = "cm", dpi = 300, limitsize = TRUE)
-```
-
-```{r, fig.width=7, fig.height=6}
-# Testing data seems to lag in date yet a bit more than case data.
-subDT <- merge(world_df, DT[Date==current-1, ], by.x='id', by.y='countryCode', all=TRUE)
-setorder(subDT, ord)
-
-if(any(is.finite(subDT$norm_roll_Tests) & subDT$norm_roll_Tests > 0)){
-  print(
-    ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_roll_Tests)) +
-  		geom_polygon(colour='black', size=0.2) +
-  		scale_fill_gradient(high=test_col, low='white') +
-  	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
-  		theme_void() +
-  		theme(panel.background = element_rect(fill='#BBFFFF'))
-  )
-  
-  ggsave('~/covid/ertest.png', plot = last_plot(), scale = 1,
-       width = 21, height = 18, units = "cm", dpi = 300, limitsize = TRUE)
-}
-```
-
-```{r, fig.width=7, fig.height=6}
-if(any(!is.na(subDT$norm_roll_Hosp) & subDT$norm_roll_Hosp > 0)){
-  print(
-    ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_roll_Hosp)) +
-  		geom_polygon(colour='black', size=0.2) +
-  		scale_fill_gradient(high=hosp_col, low='white') +
-  	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
-  		theme_void() +
-  		theme(panel.background = element_rect(fill='#BBFFFF'))
-  )
-
-    ggsave('~/covid/erhosp.png', plot = last_plot(), scale = 1,
-       width = 21, height = 18, units = "cm", dpi = 300, limitsize = TRUE)
-}
-
-if(any(!is.na(subDT$norm_roll_ICU) & subDT$norm_roll_ICU > 0)){
-  print(
-    ggplot(subDT, aes(x=long, y=lat, group=group, fill=norm_roll_ICU)) +
-  		geom_polygon(colour='black', size=0.2) +
-  		scale_fill_gradient(high=icu_col, low='white') +
-  	  coord_cartesian(xlim=c(-10, 50), ylim=c(30,70)) +
-  		theme_void() +
-  		theme(panel.background = element_rect(fill='#BBFFFF'))
-  )
-  
-  ggsave('~/covid/ericu.png', plot = last_plot(), scale = 1,
-       width = 21, height = 18, units = "cm", dpi = 300, limitsize = TRUE)
-}
+print( 
+  movement[country %in% family_countries & week==endweek, 
+           .(country, region, subnational_cases_7, subnational_cases_14, subnational_rate_14)] )
 ```
 
 
 
-## Countries of personal interest
 
-```{r}
-setorder(DT, Country, Date)
-```
-
-Normalized to `r P` residents.
-
-### In last `r W` days
-
-```{r}
-DT[Date==current & Country %in% topInterest, .(Country, norm_roll_Cases, norm_roll_Deaths, norm_roll_Tests, norm_roll_Hosp, norm_roll_ICU)]
-```
-
-### Since the beginning
-
-```{r}
-DT[Date==current & Country %in% topInterest, .(Country, norm_tot_Cases, norm_tot_Deaths, norm_tot_Tests, norm_tot_Hosp, norm_tot_ICU)]
-```
 
 # Timeline
 
-```{r}
-# Numbers over time
-tidyDT <- melt(DT[, .(Date, Country, 
-                      norm_new_Cases, norm_new_Deaths, norm_new_Tests, #norm_new_Hosp, norm_new_ICU,
-                      norm_tot_Cases, norm_tot_Deaths, norm_tot_Tests, #norm_tot_Hosp, norm_tot_ICU,
-                      norm_roll_Cases, norm_roll_Deaths, norm_roll_Tests#, norm_roll_Hosp, norm_roll_ICU
-                      )],
-								id.vars = c('Date', 'Country'), variable.name = 'Type', value.name = 'Normalized_count')
-tidyDT[grepl('Death', Type), vsplit := 'Deaths']
-tidyDT[grepl('Cases', Type), vsplit := 'Cases']
-tidyDT[grepl('Tests', Type), vsplit := 'Tests']
-tidyDT[, hsplit := sub('_Cases|_Deaths|_Tests|_Hosp|_ICU', '', sub('norm_', '', Type), perl=TRUE)]
-setkey(tidyDT, Country)
 
-# Rolling VS Total (exponential-ness)
-expDT <- DT[, .(Date, Country, norm_tot_Cases, norm_tot_Deaths, norm_roll_Cases, norm_roll_Deaths)]
-tmptot <- melt(expDT, id.vars = c('Date', 'Country'), measure.vars = c('norm_tot_Cases', 'norm_tot_Deaths'), variable.name = 'Type', value.name = 'norm_Total')
-tmptot[grepl('Death', Type), vsplit := 'Deaths']
-tmptot[!grepl('Death', Type), vsplit := 'Cases']
-tmproll <- melt(expDT, id.vars = c('Date', 'Country'), measure.vars = c('norm_roll_Cases', 'norm_roll_Deaths'), variable.name = 'Type', value.name = 'norm_Roll')
-tmproll[grepl('Death', Type), vsplit := 'Deaths']
-tmproll[!grepl('Death', Type), vsplit := 'Cases']
-expDT <- merge(tmproll, tmptot, by=c('Date','Country', 'vsplit'))
-setkey(expDT, Country)
-
-# Rate of change
-rateDT <- DT[, .(Date, Country, roll_Cases_Rate, roll_Deaths_Rate)]
-rateDT <- melt(rateDT, id.vars = c('Date', 'Country'), value.name = 'daily_Rate', variable.name = 'Type')
-rateDT[grepl('Death', Type), vsplit := 'Deaths']
-rateDT[!grepl('Death', Type), vsplit := 'Cases']
-setkey(rateDT, Country)
-
-# Singular plots by information type.
-relative_plot <- function(df=expDT, sel_country, title='') {
-  ggplot(df, aes(x=norm_Total, y=norm_Roll, group=Country, colour=vsplit)) +
-	  facet_grid(vsplit ~ ., scales='free_y') +
-		geom_line(colour='black', alpha=0.1, size=0.2) +
-		geom_line(data=df[sel_country,], size=0.8) +
-		scale_colour_manual(values=c(Deaths=death_col, Cases=case_col, Tests=test_col, Hosp=hosp_col, ICU=icu_col)) +
-		scale_x_log10() +
-		scale_y_log10() +
-		coord_cartesian(xlim=c(1,NA), ylim=c(1,NA)) +
-		annotation_logticks(sides='lrb') +
-		labs(title=title) +
-		theme_bw() +
-    theme(panel.grid=element_blank(),
-          legend.position = 'none')
-}
-
-numbers_plot <- function(df=tidyDT, sel_country, title='', linear=FALSE) {
-  p1 <- ggplot(df, aes(x=Date, y=Normalized_count, group=Country, colour=vsplit)) +
-		facet_grid(vsplit ~ hsplit, scales = 'free_y') +
-		# geom_line(colour='#000000', alpha=0.1, size=0.2) +  ## Plotting all countries as background for 9 facets
-                                                          ## demands too much memory and crashes.
-		geom_line(data=df[sel_country,], size=0.8) +
-		scale_colour_manual(values=c(Deaths=death_col, Cases=case_col, Tests=test_col, Hosp=hosp_col, ICU=icu_col)) +
-    # coord_cartesian(ylim=c(1,NA)) +
-		labs(title=title, y='', x='') +
-		theme_bw() + 
-		theme(legend.position = 'none',
-					panel.grid.minor = element_blank())
-  
-  if (linear) {
-    p1
-  } else {
-    p1 + scale_y_log10() +
-      annotation_logticks(sides='lr')
-  }
-}
-
-rate_plot <- function(df=rateDT, sel_country, title='', D=W) {
-	ggplot(df, aes(x=Date, y=daily_Rate, group=Country, colour=vsplit)) +
-    facet_grid(vsplit ~ ., scales='free_y') +
-		geom_hline(yintercept = 1, size=0.2) +
-	  geom_point(data=df[sel_country,], size=0.5) +
-		geom_smooth(data=df[sel_country,], span=0.3, size=0.8) +
-		scale_colour_manual(values=c(Deaths=death_col, Cases=case_col)) +
-		coord_cartesian(ylim=c(0.6, 1.5)) +
-		labs(title=title, x='', y='change_Ratio') +
-		theme_bw() +
-    theme(legend.position = 'none')
-}
-
-ratio_plot <- function(df=tidyDT, sel_country, ref_country=homecountry, title='') {
-  ratioDT <- merge(df[sel_country], df[ref_country,], by=c('Date', 'Type'))
-  ratioDT[, relative := Normalized_count.x / Normalized_count.y]
-  ggplot(ratioDT[hsplit.y=='roll',], aes(x=Date, y=relative, colour=vsplit.y)) +
-		facet_grid(vsplit.y ~ hsplit.y, scales = 'free_y') +
-		geom_hline(yintercept = 1, size=0.15) +
-		geom_point(size=0.5) +
-	  geom_smooth(span=0.3, size=0.75) +
-		scale_y_continuous(trans='log2', breaks=c(1/64, 1/16, 1/4, 1, 4, 16, 64)) +
-		scale_colour_manual(values=c(Deaths=death_col, Cases=case_col, Tests=test_col, Hosp=hosp_col, ICU=icu_col)) +
-		coord_cartesian(ylim=c(1/33, 33)) +
-		# annotation_logticks(sides='lr') +
-		labs(title=title, y='', x='') +
-		theme_bw() + 
-		theme(legend.position = 'none',
-					axis.text.y.left = element_text())
-}
-
-## TODO : Add Hosp/Test, ICU/Hosp, Death/ICU rates to more_plots()
-
-# Collections of singular plots.
-more_plots <- function(numbers=tidyDT, exponential=expDT, rates=rateDT, sel_country, ref_country=homecountry){
-
-  cat(sel_country)
-  p1 <- relative_plot(exponential, sel_country, 
-                      title=paste(sel_country, ': ', W, '-day rolling sum, per', P/1e6, 'M residents, as function of total'))
-	p2 <- numbers_plot(numbers[,], sel_country, 
-	                   title=paste(sel_country, ': new, total &', W, '-day rolling sum, normalized to', P/1e6, 'M residents'))
-	p3 <- rate_plot(rates, sel_country,
-	                title=paste(sel_country, ': Daily change rate of', W, '-day roll. sum'))
-	p4 <- ratio_plot(numbers, sel_country, ref_country,
-	                 title=paste(sel_country,':', W, '-day norm.roll. sum, relative to', ref_country))
-	
-	print( p1 / p2 / p3 / p4 )
-}
-
-fewer_plots <- function(numbers=tidyDT[hsplit=='roll',], exponential=expDT, rates=rateDT, sel_country, ref_country=homecountry){
-
-  cat(sel_country)
-  p1 <- relative_plot(exponential, sel_country,
-                      title=paste(sel_country, ': ', W, '-day rolling sum, per', P/1e6, 'M residents, as function of total'))
-	p2 <- numbers_plot(numbers, sel_country, linear=TRUE,
-	                   title=paste(sel_country, ': new, total &', W, '-day rolling sum, normalized to', P/1e6, 'M residents'))
-	# p3 <- rate_plot(rates, sel_country,
-	                # title=paste(sel_country, ': Daily change rate of', W, '-day roll. sum'))
-  
-	p4 <- ratio_plot(numbers, sel_country, ref_country, 
-	                 title=paste(sel_country,':', W, '-day norm.roll. sum, relative to', ref_country))
-  
-	print( p1 / p2 / p4)
-}
-
-# Easier comparison plots. Many countries by info type.
-
-compare_numbers <- function(df=tidyDT, info, countries) {
-  subdf <- df[Type %in% info & Country %in% countries, ]
-  m1 <- max(subdf[Date==current, Normalized_count], na.rm = TRUE)
-  
-  p1 <- ggplot(subdf, aes(x=Date, y=Normalized_count, group=Country, colour=vsplit)) +
-    geom_hline(yintercept=m1, size=0.25, colour='black', linetype='dotted') +
-    geom_line() +
-    geom_point(data=subdf[Normalized_count==m1 & Date==current,], colour='black') +
-    facet_grid(Country ~ ., ) +
-    scale_colour_manual(values=c(Deaths=death_col, Cases=case_col, Tests=test_col, Hosp=hosp_col, ICU=icu_col)) +
-    theme_bw() +
-    theme(legend.position = 'none')
-  
-  p2 <- p1 +   
-    scale_y_log10() +
-    annotation_logticks(side='lr') +
-    coord_cartesian(ylim=c(1,NA))
-  
-  print((p1 + labs(y=paste(info, '(linear scale)'))) + 
-        (p2 + labs(y=paste(info, '(log scale)'))))  
-}
-
-compare_exp <- function(df, type, info_x, info_y, countries) {
-  subdf <- df[vsplit %in% type & Country %in% countries, ]
-  m1 <- max(subdf[Date==current, c(info_y), with=FALSE], na.rm = TRUE)
-  m2 <- max(subdf[Date==current, c(info_x), with=FALSE], na.rm = TRUE)
-  
-  p1 <- ggplot(subdf, aes_string(x=info_x, y=info_y, group='Country', colour='vsplit')) +
-    geom_hline(yintercept=m1, size=0.25, colour='black', linetype='dotted') +
-    geom_vline(xintercept=m2, size=0.25, colour='black', linetype='dotted') +
-    geom_line() +
-    geom_point(data=subdf[(subdf[[info_x]]==m2 | subdf[[info_y]]==m1) & Date==current,], colour='black') +
-    facet_grid(Country ~ ., ) +
-    scale_colour_manual(values=c(Deaths=death_col, Cases=case_col, Tests=test_col, Hosp=hosp_col, ICU=icu_col)) +
-    theme_bw() +
-    theme(legend.position = 'none')
-  
-  p2 <- p1 +   
-    scale_y_log10() +
-    scale_x_log10() +
-    annotation_logticks(side='lb') +
-    coord_cartesian(ylim=c(1,NA), xlim=c(1,NA))
-  
-  print((p1 + labs(y=paste(info_y, type, '(linear scale)'), x=paste(info_x, type, '(linear scale)') )) + 
-        (p2 + labs(y=paste(info_y, type, '(log scale)'), x=paste(info_x, type, '(linear scale)') )))  
-}
-
-```
 
 ## Global
 
