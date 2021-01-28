@@ -17,8 +17,6 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE, warning=FALSE)
 ```
 
-# Libraries
-
 ```{r message=FALSE}
 library(httr)
 library(lubridate)
@@ -32,6 +30,7 @@ options(scipen=2)
 ```
 
 Source: https://opendata.ecdc.europa.eu/covid19/
+
 
 # Load current data
 
@@ -235,6 +234,8 @@ p2 <- ggplot(subDT,
         panel.grid=element_line(colour='white', size=0.1))
 
 print( p1 / p2 )
+ggsave('world_cases.png', plot = p1 / p2, device = png(), path = NULL, 
+       scale = 1, width = 12, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
 
 p3 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=deaths_weekly)) +
@@ -254,6 +255,8 @@ p4 <- ggplot(subDT,
 
 
 print( p3 / p4 )
+ggsave('world_deaths.png', plot = p1 / p2, device = png(), path = NULL, 
+       scale = 1, width = 12, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
 ```
 
 ### Europe
@@ -280,6 +283,8 @@ p2 <- ggplot(subDT,
         panel.grid=element_line(colour='white', size=0.1))
 
 print( p1 / p2 )
+ggsave('europe_cases.png', plot = p1 / p2, device = png(), path = NULL, 
+       scale = 1, width = 10, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
 
 p3 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=deaths_weekly)) +
@@ -297,8 +302,9 @@ p4 <- ggplot(subDT,
   theme(panel.background=element_rect(fill=seablue),
         panel.grid=element_line(colour='white', size=0.1))
 
-
 print( p3 / p4 )
+ggsave('europe_deaths.png', plot = p1 / p2, device = png(), path = NULL, 
+       scale = 1, width = 10, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
 ```
 
 
@@ -475,113 +481,154 @@ print(
 
 
 
-
-
 # Timeline
 
+## Map
+
+```{r, fig.height=7, fig.width=12}
+subDT <- merge(world_map[, .(region, long, lat, group, order)], 
+               casedist[, .(countriesAndTerritories, popData2019, cases_weekly, deaths_weekly, year_week)], 
+               by.x='region', by.y='countriesAndTerritories', all.x=TRUE, all.y=FALSE, allow.cartesian=TRUE)
 
 
-## Global
+# These are insanely slow, they are only
 
-```{r, fig.height=8, fig.width=8, warning=FALSE}
-subDT <- melt(unique(DT[, .(Date, gNew_Cases, gNew_Deaths, gTotal_Cases, gTotal_Deaths, gRoll_Cases, gRoll_Deaths)]),
-							id.vars="Date", variable.name="Type", value.name="Events")
+anim1 <- ggplot(subDT, 
+       aes(x=long, y=lat, group=group, fill=cases_weekly / popData2019 * popnorm)) +
+  geom_polygon(colour='black', size=0.01) +
+  coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
+  scale_fill_gradient(low='white', high=case_col, na.value='grey50') +
+  theme(panel.background=element_rect(fill=seablue),
+        panel.grid=element_line(colour='white', size=0.1)) +
+  labs('Week: {closest_state}') +
+  transition_states(year_week,
+                    transition_length = 0,
+                    state_length = 1,
+                    wrap=TRUE)
 
-p1 <- ggplot(subDT, aes(x=Date, y=Events, colour=Type, fill=Type)) +
-	facet_grid( sub('^g', '', sub('_Cases', '', sub('_Deaths', '', subDT$Type))) ~ ., scales = 'free_y') +
-	geom_line() +
-	theme_minimal() + 
-	labs(x='', y='') +
-	theme(legend.position='none')
+print( anim1 )
+anim_save('world_cases.gif', animation = anim1, path = NULL, 
+          device= png(), fps=1, nframes=length(unique(casedist$year_week)), 
+          detail=0, start_pause=2, end_pause=5, fig.height=7, fig.width=12)
 
-p2 <- ggplot(subDT, aes(x=Date, y=Events, colour=Type, fill=Type)) +
-	facet_grid( sub('^g', '', sub('_Cases', '', sub('_Deaths', '', subDT$Type))) ~ ., scales = 'free_y') +
-	geom_line() +
-	scale_y_log10() +
-	labs(x='', y='') +
-	theme_minimal()
+anim2 <- ggplot(subDT, 
+       aes(x=long, y=lat, group=group, fill=deaths_weekly / popData2019 * popnorm)) +
+  geom_polygon(colour='black', size=0.01) +
+  coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
+  scale_fill_gradient(low='white', high=death_col, na.value='grey50', name=paste('deaths_weekly\nper', popnorm)) +
+  theme(panel.background=element_rect(fill=seablue),
+        panel.grid=element_line(colour='white', size=0.1))
+  labs('Week: {closest_state}') +
+  transition_states(year_week,
+                    transition_length = 0.5,
+                    state_length = 1,
+                    wrap=TRUE)
 
-print( p1 + p2 )
+print( anim2 )
+anim_save('world_deaths.gif', animation = anim2, path = NULL, 
+        device= png(), fps=1, nframes=length(unique(casedist$year_week)), 
+        detail=0, start_pause=2, end_pause=5, fig.height=7, fig.width=12)
 
-subDT <- unique(DT[, .(Date, gRoll_Cases_Rate, gRoll_Deaths_Rate, gMortality)])
-
-p3 <- ggplot(subDT, aes(x=Date, y=gRoll_Cases_Rate)) +
-	geom_hline(yintercept = 1, size=0.1) +
-  geom_point(colour=case_col, size=0.5) +
-	geom_smooth(span=0.2, colour=case_col, size=0.5) +
-	coord_cartesian(ylim=c(0.8, 1.2)) +
-	labs(title=paste('Daily change rate of ', W, '-day rolling sum')) +
-	theme_bw()
-
-p4 <- ggplot(subDT, aes(x=Date, y=gRoll_Deaths_Rate)) +
-	geom_hline(yintercept = 1, size=0.1) +
-  geom_point(colour=death_col, size=0.5) +
-	geom_smooth(span=0.2, colour=death_col, size=0.5) +
-	coord_cartesian(ylim=c(0.8, 1.2)) +
-	labs(title='') +
-		theme_bw()
-
-p5 <- ggplot(subDT, aes(x=Date, y=gMortality)) +
-	geom_hline(yintercept = 0, size=0.1) +
-  geom_point(colour=death_col, size=0.5) +
-	geom_smooth(span=0.3, colour=death_col, size=0.5) +
-	labs(title='') +
-		theme_bw()
-
-print( p3 / p4 / p5 )
 ```
 
-## Detailed
 
-### Countries of personal interest
+## Charts
 
-#### More plots
+### Growth in selected countries
 
-```{r, fig.height=20, fig.width=10, warning=FALSE}
-for (i in topInterest) {
-	more_plots(tidyDT, expDT, rateDT, i, homecountry)
+```{r, fig.width=10, fig.height=15}
+# Cumulative totals.
+# In exponential growth, new cases are proportional to the total cases.
+setorder(casedist, year_week, dateRep, countriesAndTerritories)
+casedist[, cumulative_total_cases := cumsum(cases_weekly), by='countriesAndTerritories']
+casedist[, cumulative_total_deaths := cumsum(deaths_weekly), by='countriesAndTerritories']
+
+# The above doesn't take into account recovery. The all-time total is much larger than the number of active cases. Only active infections contribute to growth.
+# Use 4-week rolling sum as an approximation for active total.
+casedist[, monthly_cases := frollsum(cases_weekly, n=4), by='countriesAndTerritories']
+casedist[, monthly_deaths := frollsum(deaths_weekly, n=4), by='countriesAndTerritories']
+
+
+for (country in union(c(family_countries, other_countries), neighbour_countries)){
+  # country <- 'Austria'
   
-  ggsave(paste0('~/covid/', i, '_more.png'), plot = last_plot(), scale = 1,
-       width = 20, height = 40, units = "cm", dpi = 300, limitsize = TRUE)
+  p1 <- ggplot(casedist, 
+               aes(x=cumulative_total_cases, y=cases_weekly, 
+                   group=countriesAndTerritories)) +
+    geom_line(colour='black', size=0.5, alpha=0.1) +
+    scale_x_log10() +
+    scale_y_log10() +
+    geom_line(data=casedist[countriesAndTerritories==country,], 
+              colour=case_col, size=1, alpha=1) +
+    coord_cartesian(ylim=c(1,NA), xlim=c(1,NA)) +
+    labs(title='Growth') +
+    annotation_logticks(base=10, sides='lbrt') +
+    theme_bw()
+  
+     
+  p2 <- ggplot(casedist, 
+               aes(x=cumulative_total_deaths, y=deaths_weekly, 
+                   group=countriesAndTerritories)) +
+    geom_line(colour='black', size=0.5, alpha=0.1) +
+    scale_x_log10() +
+    scale_y_log10() +
+    geom_line(data=casedist[countriesAndTerritories==country,], 
+              colour=death_col, size=1, alpha=1) +
+    coord_cartesian(ylim=c(1,NA), xlim=c(1,NA)) +
+    # labs(title=country) +
+    annotation_logticks(base=10, sides='lbrt') +
+    theme_bw()
+  
+  # print( p1 | p2 )
+  
+  
+  p3 <- ggplot(casedist[countriesAndTerritories==country,], 
+               aes(x=monthly_cases, # colour=dateRep,
+                   y=cases_weekly)) + 
+    # geom_point() +
+    geom_path(size=rel(0.5), colour=case_col,
+              arrow=grid::arrow(length=unit(0.15,'cm'), type='closed')) +
+    scale_colour_gradientn(colours=c('black', 'black', 'black', case_col), guide='none') +
+    labs(title='Progression') +
+    theme_bw()
+  
+  
+  p4 <- ggplot(casedist[countriesAndTerritories==country,], 
+               aes(x=monthly_deaths, # colour=dateRep,
+                   y=deaths_weekly)) +
+    # geom_point() +
+    geom_path(size=rel(0.5), colour=death_col,
+              arrow=grid::arrow(length=unit(0.15,'cm'), type='closed')) +
+    scale_colour_gradientn(colours=c('black', 'black', 'black', death_col), guide='none') +
+    # labs(title=country) +
+    theme_bw()
+
+  # print( p3 | p4 )
+  
+  # print( (p1|p2)/(p3|p4) )
+  
+  
+  ggplot(casedist, 
+         aes(x=dateRep, y=cases_weekly / popData2019 * popnorm,
+             group=countriesAndTerritories)) +
+    geom_line(size=0.5, colour='black', alpha=0.1) +
+    geom_line(data=casedist[countriesAndTerritories==country,],
+              colour=case_col, size=1) +
+    labs(title=country, x=NULL, y='Population-normalized weekly cases') +
+    theme_bw() +
+    theme(axis.text.x=element_text(angle=45, hjust=0.5, vjust=0.5))
+  
+  p6 <- ggplot(casedist, 
+         aes(x=dateRep, y=deaths_weekly / popData2019 * popnorm,
+             group=countriesAndTerritories)) +
+    geom_line(size=0.5, colour='black', alpha=0.1) +
+    geom_line(data=casedist[countriesAndTerritories==country,],
+              colour=death_col, size=1) +
+    labs(x=NULL, y='Population-normalized weekly deaths') +
+    theme_bw()
+  
+  print( (p5|p6) / (p1|p2) / (p3|p4) )
 }
 ```
 
-#### Fewer plots
 
-```{r, fig.height=15, fig.width=10, warning=FALSE}
-for (i in topInterest) {
-	fewer_plots(tidyDT[hsplit=='roll',], expDT, rateDT, i, homecountry)
-  
-  ggsave(paste0('~/covid/', i, '_fewer.png'), plot = last_plot(), scale = 1,
-       width = 20, height = 40, units = "cm", dpi = 300, limitsize = TRUE)
-}
-```
-
-## Comparative
-
-### Selected countries
-
-```{r, fig.height=20, fig.width=10, warning=FALSE}
-countries <- c(topInterest, other_countries, neighbour_countries)
-
-for (j in c('norm_roll_Cases', 'norm_roll_Deaths', 'norm_new_Tests')) {
-	compare_numbers(tidyDT, j, countries)
-  
-  ggsave(paste0('~/covid/', j, '_comp.png'), plot = last_plot(), scale = 1,
-       width = 30, height = 3 * length(countries), units = "cm", dpi = 300, limitsize = TRUE)
-}
-
-for (j in c('Cases', 'Deaths')) {
-  compare_exp(expDT, j, 'norm_Total', 'norm_Roll', countries)
-    
-  ggsave(paste0('~/covid/', j, '_comp.png'), plot = last_plot(), scale = 1,
-       width = 30, height = 3 * length(countries), units = "cm", dpi = 300, limitsize = TRUE)
-  }
-```
-
-
-# Session
-
-```{r}
-sessionInfo()
-```
