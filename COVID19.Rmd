@@ -608,13 +608,13 @@ for (country in union(c(family_countries, other_countries), neighbour_countries)
   # print( (p1|p2)/(p3|p4) )
   
   
-  ggplot(casedist, 
+  p5 <- ggplot(casedist, 
          aes(x=dateRep, y=cases_weekly / popData2019 * popnorm,
              group=countriesAndTerritories)) +
     geom_line(size=0.5, colour='black', alpha=0.1) +
     geom_line(data=casedist[countriesAndTerritories==country,],
               colour=case_col, size=1) +
-    labs(title=country, x=NULL, y='Population-normalized weekly cases') +
+    labs(title=country, x=NULL, y='Population-normalized\n weekly cases') +
     theme_bw() +
     theme(axis.text.x=element_text(angle=45, hjust=0.5, vjust=0.5))
   
@@ -624,8 +624,9 @@ for (country in union(c(family_countries, other_countries), neighbour_countries)
     geom_line(size=0.5, colour='black', alpha=0.1) +
     geom_line(data=casedist[countriesAndTerritories==country,],
               colour=death_col, size=1) +
-    labs(x=NULL, y='Population-normalized weekly deaths') +
-    theme_bw()
+    labs(x=NULL, y='Population-normalized\n weekly deaths') +
+    theme_bw() +
+    theme(axis.text.x=element_text(angle=45, hjust=0.5, vjust=0.5))
   
   print( (p5|p6) / (p1|p2) / (p3|p4) )
 }
