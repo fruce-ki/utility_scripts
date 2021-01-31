@@ -15,6 +15,8 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning=FALSE)
+
+dirpath <- 'D:/Documents/covid'
 ```
 
 ```{r message=FALSE}
@@ -25,6 +27,7 @@ library(ggrepel)
 library(patchwork)
 library(data.table)
 library(maps)
+library(gganimate)
 
 options(scipen=2)
 ```
@@ -34,32 +37,34 @@ Source: https://opendata.ecdc.europa.eu/covid19/
 
 # Load current data
 
-```{r}
+```{r download}
 # Load data
 ###########
 
-## Download latest data
-# GET("https://opendata.ecdc.europa.eu/covid19/agecasesnational/csv", authenticate(":", ":", type="ntlm"), write_disk('D:/Documents/covid/agecasesnational.csv', overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/agecasesubnational/csv", authenticate(":", ":", type="ntlm"), write_disk('D:/Documents/covid/agecasesubnational.csv', overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", authenticate(":", ":", type="ntlm"), write_disk('D:/Documents/covid/casedistribution.csv', overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/hospitalicuadmissionrates/csv", authenticate(":", ":", type="ntlm"), write_disk('D:/Documents/covid/hospitalicuadmissionrates.csv', overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/movementindicators/csv", authenticate(":", ":", type="ntlm"), write_disk('D:/Documents/covid/movementindicators.csv', overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/nationalcasedeath/csv", authenticate(":", ":", type="ntlm"), write_disk('D:/Documents/covid/nationalcasedeath.csv', overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/subnationalcasedaily/csv", authenticate(":", ":", type="ntlm"), write_disk('D:/Documents/covid/subnationalcasedaily.csv', overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/subnationalcaseweekly/csv", authenticate(":", ":", type="ntlm"), write_disk('D:/Documents/covid/subnationalcaseweekly.csv', overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/testing/csv", authenticate(":", ":", type="ntlm"), write_disk('D:/Documents/covid/testing.csv', overwrite = TRUE))
+# ## Download latest data
+# GET("https://opendata.ecdc.europa.eu/covid19/agecasesnational/csv", authenticate(":", ":", type="ntlm"), write_disk(file.path(dirpath,'agecasesnational.csv'), overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/agecasesubnational/csv", authenticate(":", ":", type="ntlm"), write_disk(file.path(dirpath,'agecasesubnational.csv'), overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", authenticate(":", ":", type="ntlm"), write_disk('file.path(dirpath,'casedistribution.csv'), overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/hospitalicuadmissionrates/csv", authenticate(":", ":", type="ntlm"), write_disk('file.path(dirpath,'hospitalicuadmissionrates.csv'), overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/movementindicators/csv", authenticate(":", ":", type="ntlm"), write_disk(file.path(dirpath,'movementindicators.csv'), overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/nationalcasedeath/csv", authenticate(":", ":", type="ntlm"), write_disk(file.path(dirpath,'nationalcasedeath.csv'), overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/subnationalcasedaily/csv", authenticate(":", ":", type="ntlm"), write_disk(file.path(dirpath,'subnationalcasedaily.csv'), overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/subnationalcaseweekly/csv", authenticate(":", ":", type="ntlm"), write_disk(file.path(dirpath,'subnationalcaseweekly.csv'), overwrite = TRUE))
+# GET("https://opendata.ecdc.europa.eu/covid19/testing/csv", authenticate(":", ":", type="ntlm"), write_disk(file.path(dirpath,'testing.csv'), overwrite = TRUE))
+```
 
+```{r load}
 # Import data.
 # Don't need the cruiseship.
-agecasenat <- fread('D:/Documents/covid/agecasesnational.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
-agecasesubnat <- fread('D:/Documents/covid/agecasesubnational.csv') # [country != 'Cases_on_an_international_conveyance_Japan',] # Still blank
-casedist <- fread('D:/Documents/covid/casedistribution.csv')[countriesAndTerritories != 'Cases_on_an_international_conveyance_Japan', ]
-hosprate <- fread('D:/Documents/covid/hospitalicuadmissionrates.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
-movement <- fread('D:/Documents/covid/movementindicators.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
-natcasedeath <- fread('D:/Documents/covid/nationalcasedeath.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
-subnatcaseday <- fread('D:/Documents/covid/subnationalcasedaily.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
-subnatcaseweek <- fread('D:/Documents/covid/subnationalcaseweekly.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
-testing <- fread('D:/Documents/covid/testing.csv')[country != 'Cases_on_an_international_conveyance_Japan', ]
+agecasenat <- fread(file.path(dirpath,'agecasesnational.csv'))[country != 'Cases_on_an_international_conveyance_Japan', ]
+agecasesubnat <- fread(file.path(dirpath,'agecasesubnational.csv')) # [country != 'Cases_on_an_international_conveyance_Japan',] # Still blank
+casedist <- fread(file.path(dirpath,'casedistribution.csv'))[countriesAndTerritories != 'Cases_on_an_international_conveyance_Japan', ]
+hosprate <- fread(file.path(dirpath,'hospitalicuadmissionrates.csv'))[country != 'Cases_on_an_international_conveyance_Japan', ]
+movement <- fread(file.path(dirpath,'movementindicators.csv'))[country != 'Cases_on_an_international_conveyance_Japan', ]
+natcasedeath <- fread(file.path(dirpath,'nationalcasedeath.csv'))[country != 'Cases_on_an_international_conveyance_Japan', ]
+subnatcaseday <- fread(file.path(dirpath,'subnationalcasedaily.csv'))[country != 'Cases_on_an_international_conveyance_Japan', ]
+subnatcaseweek <- fread(file.path(dirpath,'subnationalcaseweekly.csv'))[country != 'Cases_on_an_international_conveyance_Japan', ]
+testing <- fread(file.path(dirpath,'testing.csv'))[country != 'Cases_on_an_international_conveyance_Japan', ]
 
 # Verify that the data format wasn't changed again
 stopifnot(names(agecasenat) == c('country', 'country_code', 'year_week', 'age_group', 'new_cases', 'population', 'rate_14_day_per_100k', 'source'))
@@ -81,6 +86,7 @@ homecountry = 'Austria'
 family_countries <- c('Austria', 'Italy', 'Greece', 'Luxembourg', 'Germany')
 neighbour_countries <- c('Switzerland', 'Slovakia', 'Slovenia', 'Czechia', 'Hungary')
 other_countries <- c('United_Kingdom', 'Spain', 'France', 'Belgium', 'United_States_of_America', 'Sweden', 'South_Korea')
+holiday_options=c('Croatia', 'Greece', 'Italy', 'Malta', 'Spain', 'Egypt')
 
 
 # Make dates workable and uniform
@@ -199,11 +205,17 @@ popnorm= 1e6
 
 # Status
 
-```{r}
-endday <- unique(casedist[dateRep == max(dateRep), dateRep])
-startday <- unique(casedist[dateRep == min(dateRep), dateRep])
-endweek <- unique(casedist[year_week == max(year_week), year_week])
-startweek <- unique(casedist[year_week == max(year_week), year_week])
+```{r status}
+setorder(casedist, dateRep, countriesAndTerritories)
+
+endday <- tail(casedist[, dateRep], 1)
+startday <- head(casedist[, dateRep], 1)
+endweek <- tail(casedist[, year_week], 1)
+startweek <- head(casedist[, year_week], 1)
+
+message(paste('First entry:', startday))
+message(paste('Last update:', endday))
+message(paste('Recording duration:', length(unique(casedist$year_week)), 'weeks'))
 ```
 
 Based on the latest available date in the table. Some countries may be slower at releasing/entering their data, and not have current data to show.
@@ -212,10 +224,12 @@ Based on the latest available date in the table. Some countries may be slower at
 
 ### Global
 
-```{r, fig.height=12, fig.width=12}
+```{r global, fig.height=12, fig.width=12}
 subDT <- merge(world_map[, .(region, long, lat, group, order)], 
                casedist[year_week==endweek, .(countriesAndTerritories, popData2019, cases_weekly, deaths_weekly)], 
                by.x='region', by.y='countriesAndTerritories', all.x=TRUE, all.y=FALSE, allow.cartesian=TRUE)
+
+
 
 p1 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=cases_weekly)) +
@@ -234,8 +248,10 @@ p2 <- ggplot(subDT,
         panel.grid=element_line(colour='white', size=0.1))
 
 print( p1 / p2 )
-ggsave('world_cases.png', plot = p1 / p2, device = png(), path = NULL, 
+ggsave(file.path(dirpath,'world_cases.png'), plot = p1 / p2, device = png(), path = NULL, 
        scale = 1, width = 12, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
+
+
 
 p3 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=deaths_weekly)) +
@@ -255,21 +271,23 @@ p4 <- ggplot(subDT,
 
 
 print( p3 / p4 )
-ggsave('world_deaths.png', plot = p1 / p2, device = png(), path = NULL, 
+ggsave(file.path(dirpath,'world_deaths.png'), plot = p3 / p4, device = png(), path = NULL, 
        scale = 1, width = 12, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
 ```
 
 ### Europe
 
-```{r, fig.height=12, fig.width=10}
+```{r europe, fig.height=12, fig.width=10}
 subDT <- merge(world_map[, .(region, long, lat, group, order)], 
                casedist[year_week==endweek & continentExp=='Europe', .(countriesAndTerritories, popData2019, cases_weekly, deaths_weekly)], 
                by.x='region', by.y='countriesAndTerritories', all.x=TRUE, all.y=FALSE, allow.cartesian=TRUE)
 
+
+
 p1 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=cases_weekly)) +
   geom_polygon(colour='black', size=0.01) +
-  coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) + # Crop giant Antarctica and empty Arctic
+  coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) +
   scale_fill_gradient(low='white', high=case_col, na.value='grey50') +
   theme(panel.background=element_rect(fill=seablue),
         panel.grid=element_line(colour='white', size=0.1))
@@ -277,19 +295,22 @@ p1 <- ggplot(subDT,
 p2 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=cases_weekly / popData2019 * popnorm)) +
   geom_polygon(colour='black', size=0.01) +
-  coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) + # Crop giant Antarctica and empty Arctic
+  coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) +
   scale_fill_gradient(low='white', high=case_col, na.value='grey50', name=paste('cases_weekly\nper', popnorm)) +
   theme(panel.background=element_rect(fill=seablue),
         panel.grid=element_line(colour='white', size=0.1))
 
 print( p1 / p2 )
-ggsave('europe_cases.png', plot = p1 / p2, device = png(), path = NULL, 
+ggsave(file.path(dirpath,'europe_cases.png'), plot = p1 / p2, device = png(), path = NULL, 
        scale = 1, width = 10, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
+
+
+
 
 p3 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=deaths_weekly)) +
   geom_polygon(colour='black', size=0.01) +
-  coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) + # Crop giant Antarctica and empty Arctic
+  coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) +
   scale_fill_gradient(low='white', high=death_col, na.value='grey50') +
   theme(panel.background=element_rect(fill=seablue),
         panel.grid=element_line(colour='white', size=0.1))
@@ -297,16 +318,15 @@ p3 <- ggplot(subDT,
 p4 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=deaths_weekly / popData2019 * popnorm)) +
   geom_polygon(colour='black', size=0.01) +
-  coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) + # Crop giant Antarctica and empty Arctic
+  coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) +
   scale_fill_gradient(low='white', high=death_col, na.value='grey50', name=paste('deaths_weekly\nper', popnorm)) +
   theme(panel.background=element_rect(fill=seablue),
         panel.grid=element_line(colour='white', size=0.1))
 
 print( p3 / p4 )
-ggsave('europe_deaths.png', plot = p1 / p2, device = png(), path = NULL, 
+ggsave(file.path(dirpath,'europe_deaths.png'), plot = p3 / p4, device = png(), path = NULL, 
        scale = 1, width = 10, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
 ```
-
 
 
 ## Top 10s
@@ -315,7 +335,7 @@ ggsave('europe_deaths.png', plot = p1 / p2, device = png(), path = NULL,
 
 #### By cases
 
-```{r}
+```{r wcase}
 # Worse 10 (or more) by weekly cases
 subDT <- casedist[dateRep==endday & !is.na(cases_weekly), 
                   .(countriesAndTerritories, dateRep, cases_weekly, population_normalized = cases_weekly / popData2019 * popnorm)] [order(cases_weekly, decreasing=TRUE), ]
@@ -339,7 +359,7 @@ print( head(subDT, n) )
 
 #### By deaths
 
-```{r}
+```{r wdeath}
 # Worse 10 (or more) by weekly deaths
 subDT <- casedist[dateRep==endday & !is.na(deaths_weekly), 
                   .(countriesAndTerritories, dateRep, deaths_weekly, population_normalized = deaths_weekly / popData2019 * popnorm)] [order(deaths_weekly, decreasing=TRUE), ]
@@ -364,7 +384,7 @@ print( head(subDT, n) )
 
 #### By cases
 
-```{r}
+```{r eucase}
 # Worse 10 (or more) by weekly cases
 subDT <- casedist[dateRep==endday & !is.na(cases_weekly) & continentExp == 'Europe', 
                   .(countriesAndTerritories, dateRep, cases_weekly, population_normalized = cases_weekly / popData2019 * popnorm)] [order(cases_weekly, decreasing=TRUE), ]
@@ -388,7 +408,7 @@ print( head(subDT, n) )
 
 #### By deaths
 
-```{r}
+```{r eudeath}
 # Worse 10 (or more) by weekly deaths
 subDT <- casedist[dateRep==endday & !is.na(deaths_weekly) & continentExp == 'Europe', 
                   .(countriesAndTerritories, dateRep, deaths_weekly, population_normalized = deaths_weekly / popData2019 * popnorm)] [order(deaths_weekly, decreasing=TRUE), ]
@@ -413,7 +433,7 @@ print( head(subDT, n) )
 
 #### By cases
 
-```{r}
+```{r eucase2}
 # Worse 10 (or more) by weekly cases
 subDT <- casedist[dateRep==endday & !is.na(cases_weekly) & continentExp == 'Europe', 
                   .(countriesAndTerritories, dateRep, cases_weekly, population_normalized = cases_weekly / popData2019 * popnorm)] [order(cases_weekly, decreasing=FALSE), ]
@@ -435,9 +455,9 @@ n <- max(10, nrow(subDT[sapply(subDT$population_normalized,
 print( head(subDT, n) )
 ```
 
-##]# By deaths
+### By deaths
 
-```{r}
+```{r eudeath2}
 # Worse 10 (or more) by weekly deaths
 subDT <- casedist[dateRep==endday & !is.na(deaths_weekly) & continentExp == 'Europe', 
                   .(countriesAndTerritories, dateRep, deaths_weekly, population_normalized = deaths_weekly / popData2019 * popnorm)] [order(deaths_weekly, decreasing=FALSE), ]
@@ -460,7 +480,7 @@ print( head(subDT, n) )
 
 ### Countries of personal interest
 
-```{r}
+```{r interest}
 print( 
   casedist[dateRep==endday & countriesAndTerritories %in% family_countries,
            .(countriesAndTerritories, dateRep, year_week, cases_weekly, population_normalized = cases_weekly / popData2019 * popnorm)] )
@@ -481,155 +501,267 @@ print(
 
 
 
-# Timeline
+# Progression
 
-## Map
+<!-- ## GIF Maps -->
 
-```{r, fig.height=7, fig.width=12}
-subDT <- merge(world_map[, .(region, long, lat, group, order)], 
-               casedist[, .(countriesAndTerritories, popData2019, cases_weekly, deaths_weekly, year_week)], 
-               by.x='region', by.y='countriesAndTerritories', all.x=TRUE, all.y=FALSE, allow.cartesian=TRUE)
+<!-- ```{r pregif} -->
+<!-- subDT <- merge(world_map[, .(region, long, lat, group, order)], -->
+<!--                casedist[, .(countriesAndTerritories, popData2019, cases_weekly, deaths_weekly, dateRep)], -->
+<!--                by.x='region', by.y='countriesAndTerritories', all.x=TRUE, all.y=FALSE, allow.cartesian=TRUE) -->
+<!-- ``` -->
+
+<!-- ### World -->
+
+<!-- ```{r gifw, fig.height=7, fig.width=12} -->
+<!-- anim <- ggplot(subDT) + -->
+<!--   geom_polygon(aes(x=long, y=lat, group=group, fill=cases_weekly / popData2019 * popnorm), -->
+<!--                colour='black', size=0.01) + -->
+<!--   transition_states(dateRep, transition_length = 0, state_length = 1, wrap=TRUE) + -->
+<!--   scale_fill_gradient(low='white', high=case_col, na.value='grey50', name=paste('per', popnorm)) + -->
+<!--   coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic -->
+<!--   labs(title='Weekly cases: {closest_state}') + -->
+<!--   theme(panel.background=element_rect(fill=seablue), -->
+<!--         panel.grid=element_line(colour='white', size=0.1)) -->
+
+<!-- gif <- animate(anim, duration=30, end_pause=15,  -->
+<!--                 width=1200, height=700, renderer=gifski_renderer() ) -->
+
+<!-- anim_save(file.path(dirpath,'world_cases.gif'), animation=gif) -->
+
+<!-- gif -->
+<!-- ``` -->
+
+<!-- ```{r gifw2, fig.height=7, fig.width=12} -->
+<!-- anim <- ggplot(subDT) + -->
+<!--   geom_polygon(aes(x=long, y=lat, group=group, fill=deaths_weekly / popData2019 * popnorm), -->
+<!--                colour='black', size=0.01) + -->
+<!--   transition_states(dateRep, transition_length = 0, state_length = 1, wrap=TRUE) + -->
+<!--   scale_fill_gradient(low='white', high=death_col, na.value='grey50', name=paste('per', popnorm)) + -->
+<!--   coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic -->
+<!--   labs(title='Weekly deaths: {closest_state}') + -->
+<!--   theme(panel.background=element_rect(fill=seablue), -->
+<!--         panel.grid=element_line(colour='white', size=0.1)) -->
+
+<!-- gif <- animate(anim, duration=30, end_pause=15,  -->
+<!--                 width=1200, height=700, renderer=gifski_renderer() ) -->
+
+<!-- anim_save(file.path(dirpath,'world_deaths.gif'), animation=gif) -->
+
+<!-- gif -->
+<!-- ``` -->
+
+<!-- ### Europe -->
+
+<!-- ```{r gife, fig.height=7, fig.width=10} -->
+<!-- anim <- ggplot(subDT) + -->
+<!--   geom_polygon(aes(x=long, y=lat, group=group, fill=cases_weekly / popData2019 * popnorm), -->
+<!--                colour='black', size=0.01) + -->
+<!--   transition_states(dateRep, transition_length = 0, state_length = 1, wrap=TRUE) + -->
+<!--   scale_fill_gradient(low='white', high=case_col, na.value='grey50', name=paste('per', popnorm)) + -->
+<!--   coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) + -->
+<!--   labs(title='Weekly cases: {closest_state}') + -->
+<!--   theme(panel.background=element_rect(fill=seablue), -->
+<!--         panel.grid=element_line(colour='white', size=0.1)) -->
+
+<!-- gif <- animate(anim, duration=30, end_pause=15,  -->
+<!--                 width=1000, height=700, renderer=gifski_renderer() ) -->
+
+<!-- anim_save(file.path(dirpath,'europe_cases.gif'), animation=gif) -->
+
+<!-- gif -->
+<!-- ``` -->
+
+<!-- ```{r gife2, fig.height=7, fig.width=10} -->
+<!-- anim <- ggplot(subDT) + -->
+<!--   geom_polygon(aes(x=long, y=lat, group=group, fill=deaths_weekly / popData2019 * popnorm), -->
+<!--                colour='black', size=0.01) + -->
+<!--   transition_states(dateRep, transition_length = 0, state_length = 1, wrap=TRUE) + -->
+<!--   scale_fill_gradient(low='white', high=death_col, na.value='grey50', name=paste('per', popnorm)) + -->
+<!--   coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) + -->
+<!--   labs(title='Weekly deaths: {closest_state}') + -->
+<!--   theme(panel.background=element_rect(fill=seablue), -->
+<!--         panel.grid=element_line(colour='white', size=0.1)) -->
+
+<!-- gif <- animate(anim, duration=30, end_pause=15,  -->
+<!--                 width=1000, height=700, renderer=gifski_renderer() ) -->
+
+<!-- anim_save(file.path(dirpath,'europe_deaths.gif'), animation=gif) -->
+
+<!-- gif -->
+<!-- ``` -->
 
 
-# These are insanely slow, they are only
+## Plots
 
-anim1 <- ggplot(subDT, 
-       aes(x=long, y=lat, group=group, fill=cases_weekly / popData2019 * popnorm)) +
-  geom_polygon(colour='black', size=0.01) +
-  coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
-  scale_fill_gradient(low='white', high=case_col, na.value='grey50') +
-  theme(panel.background=element_rect(fill=seablue),
-        panel.grid=element_line(colour='white', size=0.1)) +
-  labs('Week: {closest_state}') +
-  transition_states(year_week,
-                    transition_length = 0,
-                    state_length = 1,
-                    wrap=TRUE)
-
-print( anim1 )
-anim_save('world_cases.gif', animation = anim1, path = NULL, 
-          device= png(), fps=1, nframes=length(unique(casedist$year_week)), 
-          detail=0, start_pause=2, end_pause=5, fig.height=7, fig.width=12)
-
-anim2 <- ggplot(subDT, 
-       aes(x=long, y=lat, group=group, fill=deaths_weekly / popData2019 * popnorm)) +
-  geom_polygon(colour='black', size=0.01) +
-  coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
-  scale_fill_gradient(low='white', high=death_col, na.value='grey50', name=paste('deaths_weekly\nper', popnorm)) +
-  theme(panel.background=element_rect(fill=seablue),
-        panel.grid=element_line(colour='white', size=0.1))
-  labs('Week: {closest_state}') +
-  transition_states(year_week,
-                    transition_length = 0.5,
-                    state_length = 1,
-                    wrap=TRUE)
-
-print( anim2 )
-anim_save('world_deaths.gif', animation = anim2, path = NULL, 
-        device= png(), fps=1, nframes=length(unique(casedist$year_week)), 
-        detail=0, start_pause=2, end_pause=5, fig.height=7, fig.width=12)
-
-```
-
-
-## Charts
-
-### Growth in selected countries
-
-```{r, fig.width=10, fig.height=15}
+```{r cumulative}
 # Cumulative totals.
 # In exponential growth, new cases are proportional to the total cases.
 setorder(casedist, year_week, dateRep, countriesAndTerritories)
-casedist[, cumulative_total_cases := cumsum(cases_weekly), by='countriesAndTerritories']
-casedist[, cumulative_total_deaths := cumsum(deaths_weekly), by='countriesAndTerritories']
+casedist[, total_cases := cumsum(cases_weekly), by='countriesAndTerritories']
+casedist[, total_deaths := cumsum(deaths_weekly), by='countriesAndTerritories']
+# Need 2 country variables to simultaneously differentially display some stuff and all stuff.
+casedist[, country := countriesAndTerritories]
+```
 
-# The above doesn't take into account recovery. The all-time total is much larger than the number of active cases. Only active infections contribute to growth.
+### Growth in selected countries
+
+New events relative to total events. In exponential growth, the new events are proportional to the total events.
+
+```{r expo, fig.width=10, fig.height=15}
+# New vs Total
+expo <- function(selcnt=family_countries){
+  # Prime a dummy table to graft things onto
+  pileup <- data.table(cases_weekly=NA_integer_, deaths_weekly=NA_integer_,
+                       countriesAndTerritories=NA_character_,
+                       total_cases=NA_integer_, total_deaths=NA_integer_,
+                       country=NA_integer_)
+  # Graft
+  for (cnt in selcnt){
+    clonecd <- copy(casedist[, .(cases_weekly, deaths_weekly, countriesAndTerritories,
+                                 total_cases, total_deaths, country)])
+    clonecd[, country := cnt]
+    pileup <- rbind(pileup, clonecd)
+  }
+  # Lose the primer
+  pileup <- pileup[2:nrow(pileup),]
+  # Melt cases and deaths
+  pileup <- melt(pileup, id.vars=c('countriesAndTerritories', 'country'),
+                 measure=list(c('cases_weekly', 'deaths_weekly'), 
+                    c('total_cases', 'total_deaths')),
+                 value.name=c('Weekly', 'Total'))
+  subdist <- melt(casedist, id.vars=c('countriesAndTerritories', 'country'),
+                  measure=list(c('cases_weekly', 'deaths_weekly'), 
+                    c('total_cases', 'total_deaths')),
+                  value.name=c('Weekly', 'Total'))
+  
+  pileup[variable==1, variable := 'Cases']
+  pileup[variable==2, variable := 'Deaths']
+  pileup[, variable := factor(variable, levels=c('Cases', 'Deaths'), ordered=TRUE)]
+  subdist[variable==1, variable := 'Cases']
+  subdist[variable==2, variable := 'Deaths']
+  subdist[, variable := factor(variable, levels=c('Cases', 'Deaths'), ordered=TRUE)]
+  
+  # Plot
+  p1 <- ggplot(pileup, 
+       aes(x=Total, y=Weekly,
+           group=countriesAndTerritories)) +
+    facet_grid(country ~ variable) +
+    geom_line(colour='black', size=0.5, alpha=0.1) +
+    scale_x_log10() +
+    scale_y_log10() +
+    geom_line(data=subdist[countriesAndTerritories %in% selcnt,], 
+              aes(colour=variable), size=1, alpha=1) +
+    coord_cartesian(ylim=c(1,NA), xlim=c(1,NA)) +
+    scale_colour_manual(values=c(case_col, death_col), guide='none') +
+    annotation_logticks(base=10, sides='lbrt') +
+    theme_bw()
+    
+  return( p1 )
+}
+  
+for (x in list(family_countries, 
+              c(homecountry, neighbour_countries), 
+              c(homecountry, other_countries),
+              c(homecountry, holiday_options))) {
+  p <- expo(x)
+  print( p )
+  ggsave(p, file=file.path(dirpath,paste(paste(x, collapse='-'), 'expo.png', sep='_')), device='png')
+}
+```
+
+### Waves in selected countries
+
+The previous does not take recovery into account. Only active infections create new cases. Using the cumulative cases in a smaller 4-week rolling window as approximation of active cases.
+
+```{r wave, fig.width=10, fig.height=15}
 # Use 4-week rolling sum as an approximation for active total.
 casedist[, monthly_cases := frollsum(cases_weekly, n=4), by='countriesAndTerritories']
 casedist[, monthly_deaths := frollsum(deaths_weekly, n=4), by='countriesAndTerritories']
 
-
-for (country in union(c(family_countries, other_countries), neighbour_countries)){
-  # country <- 'Austria'
-  
-  p1 <- ggplot(casedist, 
-               aes(x=cumulative_total_cases, y=cases_weekly, 
-                   group=countriesAndTerritories)) +
-    geom_line(colour='black', size=0.5, alpha=0.1) +
-    scale_x_log10() +
-    scale_y_log10() +
-    geom_line(data=casedist[countriesAndTerritories==country,], 
-              colour=case_col, size=1, alpha=1) +
-    coord_cartesian(ylim=c(1,NA), xlim=c(1,NA)) +
-    labs(title='Growth') +
-    annotation_logticks(base=10, sides='lbrt') +
-    theme_bw()
-  
-     
-  p2 <- ggplot(casedist, 
-               aes(x=cumulative_total_deaths, y=deaths_weekly, 
-                   group=countriesAndTerritories)) +
-    geom_line(colour='black', size=0.5, alpha=0.1) +
-    scale_x_log10() +
-    scale_y_log10() +
-    geom_line(data=casedist[countriesAndTerritories==country,], 
-              colour=death_col, size=1, alpha=1) +
-    coord_cartesian(ylim=c(1,NA), xlim=c(1,NA)) +
-    # labs(title=country) +
-    annotation_logticks(base=10, sides='lbrt') +
-    theme_bw()
-  
-  # print( p1 | p2 )
-  
-  
-  p3 <- ggplot(casedist[countriesAndTerritories==country,], 
-               aes(x=monthly_cases, # colour=dateRep,
-                   y=cases_weekly)) + 
-    # geom_point() +
-    geom_path(size=rel(0.5), colour=case_col,
-              arrow=grid::arrow(length=unit(0.15,'cm'), type='closed')) +
-    scale_colour_gradientn(colours=c('black', 'black', 'black', case_col), guide='none') +
-    labs(title='Progression') +
-    theme_bw()
-  
-  
-  p4 <- ggplot(casedist[countriesAndTerritories==country,], 
-               aes(x=monthly_deaths, # colour=dateRep,
-                   y=deaths_weekly)) +
-    # geom_point() +
-    geom_path(size=rel(0.5), colour=death_col,
-              arrow=grid::arrow(length=unit(0.15,'cm'), type='closed')) +
-    scale_colour_gradientn(colours=c('black', 'black', 'black', death_col), guide='none') +
-    # labs(title=country) +
-    theme_bw()
-
-  # print( p3 | p4 )
-  
-  # print( (p1|p2)/(p3|p4) )
-  
-  
-  p5 <- ggplot(casedist, 
-         aes(x=dateRep, y=cases_weekly / popData2019 * popnorm,
-             group=countriesAndTerritories)) +
-    geom_line(size=0.5, colour='black', alpha=0.1) +
-    geom_line(data=casedist[countriesAndTerritories==country,],
-              colour=case_col, size=1) +
-    labs(title=country, x=NULL, y='Population-normalized\n weekly cases') +
+# New vs Monthly
+wave <- function(selcnt=family_countries){
+  # No melty business here. Cases and deaths need completely different Y scales.
+  p1 <- ggplot(casedist[countriesAndTerritories %in% selcnt,],
+           aes(x=monthly_cases / popData2019 * popnorm, 
+               y=cases_weekly / popData2019 * popnorm,
+               colour=dateRep, group=countriesAndTerritories)) +
+    facet_grid(country ~ ., scales='fixed') +
+    geom_path(size=1) +
+    scale_colour_gradientn(colours=c('black','black',case_col), guide='none') +
+    coord_cartesian(xlim=c(0,NA), ylim=c(0,NA)) +
+    labs(title='Waves', x=paste('Monthly cases per', popnorm), y=paste('Weekly cases per', popnorm)) +
     theme_bw() +
-    theme(axis.text.x=element_text(angle=45, hjust=0.5, vjust=0.5))
+    theme(axis.text.x=element_text(angle=45, hjust=1, vjust=1))
   
-  p6 <- ggplot(casedist, 
-         aes(x=dateRep, y=deaths_weekly / popData2019 * popnorm,
-             group=countriesAndTerritories)) +
-    geom_line(size=0.5, colour='black', alpha=0.1) +
-    geom_line(data=casedist[countriesAndTerritories==country,],
-              colour=death_col, size=1) +
-    labs(x=NULL, y='Population-normalized\n weekly deaths') +
+  p2 <- ggplot(casedist[countriesAndTerritories %in% selcnt,],
+           aes(x=monthly_deaths / popData2019 * popnorm, 
+               y=deaths_weekly / popData2019 * popnorm,
+               colour=dateRep, group=countriesAndTerritories)) +
+    facet_grid(country ~ ., scales='fixed') +
+    geom_path(size=1) +
+    scale_colour_gradientn(colours=c('black','black',death_col), guide='none') +
+    coord_cartesian(xlim=c(0,NA), ylim=c(0,NA)) +
+    labs(x=paste('Monthly deaths per', popnorm), y=paste('Weekly deaths per', popnorm)) +
     theme_bw() +
-    theme(axis.text.x=element_text(angle=45, hjust=0.5, vjust=0.5))
+    theme(axis.text.x=element_text(angle=45, hjust=1, vjust=1))
   
-  print( (p5|p6) / (p1|p2) / (p3|p4) )
+  return( p1 | p2 )
+}
+
+for (x in list(family_countries, 
+              c(homecountry, neighbour_countries), 
+              c(homecountry, other_countries),
+              c(homecountry, holiday_options))) {
+  p <- wave(x)
+  print( p )
+  ggsave(p, file=file.path(dirpath,paste(paste(x, collapse='-'), 'wave.png', sep='_')), device='png')
 }
 ```
+
+### Timeline in selected countries
+
+A conventional view as function of time.
+
+```{r time, fig.width=10, fig.height=15}
+tline <- function(selcnt=family_countries){
+  p1 <- ggplot(casedist[countriesAndTerritories %in% selcnt,],
+           aes(x=dateRep, y=cases_weekly / popData2019 * popnorm,
+               colour=dateRep, group=countriesAndTerritories)) +
+    facet_grid(country ~ ., scales='fixed') +
+    geom_path(size=1) +
+    # scale_colour_manual(values=c(case_col, death_col), guide='none') +
+    scale_colour_gradientn(colours=c('black','black',case_col), guide='none') +
+    coord_cartesian(xlim=c(min(casedist$dateRep),max(casedist$dateRep)), ylim=c(0,NA)) +
+    labs(title='Timeline', x=NULL, y=paste('Weekly cases per', popnorm)) +
+    theme_bw() +
+    theme(axis.text.x=element_text(angle=45, hjust=1, vjust=1))
+  
+  
+  p2 <- ggplot(casedist[countriesAndTerritories %in% selcnt,],
+           aes(x=dateRep, y=deaths_weekly / popData2019 * popnorm,
+               colour=dateRep, group=countriesAndTerritories)) +
+    facet_grid(country ~ ., scales='fixed') +
+    geom_path(size=1) +
+    # scale_colour_manual(values=c(case_col, death_col), guide='none') +
+    scale_colour_gradientn(colours=c('black','black',death_col), guide='none') +
+    coord_cartesian(xlim=c(min(casedist$dateRep),max(casedist$dateRep)), ylim=c(0,NA)) +
+    labs(x=NULL, y=paste('Weekly deaths per', popnorm)) +
+    theme_bw() +
+    theme(axis.text.x=element_text(angle=45, hjust=1, vjust=1))
+  
+  return( p1 | p2 )  
+}
+
+for (x in list(family_countries, 
+              c(homecountry, neighbour_countries), 
+              c(homecountry, other_countries),
+              c(homecountry, holiday_options))) {
+  p <- tline(x)
+  print( p )
+  ggsave(p, file=file.path(dirpath, paste(paste(x, collapse='-'), 'tline.png', sep='_')), device='png')
+}
+```
+
 
 
