@@ -143,13 +143,6 @@ testing[, year_week := sub('W', '', year_week)]
 # Simple world map
 world_map <- as.data.table(map_data('world'))
 
-## Code template
-# ggplot(world_map, aes(x=long, y=lat, group=group)) +
-#   geom_polygon(fill='white', colour='black', size=0.01) +
-#   coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
-#   theme(panel.background=element_rect(fill=seablue),
-#         panel.grid=element_line(colour='white', size=0.1))
-
 # Finer-detailed EU map.
 # Covid data for some countries is recorded at NUTS level 2 and for some other at NUTS level 1.
 eu2 <- readOGR(file.path(dirpath, 'ref-nuts-2021-01m.shp', 'NUTS_RG_01M_2021_3035_LEVL_2.shp'))
@@ -163,32 +156,15 @@ eu1t <- as.data.table(tidy(eu1))
 eu1t <- merge(eu1t, eu1@data, by='id')
 
 eut <- rbind(eu1t, eu2t)
-eut <- merge(eut, movement,
-             by.x='NUTS_ID', by.y='geo_id_final', all.x=FALSE, all.y=FALSE)
-setorder(eut, LEVL_CODE, NUTS_ID, order)
-
-# Overseas territories of France, Spain and Portugal force too much zoom-out. 
-# Remove them to focus on the continent.
-eut <- eut[! NUTS_ID %in% c('ES70', 'FRY1', 'FRY2', 'FRY3', 'FRY4', 'FRY5', 'PT2', 'PT3'),]
-# Fix illegal colour name
-eut[(colour=='Grey - no data'), colour := 'grey50']
-
-## Code template
-# ggplot(subDT, 
-#        aes(x=long, y=lat, group=group,
-#            fill=subnational_population)) +
-#   geom_polygon(colour='black')
 
 
-
-
-
-# Sanitize country names
+# Sanitize countries
 
 # Map data names allow spaces, ECDC uses underscores.
 # Spaces are nice, but ECDC tables out-number the coordinates table, so it makes sense to keep the ECDC convention.
-# Also, ECDC groups some of these territories together, whereas the map doesn't (except for the Virgin Islands, where it is the other way around)/
+# Also, ECDC groups some of these territories together, whereas the map doesn't (except for the Virgin Islands, where it is the other way around and which is not worth the trouble to reconcile)/
 world_map[, region := gsub(' ', '_', region,)]
+
 
 # More mismatched spellings.
 world_map[region=='Antigua', region := 'Antigua_and_Barbuda']
@@ -228,26 +204,27 @@ print( data.frame(Only_in_the_map = setdiff(
   unique(world_map$region), 
   unique(casedist$countriesAndTerritories)) ) )
 
- 
+
+# Overseas territories of France, Spain and Portugal force too much zoom-out. 
+# Remove them to focus on the continent.
+eut <- eut[! NUTS_ID %in% c('ES70', 'FRY1', 'FRY2', 'FRY3', 'FRY4', 'FRY5', 'PT2', 'PT3'),]
+
+
+
 # Add coordinates to the data tables
 ####################################
 
+eut <- merge(eut, movement,
+             by.x='NUTS_ID', by.y='geo_id_final', all.x=FALSE, all.y=FALSE)
+setorder(eut, LEVL_CODE, NUTS_ID, order)
+# Fix illegal colour name
+eut[(colour=='Grey - no data'), colour := 'grey50']
+
+# Merge on demand, to save on table size instead.
 mapify <- function(dt, country1='country', country2='region') {
   merge(dt, world_map, by.x=country1, by.y=country2, all.x=TRUE, all.y=FALSE, allow.cartesian=TRUE)
 }
 
-# Code templates
-## Don't merge data with the coordinates yet. Leave it until after any calculations.
-# agecasenat <- mapify(agecasenat)
-# casedist <- mapify(casedist, 'countriesAndTerritories')
-# hosprate <- mapify(hosprate)
-# natcasedeath <- mapify(natcasedeath)
-# testingnat <- mapify(testing[level == 'national',])
-## These tables include subregional detail. Neither the data nor the coordinates have subregional info for all countries. So, merging on subregions is problematic, and merging on countries is not sensible for the kind of data.
-# testingsubnat <- testing[level != 'national',]
-## movement
-## subnatcaseday
-## subnatcaseweek
 
 # Colours
 #########
@@ -284,110 +261,128 @@ Based on the latest available date in the table. Some countries may be slower at
 
 ### Global
 
-```{r global}
+```{r global, fig.height=10, fig.width=20}
 subDT <- merge(world_map[, .(region, long, lat, group, order)], 
                casedist[year_week==endweek, .(countriesAndTerritories, popData2019, cases_weekly, deaths_weekly)], 
                by.x='region', by.y='countriesAndTerritories', all.x=TRUE, all.y=FALSE, allow.cartesian=TRUE)
-```
 
-```{r gcase, fig.height=12, fig.width=12}
 p1 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=cases_weekly)) +
   geom_polygon(colour='transparent', size=0.01) +
   coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
   scale_fill_gradient(low='white', high=case_col, na.value='grey50') +
+  theme_void() +
   theme(panel.background=element_rect(fill=seablue),
-        panel.grid=element_blank())
+        panel.grid=element_blank(),
+        legend.position='left')
 
 p2 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=cases_weekly / popData2019 * popnorm)) +
   geom_polygon(colour='transparent', size=0.01) +
   coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
   scale_fill_gradient(low='white', high=case_col, na.value='grey50', name=paste('cases_weekly\nper', popnorm)) +
+  theme_void() +
   theme(panel.background=element_rect(fill=seablue),
-        panel.grid=element_blank())
+        panel.grid=element_blank(),
+        legend.position='left')
 
-print( p1 / p2 )
+# print( p1 / p2 )
+# 
+# ggsave(file.path(dirpath,'world_cases.png'), plot = p1 / p2, device = png(), 
+#        scale = 1, width = 12, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
 
-ggsave(file.path(dirpath,'world_cases.png'), plot = p1 / p2, device = png(), 
-       scale = 1, width = 12, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
-```
-
-```{r gdeath, fig.height=12, fig.width=12}
 p3 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=deaths_weekly)) +
   geom_polygon(colour='transparent', size=0.01) +
   coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
   scale_fill_gradient(low='white', high=death_col, na.value='grey50') +
+  theme_void() +
   theme(panel.background=element_rect(fill=seablue),
-        panel.grid=element_blank())
+        panel.grid=element_blank(),
+        legend.position='right')
 
 p4 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=deaths_weekly / popData2019 * popnorm)) +
   geom_polygon(colour='transparent', size=0.01) +
   coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
   scale_fill_gradient(low='white', high=death_col, na.value='grey50', name=paste('deaths_weekly\nper', popnorm)) +
+  theme_void() +
   theme(panel.background=element_rect(fill=seablue),
-        panel.grid=element_blank())
+        panel.grid=element_blank(),
+        legend.position='right')
+# 
+# print( p3 / p4 )
+# 
+# ggsave(file.path(dirpath,'world_deaths.png'), plot = p3 / p4, device = png(),
+#        scale = 1, width = 12, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
 
-print( p3 / p4 )
+print( (p1 | p3) / (p2 | p4) )
 
-ggsave(file.path(dirpath,'world_deaths.png'), plot = p3 / p4, device = png(),
+ggsave(file.path(dirpath,'world.png'), plot = p3 / p4, device = png(),
        scale = 1, width = 12, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
 ```
 
 ### Europe
 
-```{r europe, fig.height=12, fig.width=9}
+```{r europe, fig.height=15, fig.width=18}
 subDT <- merge(world_map[, .(region, long, lat, group, order)], 
                casedist[year_week==endweek & continentExp=='Europe', .(countriesAndTerritories, popData2019, cases_weekly, deaths_weekly)], 
                by.x='region', by.y='countriesAndTerritories', all.x=TRUE, all.y=FALSE, allow.cartesian=TRUE)
-```
 
-```{r eucase, fig.height=12, fig.width=9}
 p1 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=cases_weekly)) +
   geom_polygon(colour='transparent', size=0.01) +
   coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) +
   scale_fill_gradient(low='white', high=case_col, na.value='grey50') +
+  theme_void() +
   theme(panel.background=element_rect(fill=seablue),
-        panel.grid=element_blank())
+        panel.grid=element_blank(),
+        legend.position='left')
 
 p2 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=cases_weekly / popData2019 * popnorm)) +
   geom_polygon(colour='transparent', size=0.01) +
   coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) +
   scale_fill_gradient(low='white', high=case_col, na.value='grey50', name=paste('cases_weekly\nper', popnorm)) +
+  theme_void() +
   theme(panel.background=element_rect(fill=seablue),
-        panel.grid=element_blank())
+        panel.grid=element_blank(),
+        legend.position='left')
 
-print( p1 / p2 )
+# print( p1 / p2 )
+# 
+# ggsave(file.path(dirpath,'europe_cases.png'), plot = p1 / p2, device = png(), 
+#        scale = 1, width = 10, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
 
-ggsave(file.path(dirpath,'europe_cases.png'), plot = p1 / p2, device = png(), 
-       scale = 1, width = 10, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
-```
-
-```{r eudeath, fig.height=12, fig.width=9}
 p3 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=deaths_weekly)) +
   geom_polygon(colour='transparent', size=0.01) +
   coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) +
   scale_fill_gradient(low='white', high=death_col, na.value='grey50') +
+  theme_void() +
   theme(panel.background=element_rect(fill=seablue),
-        panel.grid=element_blank())
+        panel.grid=element_blank(),
+        legend.position='right')
 
 p4 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=deaths_weekly / popData2019 * popnorm)) +
   geom_polygon(colour='transparent', size=0.01) +
   coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) +
   scale_fill_gradient(low='white', high=death_col, na.value='grey50', name=paste('deaths_weekly\nper', popnorm)) +
+  theme_void() +
   theme(panel.background=element_rect(fill=seablue),
-        panel.grid=element_blank())
+        panel.grid=element_blank(),
+        legend.position='right')
 
-print( p3 / p4 )
+# print( p3 / p4 )
+# 
+# ggsave(file.path(dirpath,'europe_deaths.png'), plot = p3 / p4, device = png(),
+#        scale = 1, width = 10, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
 
-ggsave(file.path(dirpath,'europe_deaths.png'), plot = p3 / p4, device = png(),
-       scale = 1, width = 10, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
+print( (p1 | p3) / (p2 | p4) )
+
+ggsave(file.path(dirpath,'europe.png'), plot = p3 / p4, device = png(),
+       scale = 1, width = 12, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
 ```
 
 ### EU
@@ -435,19 +430,14 @@ p4 <- ggplot(eut,
 
 print( (p4 | p3) / (p1 | p2) )
 
-ggsave(((p4|p3)/(p1|p2)), file=file.path(dirpath, 'Austria_sub.png'), device='png')
+ggsave(((p4|p3)/(p1|p2)), file=file.path(dirpath, 'EU_sub.png'), device='png')
 ```
 
 
 ### Zoom on selected countries
 
 ```{r austria, fig.height=5, fig.width=10}
-subDT <- merge(eu2t[CNTR_CODE=='AT',],
-             movement[country=='Austria',],
-             by.x='NUTS_ID', by.y='geo_id_final', all.x=TRUE)
-setorder(subDT, NUTS_ID, order)
-
-p1 <- ggplot(subDT,
+p1 <- ggplot(eut[CNTR_CODE=='AT',],
        aes(x=long, y=lat, group=group,
            fill=subnational_cases_7)) +
   geom_polygon(colour='black') +
@@ -456,7 +446,7 @@ p1 <- ggplot(subDT,
   theme_void() +
   theme(legend.position='left')
 
-p2 <- ggplot(subDT,
+p2 <- ggplot(eut[CNTR_CODE=='AT',],
        aes(x=long, y=lat, group=group,
            fill=subnational_cases_7 / subnational_population * 1e5)) +
   geom_polygon(colour='black') +
@@ -465,7 +455,7 @@ p2 <- ggplot(subDT,
   theme_void() +
   theme(legend.position='right')
 
-p3 <- ggplot(subDT,
+p3 <- ggplot(eut[CNTR_CODE=='AT',],
        aes(x=long, y=lat, group=group,
            fill=(subnational_cases_14 - 2 * subnational_cases_7) / subnational_population * 1e5)) +
   geom_polygon(colour='black') +
@@ -474,7 +464,7 @@ p3 <- ggplot(subDT,
   theme_void() +
   theme(legend.position='right')
 
-p4 <- ggplot(subDT,
+p4 <- ggplot(eut[CNTR_CODE=='AT',],
        aes(x=long, y=lat, group=group,
            fill=colour)) +
   geom_polygon(colour='black') +
@@ -489,12 +479,7 @@ ggsave(((p4|p3)/(p1|p2)), file=file.path(dirpath, 'Austria_sub.png'), device='pn
 ```
 
 ```{r greece, fig.height=8, fig.width=10}
-subDT <- merge(eu2t[CNTR_CODE=='EL',],
-             movement[country=='Greece',],
-             by.x='NUTS_ID', by.y='geo_id_final', all.x=TRUE)
-setorder(subDT, NUTS_ID, order)
-
-p1 <- ggplot(subDT,
+p1 <- ggplot(eut[CNTR_CODE=='EL',],
        aes(x=long, y=lat, group=group,
            fill=subnational_cases_7)) +
   geom_polygon(colour='black') +
@@ -503,7 +488,7 @@ p1 <- ggplot(subDT,
   theme_void() +
   theme(legend.position='left')
 
-p2 <- ggplot(subDT,
+p2 <- ggplot(eut[CNTR_CODE=='EL',],
        aes(x=long, y=lat, group=group,
            fill=subnational_cases_7 / subnational_population * 1e5)) +
   geom_polygon(colour='black') +
@@ -512,7 +497,7 @@ p2 <- ggplot(subDT,
   theme_void() +
   theme(legend.position='right')
 
-p3 <- ggplot(subDT,
+p3 <- ggplot(eut[CNTR_CODE=='EL',],
        aes(x=long, y=lat, group=group,
            fill=(subnational_cases_14 - 2 * subnational_cases_7) / subnational_population * 1e5)) +
   geom_polygon(colour='black') +
@@ -521,7 +506,7 @@ p3 <- ggplot(subDT,
   theme_void() +
   theme(legend.position='right')
 
-p4 <- ggplot(subDT,
+p4 <- ggplot(eut[CNTR_CODE=='EL',],
        aes(x=long, y=lat, group=group,
            fill=colour)) +
   geom_polygon(colour='black') +
@@ -536,12 +521,7 @@ ggsave(((p4|p3)/(p1|p2)), file=file.path(dirpath, 'Greece_sub.png'), device='png
 ```
 
 ```{r italy, fig.height=11, fig.width=10}
-subDT <- merge(eu2t[CNTR_CODE=='IT',],
-             movement[country=='Italy',],
-             by.x='NUTS_ID', by.y='geo_id_final', all.x=TRUE)
-setorder(subDT, NUTS_ID, order)
-
-p1 <- ggplot(subDT,
+p1 <- ggplot(eut[CNTR_CODE=='IT',],
        aes(x=long, y=lat, group=group,
            fill=subnational_cases_7)) +
   geom_polygon(colour='black') +
@@ -550,7 +530,7 @@ p1 <- ggplot(subDT,
   theme_void() +
   theme(legend.position='left')
 
-p2 <- ggplot(subDT,
+p2 <- ggplot(eut[CNTR_CODE=='IT',],
        aes(x=long, y=lat, group=group,
            fill=subnational_cases_7 / subnational_population * 1e5)) +
   geom_polygon(colour='black') +
@@ -559,7 +539,7 @@ p2 <- ggplot(subDT,
   theme_void() +
   theme(legend.position='right')
 
-p3 <- ggplot(subDT,
+p3 <- ggplot(eut[CNTR_CODE=='IT',],
        aes(x=long, y=lat, group=group,
            fill=(subnational_cases_14 - 2 * subnational_cases_7) / subnational_population * 1e5)) +
   geom_polygon(colour='black') +
@@ -568,7 +548,7 @@ p3 <- ggplot(subDT,
   theme_void() +
   theme(legend.position='right')
 
-p4 <- ggplot(subDT,
+p4 <- ggplot(eut[CNTR_CODE=='IT',],
        aes(x=long, y=lat, group=group,
            fill=colour)) +
   geom_polygon(colour='black') +
@@ -582,13 +562,8 @@ print( (p4 | p3) / (p1 | p2) )
 ggsave(((p4|p3)/(p1|p2)), file=file.path(dirpath, 'Italy_sub.png'), device='png')
 ```
 
-```{r germany, fig.height=13, fig.width=10}
-subDT <- merge(eu1t[CNTR_CODE=='DE', ],
-             movement[country=='Germany', ],
-             by.x='NUTS_ID', by.y='geo_id_final', all.x=TRUE)
-setorder(subDT, NUTS_ID, order)
-
-p1 <- ggplot(subDT,
+```{r germany, fig.height=11, fig.width=10}
+p1 <- ggplot(eut[CNTR_CODE=='DE',],
        aes(x=long, y=lat, group=group,
            fill=subnational_cases_7)) +
   geom_polygon(colour='black') +
@@ -597,7 +572,7 @@ p1 <- ggplot(subDT,
   theme_void() +
   theme(legend.position='left')
 
-p2 <- ggplot(subDT,
+p2 <- ggplot(eut[CNTR_CODE=='DE',],
        aes(x=long, y=lat, group=group,
            fill=subnational_cases_7 / subnational_population * 1e5)) +
   geom_polygon(colour='black') +
@@ -606,7 +581,7 @@ p2 <- ggplot(subDT,
   theme_void() +
   theme(legend.position='right')
 
-p3 <- ggplot(subDT,
+p3 <- ggplot(eut[CNTR_CODE=='DE',],
        aes(x=long, y=lat, group=group,
            fill=(subnational_cases_14 - 2 * subnational_cases_7) / subnational_population * 1e5)) +
   geom_polygon(colour='black') +
@@ -615,7 +590,7 @@ p3 <- ggplot(subDT,
   theme_void() +
   theme(legend.position='right')
 
-p4 <- ggplot(subDT,
+p4 <- ggplot(eut[CNTR_CODE=='DE',],
        aes(x=long, y=lat, group=group,
            fill=colour)) +
   geom_polygon(colour='black') +
