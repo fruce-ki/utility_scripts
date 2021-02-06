@@ -38,7 +38,7 @@ options(scipen=2)
 
 Pandemic data source: European Centre for Disease Control https://opendata.ecdc.europa.eu/covid19/
 
-Detailed European maps: EUROSTAT NUTS2012
+Detailed European maps: EUROSTAT NUTS2021
 http://ec.europa.eu/eurostat/web/gisco/geodata/reference-data/administrative-units-statisticalunits
 
 # Load current data
