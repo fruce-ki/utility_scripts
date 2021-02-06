@@ -17,40 +17,65 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE, warning=FALSE)
 
 dirpath <- 'D:/Documents/covid'
+refresh <- FALSE
+# refresh <- TRUE
 ```
 
 ```{r message=FALSE}
 library(httr)
 library(lubridate)
 library(ggplot2)
-library(ggrepel)
+library(broom)
 library(patchwork)
 library(data.table)
 library(maps)
-library(gganimate)
+library(rgdal)
+# library(gganimate)
+library(utf8)
 
 options(scipen=2)
 ```
 
-Source: https://opendata.ecdc.europa.eu/covid19/
+Pandemic data source: European Centre for Disease Control https://opendata.ecdc.europa.eu/covid19/
 
+Detailed European maps: EUROSTAT NUTS2012
+http://ec.europa.eu/eurostat/web/gisco/geodata/reference-data/administrative-units-statisticalunits
 
 # Load current data
 
 ```{r download}
-# Load data
+# Get latest data
 ###########
 
-# ## Download latest data
-# GET("https://opendata.ecdc.europa.eu/covid19/agecasesnational/csv", authenticate(":", ":", type="ntlm"), write_disk(file.path(dirpath,'agecasesnational.csv'), overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/agecasesubnational/csv", authenticate(":", ":", type="ntlm"), write_disk(file.path(dirpath,'agecasesubnational.csv'), overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv", authenticate(":", ":", type="ntlm"), write_disk('file.path(dirpath,'casedistribution.csv'), overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/hospitalicuadmissionrates/csv", authenticate(":", ":", type="ntlm"), write_disk('file.path(dirpath,'hospitalicuadmissionrates.csv'), overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/movementindicators/csv", authenticate(":", ":", type="ntlm"), write_disk(file.path(dirpath,'movementindicators.csv'), overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/nationalcasedeath/csv", authenticate(":", ":", type="ntlm"), write_disk(file.path(dirpath,'nationalcasedeath.csv'), overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/subnationalcasedaily/csv", authenticate(":", ":", type="ntlm"), write_disk(file.path(dirpath,'subnationalcasedaily.csv'), overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/subnationalcaseweekly/csv", authenticate(":", ":", type="ntlm"), write_disk(file.path(dirpath,'subnationalcaseweekly.csv'), overwrite = TRUE))
-# GET("https://opendata.ecdc.europa.eu/covid19/testing/csv", authenticate(":", ":", type="ntlm"), write_disk(file.path(dirpath,'testing.csv'), overwrite = TRUE))
+if (refresh){
+  GET("https://opendata.ecdc.europa.eu/covid19/agecasesnational/csv", 
+      authenticate(":", ":", type="ntlm"),
+      write_disk(file.path(dirpath,'agecasesnational.csv'), overwrite = TRUE))
+  GET("https://opendata.ecdc.europa.eu/covid19/agecasesubnational/csv",
+      authenticate(":", ":", type="ntlm"),
+      write_disk(file.path(dirpath,'agecasesubnational.csv'), overwrite = TRUE))
+  GET("https://opendata.ecdc.europa.eu/covid19/casedistribution/csv",
+      authenticate(":", ":", type="ntlm"),
+      write_disk(file.path(dirpath,'casedistribution.csv'), overwrite = TRUE))
+  GET("https://opendata.ecdc.europa.eu/covid19/hospitalicuadmissionrates/csv",
+      authenticate(":", ":", type="ntlm"),
+      write_disk(file.path(dirpath,'hospitalicuadmissionrates.csv'), overwrite = TRUE))
+  GET("https://opendata.ecdc.europa.eu/covid19/movementindicators/csv",
+      authenticate(":", ":", type="ntlm"),
+      write_disk(file.path(dirpath,'movementindicators.csv'), overwrite = TRUE))
+  GET("https://opendata.ecdc.europa.eu/covid19/nationalcasedeath/csv",
+      authenticate(":", ":", type="ntlm"),
+      write_disk(file.path(dirpath,'nationalcasedeath.csv'), overwrite = TRUE))
+  GET("https://opendata.ecdc.europa.eu/covid19/subnationalcasedaily/csv",
+      authenticate(":", ":", type="ntlm"),
+      write_disk(file.path(dirpath,'subnationalcasedaily.csv'), overwrite = TRUE))
+  GET("https://opendata.ecdc.europa.eu/covid19/subnationalcaseweekly/csv",
+      authenticate(":", ":", type="ntlm"),
+      write_disk(file.path(dirpath,'subnationalcaseweekly.csv'), overwrite = TRUE))
+  GET("https://opendata.ecdc.europa.eu/covid19/testing/csv", 
+      authenticate(":", ":", type="ntlm"), 
+      write_disk(file.path(dirpath,'testing.csv'), overwrite = TRUE))
+}
 ```
 
 ```{r load}
@@ -109,9 +134,13 @@ subnatcaseweek[, year_week := sub('W', '', year_week)]
 testing[, year_week := sub('W', '', year_week)]
 
 
+
+
+
 # Map outlines
 ##############
 
+# Simple world map
 world_map <- as.data.table(map_data('world'))
 
 ## Code template
@@ -120,6 +149,38 @@ world_map <- as.data.table(map_data('world'))
 #   coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
 #   theme(panel.background=element_rect(fill=seablue),
 #         panel.grid=element_line(colour='white', size=0.1))
+
+# Finer-detailed EU map.
+# Covid data for some countries is recorded at NUTS level 2 and for some other at NUTS level 1.
+eu2 <- readOGR(file.path(dirpath, 'ref-nuts-2021-01m.shp', 'NUTS_RG_01M_2021_3035_LEVL_2.shp'))
+eu2@data['id'] <- as.character(seq.int(0, nrow(eu2@data)-1))
+eu2t <- as.data.table(tidy(eu2))
+eu2t <- merge(eu2t, eu2@data, by='id')
+
+eu1 <- readOGR(file.path(dirpath, 'ref-nuts-2021-01m.shp', 'NUTS_RG_01M_2021_3035_LEVL_1.shp'))
+eu1@data['id'] <- as.character(seq.int(0, nrow(eu1@data)-1))
+eu1t <- as.data.table(tidy(eu1))
+eu1t <- merge(eu1t, eu1@data, by='id')
+
+eut <- rbind(eu1t, eu2t)
+eut <- merge(eut, movement,
+             by.x='NUTS_ID', by.y='geo_id_final', all.x=FALSE, all.y=FALSE)
+setorder(eut, LEVL_CODE, NUTS_ID, order)
+
+# Overseas territories of France, Spain and Portugal force too much zoom-out. 
+# Remove them to focus on the continent.
+eut <- eut[! NUTS_ID %in% c('ES70', 'FRY1', 'FRY2', 'FRY3', 'FRY4', 'FRY5', 'PT2', 'PT3'),]
+# Fix illegal colour name
+eut[(colour=='Grey - no data'), colour := 'grey50']
+
+## Code template
+# ggplot(subDT, 
+#        aes(x=long, y=lat, group=group,
+#            fill=subnational_population)) +
+#   geom_polygon(colour='black')
+
+
+
 
 
 # Sanitize country names
@@ -190,7 +251,7 @@ mapify <- function(dt, country1='country', country2='region') {
 
 # Colours
 #########
-seablue <- '#CCEEFF'
+seablue <- 'black'
 case_col <- '#FF0000'
 death_col <- '#0055FF'
 hosp_col <- '#555500'
@@ -200,7 +261,6 @@ test_col <- '#005500'
 # Normalization
 popnorm= 1e6
 ```
-
 
 
 # Status
@@ -224,108 +284,349 @@ Based on the latest available date in the table. Some countries may be slower at
 
 ### Global
 
-```{r global, fig.height=12, fig.width=12}
+```{r global}
 subDT <- merge(world_map[, .(region, long, lat, group, order)], 
                casedist[year_week==endweek, .(countriesAndTerritories, popData2019, cases_weekly, deaths_weekly)], 
                by.x='region', by.y='countriesAndTerritories', all.x=TRUE, all.y=FALSE, allow.cartesian=TRUE)
+```
 
-
-
+```{r gcase, fig.height=12, fig.width=12}
 p1 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=cases_weekly)) +
-  geom_polygon(colour='black', size=0.01) +
+  geom_polygon(colour='transparent', size=0.01) +
   coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
   scale_fill_gradient(low='white', high=case_col, na.value='grey50') +
   theme(panel.background=element_rect(fill=seablue),
-        panel.grid=element_line(colour='white', size=0.1))
+        panel.grid=element_blank())
 
 p2 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=cases_weekly / popData2019 * popnorm)) +
-  geom_polygon(colour='black', size=0.01) +
+  geom_polygon(colour='transparent', size=0.01) +
   coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
   scale_fill_gradient(low='white', high=case_col, na.value='grey50', name=paste('cases_weekly\nper', popnorm)) +
   theme(panel.background=element_rect(fill=seablue),
-        panel.grid=element_line(colour='white', size=0.1))
+        panel.grid=element_blank())
 
 print( p1 / p2 )
-ggsave(file.path(dirpath,'world_cases.png'), plot = p1 / p2, device = png(), path = NULL, 
+
+ggsave(file.path(dirpath,'world_cases.png'), plot = p1 / p2, device = png(), 
        scale = 1, width = 12, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
+```
 
-
-
+```{r gdeath, fig.height=12, fig.width=12}
 p3 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=deaths_weekly)) +
-  geom_polygon(colour='black', size=0.01) +
+  geom_polygon(colour='transparent', size=0.01) +
   coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
   scale_fill_gradient(low='white', high=death_col, na.value='grey50') +
   theme(panel.background=element_rect(fill=seablue),
-        panel.grid=element_line(colour='white', size=0.1))
+        panel.grid=element_blank())
 
 p4 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=deaths_weekly / popData2019 * popnorm)) +
-  geom_polygon(colour='black', size=0.01) +
+  geom_polygon(colour='transparent', size=0.01) +
   coord_cartesian(ylim=c(-60, 80), xlim=c(-180,180)) + # Crop giant Antarctica and empty Arctic
   scale_fill_gradient(low='white', high=death_col, na.value='grey50', name=paste('deaths_weekly\nper', popnorm)) +
   theme(panel.background=element_rect(fill=seablue),
-        panel.grid=element_line(colour='white', size=0.1))
-
+        panel.grid=element_blank())
 
 print( p3 / p4 )
-ggsave(file.path(dirpath,'world_deaths.png'), plot = p3 / p4, device = png(), path = NULL, 
+
+ggsave(file.path(dirpath,'world_deaths.png'), plot = p3 / p4, device = png(),
        scale = 1, width = 12, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
 ```
 
 ### Europe
 
-```{r europe, fig.height=12, fig.width=10}
+```{r europe, fig.height=12, fig.width=9}
 subDT <- merge(world_map[, .(region, long, lat, group, order)], 
                casedist[year_week==endweek & continentExp=='Europe', .(countriesAndTerritories, popData2019, cases_weekly, deaths_weekly)], 
                by.x='region', by.y='countriesAndTerritories', all.x=TRUE, all.y=FALSE, allow.cartesian=TRUE)
+```
 
-
-
+```{r eucase, fig.height=12, fig.width=9}
 p1 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=cases_weekly)) +
-  geom_polygon(colour='black', size=0.01) +
+  geom_polygon(colour='transparent', size=0.01) +
   coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) +
   scale_fill_gradient(low='white', high=case_col, na.value='grey50') +
   theme(panel.background=element_rect(fill=seablue),
-        panel.grid=element_line(colour='white', size=0.1))
+        panel.grid=element_blank())
 
 p2 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=cases_weekly / popData2019 * popnorm)) +
-  geom_polygon(colour='black', size=0.01) +
+  geom_polygon(colour='transparent', size=0.01) +
   coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) +
   scale_fill_gradient(low='white', high=case_col, na.value='grey50', name=paste('cases_weekly\nper', popnorm)) +
   theme(panel.background=element_rect(fill=seablue),
-        panel.grid=element_line(colour='white', size=0.1))
+        panel.grid=element_blank())
 
 print( p1 / p2 )
-ggsave(file.path(dirpath,'europe_cases.png'), plot = p1 / p2, device = png(), path = NULL, 
+
+ggsave(file.path(dirpath,'europe_cases.png'), plot = p1 / p2, device = png(), 
        scale = 1, width = 10, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
+```
 
-
-
-
+```{r eudeath, fig.height=12, fig.width=9}
 p3 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=deaths_weekly)) +
-  geom_polygon(colour='black', size=0.01) +
+  geom_polygon(colour='transparent', size=0.01) +
   coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) +
   scale_fill_gradient(low='white', high=death_col, na.value='grey50') +
   theme(panel.background=element_rect(fill=seablue),
-        panel.grid=element_line(colour='white', size=0.1))
+        panel.grid=element_blank())
 
 p4 <- ggplot(subDT, 
        aes(x=long, y=lat, group=group, fill=deaths_weekly / popData2019 * popnorm)) +
-  geom_polygon(colour='black', size=0.01) +
+  geom_polygon(colour='transparent', size=0.01) +
   coord_cartesian(ylim=c(35, 70), xlim=c(-27,50)) +
   scale_fill_gradient(low='white', high=death_col, na.value='grey50', name=paste('deaths_weekly\nper', popnorm)) +
   theme(panel.background=element_rect(fill=seablue),
-        panel.grid=element_line(colour='white', size=0.1))
+        panel.grid=element_blank())
 
 print( p3 / p4 )
-ggsave(file.path(dirpath,'europe_deaths.png'), plot = p3 / p4, device = png(), path = NULL, 
+
+ggsave(file.path(dirpath,'europe_deaths.png'), plot = p3 / p4, device = png(),
        scale = 1, width = 10, height = 12, units = "cm", dpi = 300, limitsize = TRUE)
+```
+
+### EU
+
+```{r eu, fig.height=15, fig.width=15}
+p1 <- ggplot(eut,
+       aes(x=long, y=lat, group=group,
+           fill=subnational_cases_7)) +
+  geom_polygon(colour='transparent') +
+  scale_fill_gradient(low='white', high=case_col, name='Weekly Cases') +
+  labs(x=NULL, y=NULL) +
+  theme_void() +
+  theme(legend.position='left',
+        panel.background=element_rect(fill=seablue))
+
+p2 <- ggplot(eut,
+       aes(x=long, y=lat, group=group,
+           fill=subnational_cases_7 / subnational_population * 1e5)) +
+  geom_polygon(colour='transparent') +
+  scale_fill_gradient(low='white', high=case_col, name='Weekly Cases\nper 100K') +
+  labs(x=NULL, y=NULL) +
+  theme_void() +
+  theme(legend.position='right',
+        panel.background=element_rect(fill=seablue))
+
+p3 <- ggplot(eut,
+       aes(x=long, y=lat, group=group,
+           fill=(subnational_cases_14 - 2 * subnational_cases_7) / subnational_population * 1e5)) +
+  geom_polygon(colour='transparent') +
+  scale_fill_gradient2(low='magenta', mid='white', high='darkorange', midpoint=0, name='Weekly difference\nper 100K') +
+  labs(x=NULL, y=NULL) +
+  theme_void() +
+  theme(legend.position='right',
+        panel.background=element_rect(fill=seablue))
+
+p4 <- ggplot(eut,
+       aes(x=long, y=lat, group=group,
+           fill=colour)) +
+  geom_polygon(colour='transparent') +
+  scale_fill_identity() +
+  labs(x=NULL, y=NULL, title='Traffic light code') +
+  theme_void() +
+  theme(legend.position='left',
+        panel.background=element_rect(fill=seablue))
+
+print( (p4 | p3) / (p1 | p2) )
+
+ggsave(((p4|p3)/(p1|p2)), file=file.path(dirpath, 'Austria_sub.png'), device='png')
+```
+
+
+### Zoom on selected countries
+
+```{r austria, fig.height=5, fig.width=10}
+subDT <- merge(eu2t[CNTR_CODE=='AT',],
+             movement[country=='Austria',],
+             by.x='NUTS_ID', by.y='geo_id_final', all.x=TRUE)
+setorder(subDT, NUTS_ID, order)
+
+p1 <- ggplot(subDT,
+       aes(x=long, y=lat, group=group,
+           fill=subnational_cases_7)) +
+  geom_polygon(colour='black') +
+  scale_fill_gradient(low='white', high=case_col, name='Weekly Cases') +
+  labs(x=NULL, y=NULL) +
+  theme_void() +
+  theme(legend.position='left')
+
+p2 <- ggplot(subDT,
+       aes(x=long, y=lat, group=group,
+           fill=subnational_cases_7 / subnational_population * 1e5)) +
+  geom_polygon(colour='black') +
+  scale_fill_gradient(low='white', high=case_col, name='Weekly Cases\nper 100K') +
+  labs(x=NULL, y=NULL) +
+  theme_void() +
+  theme(legend.position='right')
+
+p3 <- ggplot(subDT,
+       aes(x=long, y=lat, group=group,
+           fill=(subnational_cases_14 - 2 * subnational_cases_7) / subnational_population * 1e5)) +
+  geom_polygon(colour='black') +
+  scale_fill_gradient2(low='magenta', mid='white', high='darkorange', midpoint=0, name='Weekly difference\nper 100K') +
+  labs(x=NULL, y=NULL) +
+  theme_void() +
+  theme(legend.position='right')
+
+p4 <- ggplot(subDT,
+       aes(x=long, y=lat, group=group,
+           fill=colour)) +
+  geom_polygon(colour='black') +
+  scale_fill_identity() +
+  labs(x=NULL, y=NULL, title='Traffic light code') +
+  theme_void() +
+  theme(legend.position='left')
+
+print( (p4 | p3) / (p1 | p2) )
+
+ggsave(((p4|p3)/(p1|p2)), file=file.path(dirpath, 'Austria_sub.png'), device='png')
+```
+
+```{r greece, fig.height=8, fig.width=10}
+subDT <- merge(eu2t[CNTR_CODE=='EL',],
+             movement[country=='Greece',],
+             by.x='NUTS_ID', by.y='geo_id_final', all.x=TRUE)
+setorder(subDT, NUTS_ID, order)
+
+p1 <- ggplot(subDT,
+       aes(x=long, y=lat, group=group,
+           fill=subnational_cases_7)) +
+  geom_polygon(colour='black') +
+  scale_fill_gradient(low='white', high=case_col, name='Weekly Cases') +
+  labs(x=NULL, y=NULL) +
+  theme_void() +
+  theme(legend.position='left')
+
+p2 <- ggplot(subDT,
+       aes(x=long, y=lat, group=group,
+           fill=subnational_cases_7 / subnational_population * 1e5)) +
+  geom_polygon(colour='black') +
+  scale_fill_gradient(low='white', high=case_col, name='Weekly Cases\nper 100K') +
+  labs(x=NULL, y=NULL) +
+  theme_void() +
+  theme(legend.position='right')
+
+p3 <- ggplot(subDT,
+       aes(x=long, y=lat, group=group,
+           fill=(subnational_cases_14 - 2 * subnational_cases_7) / subnational_population * 1e5)) +
+  geom_polygon(colour='black') +
+  scale_fill_gradient2(low='magenta', mid='white', high='darkorange', midpoint=0, name='Weekly difference\nper 100K') +
+  labs(x=NULL, y=NULL) +
+  theme_void() +
+  theme(legend.position='right')
+
+p4 <- ggplot(subDT,
+       aes(x=long, y=lat, group=group,
+           fill=colour)) +
+  geom_polygon(colour='black') +
+  scale_fill_identity() +
+  labs(x=NULL, y=NULL, title='Traffic light code') +
+  theme_void() +
+  theme(legend.position='left')
+
+print( (p4 | p3) / (p1 | p2) )
+
+ggsave(((p4|p3)/(p1|p2)), file=file.path(dirpath, 'Greece_sub.png'), device='png')
+```
+
+```{r italy, fig.height=11, fig.width=10}
+subDT <- merge(eu2t[CNTR_CODE=='IT',],
+             movement[country=='Italy',],
+             by.x='NUTS_ID', by.y='geo_id_final', all.x=TRUE)
+setorder(subDT, NUTS_ID, order)
+
+p1 <- ggplot(subDT,
+       aes(x=long, y=lat, group=group,
+           fill=subnational_cases_7)) +
+  geom_polygon(colour='black') +
+  scale_fill_gradient(low='white', high=case_col, name='Weekly Cases') +
+  labs(x=NULL, y=NULL) +
+  theme_void() +
+  theme(legend.position='left')
+
+p2 <- ggplot(subDT,
+       aes(x=long, y=lat, group=group,
+           fill=subnational_cases_7 / subnational_population * 1e5)) +
+  geom_polygon(colour='black') +
+  scale_fill_gradient(low='white', high=case_col, name='Weekly Cases\nper 100K') +
+  labs(x=NULL, y=NULL) +
+  theme_void() +
+  theme(legend.position='right')
+
+p3 <- ggplot(subDT,
+       aes(x=long, y=lat, group=group,
+           fill=(subnational_cases_14 - 2 * subnational_cases_7) / subnational_population * 1e5)) +
+  geom_polygon(colour='black') +
+  scale_fill_gradient2(low='magenta', mid='white', high='darkorange', midpoint=0, name='Weekly difference\nper 100K') +
+  labs(x=NULL, y=NULL) +
+  theme_void() +
+  theme(legend.position='right')
+
+p4 <- ggplot(subDT,
+       aes(x=long, y=lat, group=group,
+           fill=colour)) +
+  geom_polygon(colour='black') +
+  scale_fill_identity() +
+  labs(x=NULL, y=NULL, title='Traffic light code') +
+  theme_void() +
+  theme(legend.position='left')
+
+print( (p4 | p3) / (p1 | p2) )
+
+ggsave(((p4|p3)/(p1|p2)), file=file.path(dirpath, 'Italy_sub.png'), device='png')
+```
+
+```{r germany, fig.height=13, fig.width=10}
+subDT <- merge(eu1t[CNTR_CODE=='DE', ],
+             movement[country=='Germany', ],
+             by.x='NUTS_ID', by.y='geo_id_final', all.x=TRUE)
+setorder(subDT, NUTS_ID, order)
+
+p1 <- ggplot(subDT,
+       aes(x=long, y=lat, group=group,
+           fill=subnational_cases_7)) +
+  geom_polygon(colour='black') +
+  scale_fill_gradient(low='white', high=case_col, name='Weekly Cases') +
+  labs(x=NULL, y=NULL) +
+  theme_void() +
+  theme(legend.position='left')
+
+p2 <- ggplot(subDT,
+       aes(x=long, y=lat, group=group,
+           fill=subnational_cases_7 / subnational_population * 1e5)) +
+  geom_polygon(colour='black') +
+  scale_fill_gradient(low='white', high=case_col, name='Weekly Cases\nper 100K') +
+  labs(x=NULL, y=NULL) +
+  theme_void() +
+  theme(legend.position='right')
+
+p3 <- ggplot(subDT,
+       aes(x=long, y=lat, group=group,
+           fill=(subnational_cases_14 - 2 * subnational_cases_7) / subnational_population * 1e5)) +
+  geom_polygon(colour='black') +
+  scale_fill_gradient2(low='magenta', mid='white', high='darkorange', midpoint=0, name='Weekly difference\nper 100K') +
+  labs(x=NULL, y=NULL) +
+  theme_void() +
+  theme(legend.position='right')
+
+p4 <- ggplot(subDT,
+       aes(x=long, y=lat, group=group,
+           fill=colour)) +
+  geom_polygon(colour='black') +
+  scale_fill_identity() +
+  labs(x=NULL, y=NULL, title='Traffic light code') +
+  theme_void() +
+  theme(legend.position='left')
+
+print( (p4 | p3) / (p1 | p2) )
+
+ggsave(((p4|p3)/(p1|p2)), file=file.path(dirpath, 'Germany_sub.png'), device='png')
 ```
 
 
@@ -335,7 +636,7 @@ ggsave(file.path(dirpath,'europe_deaths.png'), plot = p3 / p4, device = png(), p
 
 #### By cases
 
-```{r wcase}
+```{r wtopcase}
 # Worse 10 (or more) by weekly cases
 subDT <- casedist[dateRep==endday & !is.na(cases_weekly), 
                   .(countriesAndTerritories, dateRep, cases_weekly, population_normalized = cases_weekly / popData2019 * popnorm)] [order(cases_weekly, decreasing=TRUE), ]
@@ -359,7 +660,7 @@ print( head(subDT, n) )
 
 #### By deaths
 
-```{r wdeath}
+```{r wtopdeath}
 # Worse 10 (or more) by weekly deaths
 subDT <- casedist[dateRep==endday & !is.na(deaths_weekly), 
                   .(countriesAndTerritories, dateRep, deaths_weekly, population_normalized = deaths_weekly / popData2019 * popnorm)] [order(deaths_weekly, decreasing=TRUE), ]
@@ -384,7 +685,7 @@ print( head(subDT, n) )
 
 #### By cases
 
-```{r eucase}
+```{r eutopcase}
 # Worse 10 (or more) by weekly cases
 subDT <- casedist[dateRep==endday & !is.na(cases_weekly) & continentExp == 'Europe', 
                   .(countriesAndTerritories, dateRep, cases_weekly, population_normalized = cases_weekly / popData2019 * popnorm)] [order(cases_weekly, decreasing=TRUE), ]
@@ -408,7 +709,7 @@ print( head(subDT, n) )
 
 #### By deaths
 
-```{r eudeath}
+```{r eutopdeath}
 # Worse 10 (or more) by weekly deaths
 subDT <- casedist[dateRep==endday & !is.na(deaths_weekly) & continentExp == 'Europe', 
                   .(countriesAndTerritories, dateRep, deaths_weekly, population_normalized = deaths_weekly / popData2019 * popnorm)] [order(deaths_weekly, decreasing=TRUE), ]
@@ -433,7 +734,7 @@ print( head(subDT, n) )
 
 #### By cases
 
-```{r eucase2}
+```{r eutopcase2}
 # Worse 10 (or more) by weekly cases
 subDT <- casedist[dateRep==endday & !is.na(cases_weekly) & continentExp == 'Europe', 
                   .(countriesAndTerritories, dateRep, cases_weekly, population_normalized = cases_weekly / popData2019 * popnorm)] [order(cases_weekly, decreasing=FALSE), ]
@@ -455,9 +756,9 @@ n <- max(10, nrow(subDT[sapply(subDT$population_normalized,
 print( head(subDT, n) )
 ```
 
-### By deaths
+#### By deaths
 
-```{r eudeath2}
+```{r eutopdeath2}
 # Worse 10 (or more) by weekly deaths
 subDT <- casedist[dateRep==endday & !is.na(deaths_weekly) & continentExp == 'Europe', 
                   .(countriesAndTerritories, dateRep, deaths_weekly, population_normalized = deaths_weekly / popData2019 * popnorm)] [order(deaths_weekly, decreasing=FALSE), ]
@@ -478,7 +779,7 @@ n <- max(10, nrow(subDT[sapply(subDT$population_normalized,
 print( head(subDT, n) )
 ```
 
-### Countries of personal interest
+## Countries of personal interest
 
 ```{r interest}
 print( 
@@ -490,13 +791,13 @@ print(
            .(countriesAndTerritories, dateRep, year_week, deaths_weekly, population_normalized = cases_weekly / popData2019 * popnorm)] )
 
 
-print( unique(
-  movement[country %in% family_countries & week==endweek, 
-           .(country, national_cases_7, national_positivity_rate)] ) )
-
-print( 
-  movement[country %in% family_countries & week==endweek, 
-           .(country, region, subnational_cases_7, subnational_cases_14, subnational_rate_14)] )
+# print( unique(
+#   movement[country %in% family_countries & week==endweek, 
+#            .(country, national_cases_7, national_positivity_rate)] ) )
+# 
+# print( 
+#   movement[country %in% family_countries & week==endweek, 
+#            .(country, region, subnational_rate_14)] )
 ```
 
 
@@ -762,6 +1063,4 @@ for (x in list(family_countries,
   ggsave(p, file=file.path(dirpath, paste(paste(x, collapse='-'), 'tline.png', sep='_')), device='png')
 }
 ```
-
-
 
