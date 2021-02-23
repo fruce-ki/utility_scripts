@@ -111,17 +111,6 @@ stopifnot(names(subnatcaseweek) == c('country', 'region_name', 'nuts_code', 'yea
 stopifnot(names(testing) == c('country', 'country_code', 'year_week', 'level', 'region', 'region_name', 'new_cases', 'tests_done', 'population', 'testing_rate', 'positivity_rate', 'testing_data_source'))
 
 
-# Countries to highlight
-########################
-
-homecountry = 'Austria'
-# Selected countries
-family_countries <- c('Austria', 'Italy', 'Greece', 'Luxembourg', 'Germany')
-neighbour_countries <- c('Switzerland', 'Slovakia', 'Slovenia', 'Czechia', 'Hungary')
-other_countries <- c('United_Kingdom', 'Spain', 'France', 'Belgium', 'United_States_of_America', 'Sweden')
-holiday_options=c('Croatia', 'Greece', 'Italy', 'Malta', 'Spain', 'Turkey', 'Egypt')
-
-
 # Make dates workable and uniform
 #################################
 
@@ -140,11 +129,9 @@ subnatcaseday[, date := as.Date(date)]
 subnatcaseweek[, year_week := sub('W', '', year_week)]
 # str(testing)
 testing[, year_week := sub('W', '', year_week)]
+```
 
-
-
-
-
+```{r loadmaps}
 # Map outlines
 ##############
 
@@ -166,8 +153,11 @@ world_map[region=='Bonaire', region := 'Bonaire, Saint Eustatius and Saba']
 world_map[region=='Sint_Eustatius', region := 'Bonaire, Saint Eustatius and Saba']
 world_map[region=='Saba', region := 'Bonaire, Saint Eustatius and Saba']
 natcasedeath[grepl('Virgin', country, fixed=TRUE), country := 'Virgin Islands']
-natcasedeath[country=='Virgin Islands', weekly_count := sum(weekly_count), by=year_week]
-natcasedeath[country=='Virgin Islands', population := sum(population), by=year_week]
+natcasedeath[country=='Virgin Islands', weekly_count := sum(weekly_count), by=c('year_week', 'indicator')]
+natcasedeath[country=='Virgin Islands', cumulative_count := sum(cumulative_count), by=c('year_week', 'indicator')]
+natcasedeath[country=='Virgin Islands', rate_14_day := mean(rate_14_day), by=c('year_week', 'indicator')]
+natcasedeath[country=='Virgin Islands', population := sum(population), by=c('year_week', 'indicator')]
+natcasedeath[country=='Virgin Islands', country_code := 'VIR']
 natcasedeath <- unique(natcasedeath)
 world_map[region=='Cape Verde', region := 'Cabo Verde']
 world_map[region=='Republic of Congo', region := 'Congo']
@@ -198,21 +188,28 @@ print( data.frame(Only_in_the_map = setdiff(
   unique(world_map$region), 
   unique(natcasedeath$country)) ) )
 
-
 # Overseas territories of France, Spain and Portugal force too much zoom-out. 
 # Remove them to focus on the continent.
 # eut <- eut[! NUTS_ID %in% c('ES70', 'FRY1', 'FRY2', 'FRY3', 'FRY4', 'FRY5', 'PT2', 'PT3'),]
 
-
-
-# Add coordinates to the data tables
+# Add global coordinates to the data tables
 ####################################
 
 # Merge on demand, to save on table size instead.
 mapify <- function(dt, country1='country', country2='region') {
   merge(dt, world_map, by.x=country1, by.y=country2, all.x=TRUE, all.y=FALSE, allow.cartesian=TRUE)
 }
+```
 
+```{r settings}
+# Countries to highlight
+########################
+homecountry = 'Austria'
+# Selected countries
+family_countries <- c('Austria', 'Italy', 'Greece', 'Luxembourg', 'Germany')
+neighbour_countries <- c('Switzerland', 'Slovakia', 'Slovenia', 'Czechia', 'Hungary')
+other_countries <- c('United Kingdom', 'Spain', 'France', 'Belgium', 'USA', 'Sweden')
+holiday_options=c('Croatia', 'Greece', 'Italy', 'Malta', 'Spain', 'Turkey', 'Egypt')
 
 # Colours
 #########
@@ -225,7 +222,6 @@ test_col <- '#005500'
 
 # Normalization
 popnorm= 1e5
-
 natcasedeath[, population_normalized := weekly_count / population * popnorm]
 ```
 
@@ -254,7 +250,7 @@ Based on the latest available date in the table. Some countries may be slower at
 
 ### Global
 
-```{r global, fig.height=9, fig.width=20}
+```{r global, fig.height=9, fig.width=22}
 subDT <- merge(world_map[, .(region, long, lat, group, order)], 
                dcast(natcasedeath[year_week==endweek,], country + population ~ indicator, value.var = 'weekly_count'), 
                by.x='region', by.y='country', all.x=TRUE, all.y=FALSE, allow.cartesian=TRUE)
@@ -315,12 +311,12 @@ p4 <- ggplot(subDT,
 print( (p1 | p3) / (p2 | p4) )
 
 ggsave(file.path(dirpath,'world.png'), plot = ( (p1 | p3) / (p2 | p4) ), device = png(),
-       scale = 1, width = 20, height = 9, units = "cm", dpi = 300, limitsize = TRUE)
+       scale = 1, width = 22, height = 9, units = "cm", dpi = 300, limitsize = TRUE)
 ```
 
 ### Europe
 
-```{r europe, fig.height=9, fig.width=10}
+```{r europe, fig.height=9, fig.width=11}
 subDT <- merge(world_map[, .(region, long, lat, group, order)], 
                dcast(natcasedeath[year_week==endweek & continent=='Europe',], country + population ~ indicator, value.var = 'weekly_count'), 
                by.x='region', by.y='country', all.x=TRUE, all.y=FALSE, allow.cartesian=TRUE)
@@ -329,7 +325,7 @@ p1 <- ggplot(subDT,
        aes(x=long, y=lat, group=group, fill=cases)) +
   geom_polygon(colour='transparent', size=0.01) +
   scale_fill_gradient(low='white', high=case_col, na.value='transparent', name='weekly cases') +
-  coord_map(projection='azequidistant',ylim=c(36, 68), xlim=c(-10,35)) +
+  coord_map(projection='azequidistant',ylim=c(36, 68), xlim=c(-8,33)) +
   theme_void() +
   theme(panel.background=element_rect(fill=seablue),
         panel.grid=element_line(colour='grey90'),
@@ -339,7 +335,7 @@ p2 <- ggplot(subDT,
        aes(x=long, y=lat, group=group, fill=cases / population * popnorm)) +
   geom_polygon(colour='transparent', size=0.01) +
   scale_fill_gradient(low='white', high=case_col, na.value='transparent', name=paste('weekly cases\nper', popnorm)) +
-  coord_map(projection='azequidistant',ylim=c(36, 68), xlim=c(-10,35)) +
+  coord_map(projection='azequidistant',ylim=c(36, 68), xlim=c(-8,33)) +
   theme_void() +
   theme(panel.background=element_rect(fill=seablue),
         panel.grid=element_line(colour='grey90'),
@@ -354,7 +350,7 @@ p3 <- ggplot(subDT,
        aes(x=long, y=lat, group=group, fill=deaths)) +
   geom_polygon(colour='transparent', size=0.01) +
   scale_fill_gradient(low='white', high=death_col, na.value='transparent', name='weekly deaths') +
-  coord_map(projection='azequidistant',ylim=c(36, 68), xlim=c(-10,35)) +
+  coord_map(projection='azequidistant',ylim=c(36, 68), xlim=c(-8,33)) +
   theme_void() +
   theme(panel.background=element_rect(fill=seablue),
         panel.grid=element_line(colour='grey90'),
@@ -364,7 +360,7 @@ p4 <- ggplot(subDT,
        aes(x=long, y=lat, group=group, fill=deaths / population * popnorm)) +
   geom_polygon(colour='transparent', size=0.01) +
   scale_fill_gradient(low='white', high=death_col, na.value='transparent', name=paste('weekly deaths\nper', popnorm)) +
-  coord_map(projection='azequidistant',ylim=c(36, 68), xlim=c(-10,35)) +
+  coord_map(projection='azequidistant',ylim=c(36, 68), xlim=c(-8,33)) +
   theme_void() +
   theme(panel.background=element_rect(fill=seablue),
         panel.grid=element_line(colour='grey90'),
@@ -378,12 +374,12 @@ p4 <- ggplot(subDT,
 print( (p1 | p3) / (p2 | p4) )
 
 ggsave(file.path(dirpath,'europe.png'), plot = ( (p1 | p3) / (p2 | p4) ), device = png(),
-       scale = 1, width = 10, height = 9, units = "cm", dpi = 300, limitsize = TRUE)
+       scale = 1, width = 11, height = 9, units = "cm", dpi = 300, limitsize = TRUE)
 ```
 
 ### EU
 
-```{r eu, fig.height=10, fig.width=10}
+```{r eu, fig.height=10, fig.width=11}
 subDT <- merge(eut, 
                subnatcaseweek[year_week==endweek,],
                by.x='NUTS_ID', by.y='nuts_code', all.x=FALSE, all.y=FALSE)
@@ -395,29 +391,8 @@ p1 <- ggplot(subDT,
            fill=rate_14_day_per_100k)) +
   geom_polygon(colour='transparent') +
   scale_fill_gradient(low='white', high=case_col, name='per 100000') +
-  coord_map(projection='azequidistant', xlim=c(-5, 33), ylim=c(36,70)) +
+  coord_map(projection='azequidistant', xlim=c(-8, 33), ylim=c(36,70)) +
   labs(title='weekly wases') +
-  theme_void() +
-  theme(legend.position='left',
-        panel.background=element_rect(fill=seablue),
-        panel.grid = element_line(colour='grey90'))
-
-
-
-subDT <- merge(eut, 
-               subnatcaseweek[year_week %in% recentweeks[c(2,3)],],
-               by.x='NUTS_ID', by.y='nuts_code', all.x=FALSE, all.y=FALSE)
-subDT[, diff := rate_14_day_per_100k - shift(rate_14_day_per_100k, type='lag'), by=country]
-setorder(subDT, LEVL_CODE, NUTS_ID, order)
-
-
-p2 <- ggplot(subDT[year_week==endweek,],
-       aes(x=long, y=lat, group=group,
-           fill=diff)) +
-  geom_polygon(colour='transparent') +
-  scale_fill_gradient2(low='forestgreen', mid='white', high='magenta', name='per 100000') +
-  coord_map(projection='azequidistant', xlim=c(-5, 33), ylim=c(36,70)) +
-  labs(title='weekly cases change', subtitle='from previous week') +
   theme_void() +
   theme(legend.position='left',
         panel.background=element_rect(fill=seablue),
@@ -428,17 +403,30 @@ p2 <- ggplot(subDT[year_week==endweek,],
 subDT <- merge(eut, 
                subnatcaseweek[year_week %in% recentweeks[c(1,3)],],
                by.x='NUTS_ID', by.y='nuts_code', all.x=FALSE, all.y=FALSE)
-subDT[, diff := rate_14_day_per_100k - shift(rate_14_day_per_100k, type='lag'), by=country]
+subDT[, diff1 := rate_14_day_per_100k - shift(rate_14_day_per_100k, type='lag'), by=country]
+subDT[, diff2 := rate_14_day_per_100k - shift(rate_14_day_per_100k, n=2, type='lag'), by=country]
 setorder(subDT, LEVL_CODE, NUTS_ID, order)
 
 
-p3 <- ggplot(subDT[year_week==endweek,],
+p2 <- ggplot(subDT[year_week==endweek,],
        aes(x=long, y=lat, group=group,
-           fill=diff)) +
+           fill=diff1)) +
   geom_polygon(colour='transparent') +
   scale_fill_gradient2(low='forestgreen', mid='white', high='magenta', name='per 100000') +
-  coord_map(projection='azequidistant', xlim=c(-5, 33), ylim=c(36,70)) +
-  labs(title='weekly cases change', subtitle='from 2 weeks before') +
+  coord_map(projection='azequidistant', xlim=c(-8, 33), ylim=c(36,70)) +
+  labs(title='weekly cases change', subtitle='compared to previous week') +
+  theme_void() +
+  theme(legend.position='left',
+        panel.background=element_rect(fill=seablue),
+        panel.grid = element_line(colour='grey90'))
+
+p3 <- ggplot(subDT[year_week==endweek,],
+       aes(x=long, y=lat, group=group,
+           fill=diff2)) +
+  geom_polygon(colour='transparent') +
+  scale_fill_gradient2(low='forestgreen', mid='white', high='magenta', name='per 100000') +
+  coord_map(projection='azequidistant', xlim=c(-8, 33), ylim=c(36,70)) +
+  labs(title='weekly cases change', subtitle='compared to 2 weeks ago') +
   theme_void() +
   theme(legend.position='right',
         panel.background=element_rect(fill=seablue),
@@ -457,7 +445,7 @@ p4 <- ggplot(subDT,
            fill=colour)) +
   geom_polygon(colour='transparent') +
   scale_fill_identity() +
-  coord_map(projection='azequidistant', xlim=c(-5, 33), ylim=c(36,70)) +
+  coord_map(projection='azequidistant', xlim=c(-8, 33), ylim=c(36,70)) +
   labs(title='"traffic light" risk level') +
   theme_void() +
   theme(legend.position='left',
@@ -468,7 +456,7 @@ p4 <- ggplot(subDT,
 print( (p1 | p4) / (p2 | p3) )
 
 ggsave(( (p1 | p4) / (p2 | p3) ), file=file.path(dirpath, 'EU_sub.png'), device = png(),
-       scale = 1, width = 10, height = 10, units = "cm", dpi = 300, limitsize = TRUE)
+       scale = 1, width = 11, height = 10, units = "cm", dpi = 300, limitsize = TRUE)
 ```
 
 
@@ -496,40 +484,32 @@ p1 <- ggplot(subDT,
 
 
 subDT <- merge(eut, 
-               subnatcaseweek[year_week %in% recentweeks[c(2,3)] & country=='Austria',],
+               subnatcaseweek[year_week %in% recentweeks[c(1,3)] & country=='Austria',],
                by.x='NUTS_ID', by.y='nuts_code', all.x=FALSE, all.y=FALSE)
-setorder(subDT, year_week, LEVL_CODE, NUTS_ID, order)
-subDT[, diff := rate_14_day_per_100k - shift(rate_14_day_per_100k, type='lag'), by=country]
+subDT[, diff1 := rate_14_day_per_100k - shift(rate_14_day_per_100k, type='lag'), by=country]
+subDT[, diff2 := rate_14_day_per_100k - shift(rate_14_day_per_100k, n=2, type='lag'), by=country]
+setorder(subDT, LEVL_CODE, NUTS_ID, order)
 
 
 p2 <- ggplot(subDT[year_week==endweek,],
        aes(x=long, y=lat, group=group,
-           fill=diff)) +
+           fill=diff1)) +
   geom_polygon(colour='transparent') +
   scale_fill_gradient2(low='forestgreen', mid='white', high='magenta', name='per 100000') +
   coord_map(projection='azequidistant') +
-  labs(title='weekly cases change', subtitle='from previous week') +
+  labs(title='weekly cases change', subtitle='compared to previous week') +
   theme_void() +
   theme(legend.position='left',
         panel.background=element_rect(fill=seablue),
         panel.grid = element_line(colour='grey90'))
 
-
-
-subDT <- merge(eut, 
-               subnatcaseweek[year_week %in% recentweeks[c(1,3)] & country=='Austria',],
-               by.x='NUTS_ID', by.y='nuts_code', all.x=FALSE, all.y=FALSE)
-setorder(subDT, year_week, LEVL_CODE, NUTS_ID, order)
-subDT[, diff := rate_14_day_per_100k - shift(rate_14_day_per_100k, type='lag'), by=country]
-
-
 p3 <- ggplot(subDT[year_week==endweek,],
        aes(x=long, y=lat, group=group,
-           fill=diff)) +
+           fill=diff2)) +
   geom_polygon(colour='transparent') +
   scale_fill_gradient2(low='forestgreen', mid='white', high='magenta', name='per 100000') +
   coord_map(projection='azequidistant') +
-  labs(title='weekly cases change', subtitle='from 2 weeks before') +
+  labs(title='weekly cases change', subtitle='compared to 2 weeks ago') +
   theme_void() +
   theme(legend.position='right',
         panel.background=element_rect(fill=seablue),
@@ -574,29 +554,8 @@ p1 <- ggplot(subDT,
            fill=rate_14_day_per_100k)) +
   geom_polygon(colour='transparent') +
   scale_fill_gradient(low='white', high=case_col, name='per 100000') +
-  coord_map(projection='azequidistant') +
+  coord_map(projection='azequidistant', xlim=c(20, 28.5)) +
   labs(title='weekly wases') +
-  theme_void() +
-  theme(legend.position='left',
-        panel.background=element_rect(fill=seablue),
-        panel.grid = element_line(colour='grey90'))
-
-
-
-subDT <- merge(eut, 
-               subnatcaseweek[year_week %in% recentweeks[c(2,3)] & country=='Greece',],
-               by.x='NUTS_ID', by.y='nuts_code', all.x=FALSE, all.y=FALSE)
-setorder(subDT, year_week, LEVL_CODE, NUTS_ID, order)
-subDT[, diff := rate_14_day_per_100k - shift(rate_14_day_per_100k, type='lag'), by=country]
-
-
-p2 <- ggplot(subDT[year_week==endweek,],
-       aes(x=long, y=lat, group=group,
-           fill=diff)) +
-  geom_polygon(colour='transparent') +
-  scale_fill_gradient2(low='forestgreen', mid='white', high='magenta', name='per 100000') +
-  coord_map(projection='azequidistant') +
-  labs(title='weekly cases change', subtitle='from previous week') +
   theme_void() +
   theme(legend.position='left',
         panel.background=element_rect(fill=seablue),
@@ -607,17 +566,30 @@ p2 <- ggplot(subDT[year_week==endweek,],
 subDT <- merge(eut, 
                subnatcaseweek[year_week %in% recentweeks[c(1,3)] & country=='Greece',],
                by.x='NUTS_ID', by.y='nuts_code', all.x=FALSE, all.y=FALSE)
-setorder(subDT, year_week, LEVL_CODE, NUTS_ID, order)
-subDT[, diff := rate_14_day_per_100k - shift(rate_14_day_per_100k, type='lag'), by=country]
+subDT[, diff1 := rate_14_day_per_100k - shift(rate_14_day_per_100k, type='lag'), by=country]
+subDT[, diff2 := rate_14_day_per_100k - shift(rate_14_day_per_100k, n=2, type='lag'), by=country]
+setorder(subDT, LEVL_CODE, NUTS_ID, order)
 
+
+p2 <- ggplot(subDT[year_week==endweek,],
+       aes(x=long, y=lat, group=group,
+           fill=diff1)) +
+  geom_polygon(colour='transparent') +
+  scale_fill_gradient2(low='forestgreen', mid='white', high='magenta', name='per 100000') +
+  coord_map(projection='azequidistant', xlim=c(20, 28.5)) +
+  labs(title='weekly cases change', subtitle='compared to previous week') +
+  theme_void() +
+  theme(legend.position='left',
+        panel.background=element_rect(fill=seablue),
+        panel.grid = element_line(colour='grey90'))
 
 p3 <- ggplot(subDT[year_week==endweek,],
        aes(x=long, y=lat, group=group,
-           fill=diff)) +
+           fill=diff2)) +
   geom_polygon(colour='transparent') +
   scale_fill_gradient2(low='forestgreen', mid='white', high='magenta', name='per 100000') +
-  coord_map(projection='azequidistant') +
-  labs(title='weekly cases change', subtitle='from 2 weeks before') +
+  coord_map(projection='azequidistant', xlim=c(20, 28.5)) +
+  labs(title='weekly cases change', subtitle='compared to 2 weeks ago') +
   theme_void() +
   theme(legend.position='right',
         panel.background=element_rect(fill=seablue),
@@ -636,7 +608,7 @@ p4 <- ggplot(subDT,
            fill=colour)) +
   geom_polygon(colour='transparent') +
   scale_fill_identity() +
-  coord_map(projection='azequidistant') +
+  coord_map(projection='azequidistant', xlim=c(20, 28.5)) +
   labs(title='"traffic light" risk level') +
   theme_void() +
   theme(legend.position='left',
@@ -672,40 +644,32 @@ p1 <- ggplot(subDT,
 
 
 subDT <- merge(eut, 
-               subnatcaseweek[year_week %in% recentweeks[c(2,3)] & country=='Italy',],
+               subnatcaseweek[year_week %in% recentweeks[c(1,3)] & country=='Italy',],
                by.x='NUTS_ID', by.y='nuts_code', all.x=FALSE, all.y=FALSE)
-setorder(subDT, year_week, LEVL_CODE, NUTS_ID, order)
-subDT[, diff := rate_14_day_per_100k - shift(rate_14_day_per_100k, type='lag'), by=country]
+subDT[, diff1 := rate_14_day_per_100k - shift(rate_14_day_per_100k, type='lag'), by=country]
+subDT[, diff2 := rate_14_day_per_100k - shift(rate_14_day_per_100k, n=2, type='lag'), by=country]
+setorder(subDT, LEVL_CODE, NUTS_ID, order)
 
 
 p2 <- ggplot(subDT[year_week==endweek,],
        aes(x=long, y=lat, group=group,
-           fill=diff)) +
+           fill=diff1)) +
   geom_polygon(colour='transparent') +
   scale_fill_gradient2(low='forestgreen', mid='white', high='magenta', name='per 100000') +
   coord_map(projection='azequidistant') +
-  labs(title='weekly cases change', subtitle='from previous week') +
+  labs(title='weekly cases change', subtitle='compared to previous week') +
   theme_void() +
   theme(legend.position='left',
         panel.background=element_rect(fill=seablue),
         panel.grid = element_line(colour='grey90'))
 
-
-
-subDT <- merge(eut, 
-               subnatcaseweek[year_week %in% recentweeks[c(1,3)] & country=='Italy',],
-               by.x='NUTS_ID', by.y='nuts_code', all.x=FALSE, all.y=FALSE)
-setorder(subDT, year_week, LEVL_CODE, NUTS_ID, order)
-subDT[, diff := rate_14_day_per_100k - shift(rate_14_day_per_100k, type='lag'), by=country]
-
-
 p3 <- ggplot(subDT[year_week==endweek,],
        aes(x=long, y=lat, group=group,
-           fill=diff)) +
+           fill=diff2)) +
   geom_polygon(colour='transparent') +
   scale_fill_gradient2(low='forestgreen', mid='white', high='magenta', name='per 100000') +
   coord_map(projection='azequidistant') +
-  labs(title='weekly cases change', subtitle='from 2 weeks before') +
+  labs(title='weekly cases change', subtitle='compared to 2 weeks ago') +
   theme_void() +
   theme(legend.position='right',
         panel.background=element_rect(fill=seablue),
@@ -760,40 +724,32 @@ p1 <- ggplot(subDT,
 
 
 subDT <- merge(eut, 
-               subnatcaseweek[year_week %in% recentweeks[c(2,3)] & country=='Germany',],
+               subnatcaseweek[year_week %in% recentweeks[c(1,3)] & country=='Germany',],
                by.x='NUTS_ID', by.y='nuts_code', all.x=FALSE, all.y=FALSE)
-setorder(subDT, year_week, LEVL_CODE, NUTS_ID, order)
-subDT[, diff := rate_14_day_per_100k - shift(rate_14_day_per_100k, type='lag'), by=country]
+subDT[, diff1 := rate_14_day_per_100k - shift(rate_14_day_per_100k, type='lag'), by=country]
+subDT[, diff2 := rate_14_day_per_100k - shift(rate_14_day_per_100k, n=2, type='lag'), by=country]
+setorder(subDT, LEVL_CODE, NUTS_ID, order)
 
 
 p2 <- ggplot(subDT[year_week==endweek,],
        aes(x=long, y=lat, group=group,
-           fill=diff)) +
+           fill=diff1)) +
   geom_polygon(colour='transparent') +
   scale_fill_gradient2(low='forestgreen', mid='white', high='magenta', name='per 100000') +
   coord_map(projection='azequidistant') +
-  labs(title='weekly cases change', subtitle='from previous week') +
+  labs(title='weekly cases change', subtitle='compared to previous week') +
   theme_void() +
   theme(legend.position='left',
         panel.background=element_rect(fill=seablue),
         panel.grid = element_line(colour='grey90'))
 
-
-
-subDT <- merge(eut, 
-               subnatcaseweek[year_week %in% recentweeks[c(1,3)] & country=='Germany',],
-               by.x='NUTS_ID', by.y='nuts_code', all.x=FALSE, all.y=FALSE)
-setorder(subDT, year_week, LEVL_CODE, NUTS_ID, order)
-subDT[, diff := rate_14_day_per_100k - shift(rate_14_day_per_100k, type='lag'), by=country]
-
-
 p3 <- ggplot(subDT[year_week==endweek,],
        aes(x=long, y=lat, group=group,
-           fill=diff)) +
+           fill=diff2)) +
   geom_polygon(colour='transparent') +
   scale_fill_gradient2(low='forestgreen', mid='white', high='magenta', name='per 100000') +
   coord_map(projection='azequidistant') +
-  labs(title='weekly cases change', subtitle='from 2 weeks before') +
+  labs(title='weekly cases change', subtitle='compared to 2 weeks ago') +
   theme_void() +
   theme(legend.position='right',
         panel.background=element_rect(fill=seablue),
@@ -861,7 +817,7 @@ print( head(subDT, n) )
 
 ```{r wtopdeath}
 # Worse 10 (or more) by weekly deaths
-subDT <- natcasedeath[year_week==endweek & !is.na(weekly_count) & indicator=='death', 
+subDT <- natcasedeath[year_week==endweek & !is.na(weekly_count) & indicator=='deaths', 
                   .(country, weekly_count, population_normalized = weekly_count / population * popnorm)] [order(weekly_count, decreasing=TRUE), ] [!grepl('(total)', country),]
 
 n <- max(10, nrow(subDT[sapply(subDT$weekly_count, 
@@ -938,7 +894,7 @@ print( head(subDT, n) )
 ```{r eutopcase2}
 # Best 10 (or more) by weekly cases
 subDT <- natcasedeath[year_week==endweek & !is.na(weekly_count) & indicator=='cases' & continent=='Europe', 
-                  .(country, weekly_count, population_normalized = weekly_count / population * popnorm)] [order(weekly_count, decreasing=TRUE), ] [!grepl('(total)', country),]
+                  .(country, weekly_count, population_normalized = weekly_count / population * popnorm)] [order(weekly_count, decreasing=FALSE), ] [!grepl('(total)', country),]
 
 n <- max(10, nrow(subDT[sapply(subDT$weekly_count, 
                                function(x) { 
@@ -962,7 +918,7 @@ print( head(subDT, n) )
 ```{r eutopdeath2}
 # Best 10 (or more) by weekly deaths
 subDT <- natcasedeath[year_week==endweek & !is.na(weekly_count) & indicator=='deaths' & continent=='Europe', 
-                  .(country, weekly_count, population_normalized = weekly_count / population * popnorm)] [order(weekly_count, decreasing=TRUE), ] [!grepl('(total)', country),]
+                  .(country, weekly_count, population_normalized = weekly_count / population * popnorm)] [order(weekly_count, decreasing=FALSE), ] [!grepl('(total)', country),]
 
 n <- max(10, nrow(subDT[sapply(subDT$weekly_count, 
                                function(x) { 
@@ -1270,6 +1226,7 @@ tline <- function(selcnt=family_countries){
                colour=week, group=country)) +
     facet_grid(country ~ ., scales='fixed') +
     geom_path(size=1) +
+    coord_cartesian(ylim=c(0,NA)) +
     scale_colour_gradientn(colours=c('black','black', 'purple', case_col), guide='none') +
     labs(title='Timeline', y=paste('Weekly cases per', popnorm)) +
     theme_bw()
@@ -1280,6 +1237,7 @@ tline <- function(selcnt=family_countries){
                colour=week, group=country)) +
     facet_grid(country ~ ., scales='fixed') +
     geom_path(size=1) +
+    coord_cartesian(ylim=c(0,NA)) +
     scale_colour_gradientn(colours=c('black','black', 'purple', death_col), guide='none') +
     labs(title='Timeline', y=paste('Weekly deaths per', popnorm)) +
     theme_bw()
@@ -1308,6 +1266,7 @@ subtline <- function(selcnt='Austria'){
                colour=region_name)) +
     facet_wrap(~ region_name, scales='fixed') +
     geom_path(size=1) +
+    coord_cartesian(ylim=c(0,NA)) +
     labs(title='Timeline', y=paste('Weekly cases per', popnorm)) +
     theme_bw() +
     theme(legend.position='none')
