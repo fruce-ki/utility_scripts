@@ -18,20 +18,22 @@ dunk=1
 post=1
 umilen=0
 mm_umi=0
-while getopts 'i:r:b:a:o:q:t:T:x:u:U:l:123' flag; do
+debam=1
+while getopts 'i:r:b:a:o:q:t:T:x:u:U:l:F123' flag; do
   case "${flag}" in
-    i) bam="${OPTARG}" ;;			# folder of BAMs
-    r) ref="${OPTARG}" ;;			# whole reference fasta for alignment
-    b) bed="${OPTARG}" ;;			# bed of 3'UTRs (for map filtering)
-    a) annot="${OPTARG}" ;;			# GTF annotation (for counting)
-    o) outdir="${OPTARG}" ;;		# output directory
-    q) minq="${OPTARG}" ;;			# minimum alignement quality (1)
-    t) trim3="${OPTARG}" ;;         # cutadapt trim this many bases from end of reads
-    T) trim5="${OPTARG}" ;;         # cutadapt trim this many bases from start of reads. Applied *after* UMI extraction, if any.
-    x) xref="${OPTARG}" ;;         # table with additional IDs
-    u) umilen="${OPTARG}" ;;         # Length of UMI at 5' of read. If non-zero, will be trimmed and used to deduplicate
-    U) mm_umi="${OPTARG}" ;;         # Mismatch allowance in UMI
-    l) rlen="${OPTARG}" ;;         # Read length
+    i) bam="${OPTARG}" ;;	            # folder of BAMs
+    F) debam=0;;                            # files are already fastq
+    r) ref="${OPTARG}" ;;	            # whole reference fasta for alignment
+    b) bed="${OPTARG}" ;;		    # bed of 3'UTRs (for map filtering)
+    a) annot="${OPTARG}" ;;		    # GTF annotation (for counting)
+    o) outdir="${OPTARG}" ;;		    # output directory
+    q) minq="${OPTARG}" ;;	            # minimum alignement quality (1)
+    t) trim3="${OPTARG}" ;;                 # cutadapt trim this many bases from end of reads
+    T) trim5="${OPTARG}" ;;                 # cutadapt trim this many bases from start of reads. Applied *after* UMI extraction, if any.
+    x) xref="${OPTARG}" ;;                  # table with additional IDs
+    u) umilen="${OPTARG}" ;;                # Length of UMI at 5' of read. If non-zero, will be trimmed and used to deduplicate
+    U) mm_umi="${OPTARG}" ;;                # Mismatch allowance in UMI
+    l) rlen="${OPTARG}" ;;                  # Read length
     1) pre=0 ;;         		    # Skip bam 2 FQ and trim
     2) dunk=0 ;;        		    # Skip slamdunk
     3) post=0 ;;		            # Skip post-alignemnt stuff
@@ -77,11 +79,17 @@ mkdir -p ${outdir}/fastqc_pre ${outdir}/fastqc_post ${outdir}/fastq ${outdir}/fa
 
 
 if [ "$pre" -eq 1 ]; then
-    echo "$bam - BAM2FQ"
-    fileutilities.py T $bam --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J bam2fq ,--get-user-env ,--wrap "'samtools bam2fq -0 ${outdir}/fastq/{bas}.fastq {abs}'"
-    wait_for_jobs bam2fq
-    fileutilities.py T ${outdir}/fastq --dir 'fastq$|fq$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J fqzip ,--get-user-env ,--wrap "'gzip -f {abs}'"
-    wait_for_jobs fqzip
+    if ["$debam" -eq 1 ]; then
+        echo "$bam - BAM2FQ"
+        fileutilities.py T $bam --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J bam2fq ,--get-user-env ,--wrap "'samtools bam2fq -0 ${outdir}/fastq/{bas}.fastq {abs}'"
+        wait_for_jobs bam2fq
+        fileutilities.py T ${outdir}/fastq --dir 'fastq$|fq$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J fqzip ,--get-user-env ,--wrap "'gzip -f {abs}'"
+        wait_for_jobs fqzip
+    else
+        fileutilities.py T $bam --dir 'fastq$|fq$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J fqzip ,--get-user-env ,--wrap "'gzip -f {abs}'"
+        wait_for_jobs fqzip
+        fileutilities.py T $bam --dir 'fastq.gz$|fq.gz$' | fileutilities.py P --link "${outdir}/fastq/"
+    fi
 
     fqdir="${outdir}/fastq/"
 
