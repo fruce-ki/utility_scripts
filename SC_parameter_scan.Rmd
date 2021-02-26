@@ -451,7 +451,7 @@ for (nv in nvariables) {
 	print( (p1 + labs(subtitle=nv)) + p2 + p3 + plot_layout(guides='collect'))
 
 	# UMAP
-	for (dl in c(dimlim[dimlim <= ndims], ndims)) {
+	for (dl in unique(c(dimlim[dimlim <= ndims], ndims))) {
 		for (nn in nneighbours){
 			message(paste(nv,dl,nn))
 			l <- lapply( mindist, function(md){
