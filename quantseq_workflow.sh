@@ -101,7 +101,7 @@ if [ "$pre" -eq 1 ]; then
         repl() {        # Create a UMI pattern of appropriate length.
             printf "N"'%.s' $(seq 1 $1);
         }
-        fileutilities.py T ${fqdir} --dir 'fastq.gz$|fq.gz$' | fileutilities.py P --loop sbatch ,-J umitrim ,-o /dev/null ,-e /dev/null umi_tools extract ,-I {abs} ,-S ${outdir}/dedup/{cor}_umi-clipped.fastq.gz ,-p $(repl $umilen) ,--extract-method=string ,--quality-encoding=phred33
+        fileutilities.py T ${fqdir} --dir 'fastq.gz$|fq.gz$' | fileutilities.py P --loop sbatch ,--qos=medium ,-J umitrim ,-o /dev/null ,-e /dev/null umi_tools extract ,-I {abs} ,-S ${outdir}/dedup/{cor}_umi-clipped.fastq.gz ,-p $(repl $umilen) ,--extract-method=string ,--quality-encoding=phred33
         wait_for_jobs umitrim
 
         fqdir="${outdir}/dedup/"
@@ -157,12 +157,12 @@ if [ "$dunk" -eq 1 ]; then
 
         echo ""
         echo "$bam - Removing duplicates"
-        fileutilities.py T ${outdir}/dedup/map_sorted/*.bam --loop sbatch ,-J umidedup ,-o /dev/null ,-e /dev/null umi_tools dedup ,-I {abs} ,-S ${outdir}/dedup/{cor}.deduped.bam ,-L ${outdir}/dedup/{cor}_dedup.log  ,--edit-distance-threshold=${mm_umi}
+        fileutilities.py T ${outdir}/dedup/map_sorted/*.bam --loop sbatch ,--qos=medium ,-J umidedup ,-o /dev/null ,-e /dev/null umi_tools dedup ,-I {abs} ,-S ${outdir}/dedup/{cor}.deduped.bam ,-L ${outdir}/dedup/{cor}_dedup.log  ,--edit-distance-threshold=${mm_umi}
         wait_for_jobs umidedup
     fi
 fi
 
-if [ "$umilen" -gt 0 ]; then    # So that it points correctly even if I'm reapeating only the 3rd step
+if [ "$umilen" -gt 0 ]; then    # So that it points correctly even if I'm repeating only the 3rd step
   bamdir="${outdir}/dedup"
 fi
 

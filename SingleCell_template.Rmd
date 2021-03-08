@@ -1,0 +1,990 @@
+---
+title: "Single Cell analysis report"
+author: "Kimon Froussios"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+    toc_depth: 4
+    collapsed: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r start}
+library(Seurat)
+library(ggplot2)
+library(ggExtra)
+library(patchwork)
+library(dplyr)
+library(tidyr)
+# library(future)
+require(cowplot)
+require(ggrepel)
+
+# plan("multiprocess", workers = 4)
+# options(future.rng.onMisuse = "ignore")  #, future.globals.maxSize = 2000 * 1024^2)
+
+datadirs <- c(control = '~/Desktop/markus_SC/control/raw_feature_bc_matrix/',
+							Kdm2b = '~/Desktop/markus_SC/kdm2b/raw_feature_bc_matrix',
+							Rc3h1 = '~/Desktop/markus_SC/Rc3h1/raw_feature_bc_matrix')
+
+outdir <- '~/Desktop/markus_SC'
+projectname = 'OT1_Kdm2b-Rc3h1'
+
+# Checkpoints
+imported <- FALSE
+filtered <- FALSE
+ccadjusted <- FALSE
+finalized <- FALSE
+DEtabled <- FALSE
+
+imported <- TRUE
+filtered <- TRUE
+ccadjusted <- TRUE
+finalized <- TRUE
+DEtabled <- TRUE
+
+# Extra steps
+custom_filter <- FALSE
+regress_cycle <- FALSE
+scanparam <- FALSE
+
+custom_filter <- TRUE
+regress_cycle <- TRUE
+# scanparam <- TRUE
+
+# Keep number of genes in each group low, otherwise multi-plots get excessively squished and useless.
+# USER-INPUT
+priors <- list(# tcell=c('Cd3d'),
+							 # transgenes=c('Blasti_variant','GFP_variant','hSpCas9','Hygro_variant','Luc2','mCherry','Neo',
+							 # 						  'Puro_variant','rtTA3','LTR3_LENC','mirE_polyA_LENC','NLS_Cre','ERT2','IRES'),
+							 exhaustion=c("Entpd1","Havcr2","Tigit","Lag3", "Pdcd1","Batf","Tox","Id2","Ctla4"),
+							 effectors=c("Ccl3","Prf1","Fasl","Gzmb","Gzmk","Ccl5"),
+							 naive_memory=c("Ly6c2","Cxcr3","Id3","Slamf6", "Il2ra","Xcl1","Cd44","Tcf7", "Ccr7","S1pr1","Lef1","Il7r","Sell"),
+							 Kdm2b_up=c("Osr2","Cd24a","Onecut2","Fbxo2"),
+							 Rc3h1_up=c("Icos","Ctla4","Tnf","Il10", "Ccl5","Lfng","Tm2d3","Polr1c")
+							 )
+```
+
+```{r functions}
+plot_number_of_features <- function(DF = so@meta.data) {
+		p1 <- ggplot(DF,
+					 aes(x=Source, y=nFeature_RNA, fill=Source)) +
+			geom_jitter(width=0.3, height=0, size=rel(0.5), shape=16, alpha=0.4, colour='grey50') +
+			geom_violin(draw_quantiles=c(0.25, 0.5, 0.75), colour='black', alpha=0.2, size=rel(0.5)) +
+			coord_cartesian(ylim=c(0,NA)) +
+			guides(colour=FALSE) +
+			labs(x=NULL, y=NULL, title='# of Genes') +
+			theme_light() + 
+			theme(axis.text.x=element_text(angle=45, hjust=1, vjust=1),
+						legend.position='none')
+		
+		p2 <- ggplot(DF,
+					 aes(x=Source, y=nCount_RNA, fill=Source)) +
+			geom_jitter(width=0.3, height=0, size=rel(0.5), shape=16, alpha=0.4, colour='grey50') +
+			geom_violin(draw_quantiles=c(0.25, 0.5, 0.75), colour='black', alpha=0.2, size=rel(0.5)) +
+			coord_cartesian(ylim=c(0,NA)) +
+			guides(colour=FALSE) +
+			labs(x=NULL, y=NULL, title='# of Molecules') +
+			theme_light() + 
+			theme(axis.text.x=element_text(angle=45, hjust=1, vjust=1),
+						legend.position='none')
+		
+		p3 <- ggplot(DF,
+					 aes(x=Source, y=percent.mt, fill=Source)) +
+			# geom_hline(yintercept=10, colour='red') +
+			geom_jitter(width=0.3, height=0, size=rel(0.5), shape=16, alpha=0.4, colour='grey50') +
+			geom_violin(draw_quantiles=c(0.25, 0.5, 0.75), colour='black', alpha=0.2, size=rel(0.5)) +
+			coord_cartesian(ylim=c(0,NA)) +
+			guides(colour=FALSE) +
+			labs(x=NULL, y=NULL, title='% of Mt contamination') +
+			theme_light() + 
+			theme(axis.text.x=element_text(angle=45, hjust=1, vjust=1),
+						legend.position='none')
+		
+		return( list(p1, p2, p3) )
+	}
+
+plot_qc_correlations <- function(DF=so@meta.data){
+		n <- unique(DF$Source)
+		DF$Source <- factor(DF$Source, ordered=TRUE, labels=n)
+		
+		featcor <- function(f1='nFeature_RNA', f2='percent.mt'){
+			paste(vapply(n, function(x) {
+							sel <- DF$Source %in% x
+							round(cor(DF[, f1][sel], DF[, f2][sel]), 2)
+						}, numeric(1)),
+						collapse=', ')
+		}
+		
+		p1 <- ggplot(DF,
+					 aes(x=nFeature_RNA, y=percent.mt, colour=Source)) +
+			facet_grid( . ~ Source) +
+			geom_point(shape=16, alpha=0.5, size=rel(0.5)) +
+			scale_colour_discrete(name='Sample', guide='none') + 
+			guides(colour='none') +
+			coord_cartesian(ylim=c(0,NA), xlim=c(0,NA)) +
+			labs(x='# of Genes', y='% of Mt contamination', title='Correlation', subtitle=featcor('nFeature_RNA', 'percent.mt')) +
+			theme_classic() + 
+			theme(axis.text.x=element_text(angle=90, hjust=0.5, vjust=1))
+		
+		p2 <- ggplot(DF,
+					 aes(x=nCount_RNA, y=percent.mt, colour=Source)) +
+			facet_grid( . ~ Source) +
+			geom_point(shape=16, alpha=0.5, size=rel(0.5)) +
+			scale_colour_discrete(name='Sample', guide='none') + 
+			guides(colour='none') +
+			coord_cartesian(ylim=c(0,NA), xlim=c(0,NA)) +
+			labs(x='# of Molecules', y='% of Mt contamination', title='Correlation', subtitle=featcor('nCount_RNA', 'percent.mt')) +
+			theme_classic() + 
+			theme(axis.text.x=element_text(angle=90, hjust=0.5, vjust=1))
+		
+		p3 <- ggplot(DF,
+					 aes(x=nCount_RNA, y=nFeature_RNA, colour=Source)) +
+			facet_grid( . ~ Source) +
+			geom_point(shape=16, alpha=0.5, size=rel(0.5)) +
+			scale_colour_discrete(name='Sample', guide='none') + 
+			coord_cartesian(ylim=c(0,NA), xlim=c(0,NA)) +
+			labs(x='# of Molecules', y='# of Genes', title='Correlation', subtitle=featcor('nFeature_RNA', 'nCount_RNA')) +
+			theme_classic() + 
+			theme(axis.text.x=element_text(angle=90, hjust=0.5, vjust=1))
+		
+		
+		return( list(p1, p2, p3) )
+}
+
+
+scree <- function (so) {
+	pc_vars <- Stdev(object = so, reduction = 'pca') ^ 2  # From stdevs to % of total variance.
+	pc_vars <- 100 * pc_vars / sum(pc_vars)
+	ndims <- length(pc_vars)
+	pc_vars <- data.frame(PC = 1:ndims, var = pc_vars)
+	
+	p1 <- ggplot(data = pc_vars,
+							 aes(x=PC, y=var)) +
+				    geom_bar(stat='identity', width=0.5) +
+						geom_text(aes(label=round(var,2), y=-2, x=PC), angle=90, hjust=0, size=rel(2.2)) +
+						coord_cartesian(ylim=c(-5, 1.2 * max(pc_vars$var)), xlim=c(1, ndims)) +
+						scale_y_continuous(expand=c(0,0)) +
+				    labs(x='PC', y='% Variance') +
+					  theme_classic()
+	
+	return( p1 )
+}
+
+# Rolling slice, to limit the number of genes per plot.
+rollslice <- function(A,B) {
+  l <- length(A)
+  s <- as.integer(l/B)  # number of slices
+  if (s * B < l) {
+    s <- s + 1
+  }
+  
+  lapply(1:s, function(D){
+    ((D-1)*B + 1):min(l, D*B)
+  })
+}
+
+#
+# SEARCH KEY for parameter values requiring manual decision: "USER-INPUT"
+#
+
+```
+
+
+
+# Import data
+
+```{r import}
+if (!imported) {
+	mincells = 3      # USER_INPUT
+	minfeat = 200     # USER_INPUT
+
+	message(paste('Data:', paste(datadirs, collapse=', ')))
+	message(paste('Min # cells:', mincells))
+	message(paste('Min # features per cell at import:', minfeat))
+
+	# Import data pre-processed with 10X CellRanger
+	CR <- Read10X(data.dir=datadirs, gene.column=2, unique.features=TRUE, strip.suffix = TRUE) 
+	
+	# Create seurat object.
+	# Inconsistent nesting structure created by Read10X. If multiple measurement types are integrated, there is an extra nesting layer, that is not kept when there is only one measurement type.
+	if ('Gene Expression' %in% names(CR)){
+		# Multiple measurement types (ie, RNA and protein) in the imported data
+		so <- CreateSeuratObject(counts = CR[`Gene Expression`], 
+														 min.cells=mincells, project=projectname, min.features=minfeat)
+	} else {
+		# Just a single measurement type (probably "Gene Expression" ?)
+		so <- CreateSeuratObject(counts = CR, min.cells=mincells, project=projectname, min.features=minfeat)
+	}
+	
+	so@meta.data[["Source"]] = so@meta.data[["orig.ident"]]
+	
+	# Checkpoint.
+	saveRDS(so, file = file.path(outdir, paste0(projectname, '_imported.RDS')))
+	imported <- TRUE
+	
+} else {
+	
+	so <- readRDS(file = file.path(outdir, paste0(projectname, '_imported.RDS')))
+}
+
+print( so )
+```
+
+
+
+# QC
+
+## Input summary
+
+```{r qc_input, fig.width=15, fig.height=8}
+if (!filtered) {
+	
+	## The number of unique genes and total molecules are automatically calculated during CreateSeuratObject
+	
+	# Contamination with mitochondrial genes
+	so[['percent.mt']] <- PercentageFeatureSet(so, pattern='^MT-|^mt-|^Mt-')
+	
+	# Count summaries.
+	for (s in unique(so@meta.data$Source)){
+		message(s)
+		print( summary(so@meta.data[so@meta.data$Source==s, c('nFeature_RNA', 'nCount_RNA', 'percent.mt')]) )
+	}
+	
+	l <- plot_number_of_features(so@meta.data)
+	print( l[[1]] + l[[2]] + l[[3]] + plot_layout(guides='collect'))
+	
+	# Correlations. Only number of molecules and number of genes should correlate.
+	l <- plot_qc_correlations(so@meta.data)
+	print( l[[1]] + l[[2]] + l[[3]] + plot_layout(guides='collect'))
+	
+}
+```
+
+## Quality filter
+
+```{r qc_filter}
+if (!filtered) {
+	
+	# Remove unwanted cells
+	minfeat <- 1000    # USER-INPUT
+	maxfeat <- 6000    # USER-INPUT
+	maxmt <- 10        # USER-INPUT
+	
+	message(paste('Selected lower threshold:', minfeat, 'features'))
+	message(paste('Selected upper cutoff:', maxfeat, 'features'))
+	message(paste('Max mitochondrial contamination allowed:', maxmt, '%'))
+	
+	so <- subset(so, subset = nFeature_RNA > minfeat & nFeature_RNA < maxfeat & percent.mt < maxmt)
+	
+	# Don't save here. Save after scaling the data.
+	# saveRDS(so, file = file.path(outdir, paste0(projectname, '_filtered.RDS')))
+	# filtered <- TRUE
+	
+} else {
+	
+	message("Using pre-processed data that's already filtered.")
+	so <- readRDS(file = file.path(outdir, paste0(projectname, '_filtered.RDS')))
+}
+```
+
+```{r qc_filtered, fig.width=15, fig.height=8}
+# Count summaries.
+for (s in unique(so@meta.data$Source)){
+	message(s)
+	print( summary(so@meta.data[so@meta.data$Source==s, c('nFeature_RNA', 'nCount_RNA', 'percent.mt')]) )
+}
+	
+l <- plot_number_of_features(so@meta.data)
+print( l[[1]] + l[[2]] + l[[3]] + plot_layout(guides='collect'))
+
+l <- plot_qc_correlations(so@meta.data)
+print( l[[1]] + l[[2]] + l[[3]] + plot_layout(guides='collect'))
+```
+
+## Scaling
+
+```{r scale}
+# Cell cycle genes.            # USER_INPUT
+# Mouse, compiled by Markus
+s.genes <- c('Mcm4','Exo1','Slbp','Gmnn','Cdc45','Msh2','Mcm6','Rrm2','Pold3','Blm','Ubr7','Mcm5','Clspn','Hells',
+						 'Nasp','Rpa2','Rad51ap1','Tyms','Rrm1','Rfc2','Prim1','Brip1','Usp1','Ung','Pola1','Mcm2','Fen1','Tipin',
+						 'Pcna','Cdca7','Uhrf1','Casp8ap2','Cdc6','Dscc1','Wdr76','E2f8','Dtl','Ccne2','Atad2','Gins2','Chaf1b',
+						 'Pcna-ps2')       
+g2m.genes <- c('Nuf2','Psrc1','Ncapd2','Ccnb2','Smc4','Lbr','Tacc3','Cenpa','Kif23','Cdca2','Anp32e','G2e3','Cdca3',
+							 'Anln','Cenpe','Gas2l3','Tubb4b','Cenpf','Dlgap5','Hjurp','Cks1brt','Gtse1','Bub1','Birc5','Ube2c',
+							 'Rangap1','Hmmr','Ect2','Tpx2','Ckap5','Cbx5','Nek2','Ttk','Cdca8','Nusap1','Ctcf','Cdc20','Cks2',
+							 'Mki67','Tmpo','Ckap2l','Aurkb','Kif2c','Cdk1','Kif20b','Top2a','Aurka','Ckap2','Hmgb2','Cdc25c',
+							 'Ndc80','Kif11')
+
+if (!filtered){
+	normscalefactor=1e6    # USER-INPUT
+
+	# Normalize counts across cells
+	message(paste('Log-normalization to:', normscalefactor))
+	so <- NormalizeData(so, normalization.method = "LogNormalize", scale.factor = normscalefactor)
+	
+	# Standardize expressions for PCA
+	so <- ScaleData(so, features = rownames(so))
+	
+	# Identify cell cycle phase of each cell
+	if (!is.null(s.genes) && !is.null(g2m.genes)) {
+		so <- CellCycleScoring(so, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+		so$CC.Difference <- so$S.Score - so$G2M.Score
+	}
+	
+	if (!custom_filter) {
+		# Checkpoint.
+		saveRDS(so, file = file.path(outdir, paste0(projectname, '_filtered.RDS')))
+		filtered <- TRUE
+	}
+}
+```
+
+## Cell cycle phases
+
+```{r qc_cc}
+# CC phase summary
+for (s in unique(so@meta.data$Source)){
+	message(s)
+	print( summary(so@meta.data[so@meta.data$Source==s, c('Source', 'Phase')]) )
+}
+```
+
+## Custom filters
+
+```{r custom_filter, fig.width=15, fig.height=8}
+if (!custom_filter) {
+	
+	message("No additional filtering specified.")
+	
+} else {
+	
+	if (!filtered) {
+		print( VlnPlot(so, features=c('Cd3d'), group.by='Source') )     # USER-INPUT
+		so <- subset(so, Cd3d > 2.5)                                    # USER-INPUT
+	}
+	print( VlnPlot(so, features=c('Cd3d'), group.by='Source') )       # USER-INPUT
+	
+	# Checkpoint.
+	saveRDS(so, file = file.path(outdir, paste0(projectname, '_filtered.RDS')))
+	filtered <- TRUE
+	
+	# Count summaries.
+	for (s in unique(so@meta.data$Source)){
+		message(s)
+		print( summary(so@meta.data[so@meta.data$Source==s, c('nFeature_RNA', 'nCount_RNA', 'percent.mt')]) )
+	}
+		
+	l <- plot_number_of_features(so@meta.data)
+	print( l[[1]] + l[[2]] + l[[3]] + plot_layout(guides='collect'))
+	
+	# l <- plot_qc_correlations(so@meta.data)
+	# print( l[[1]] + l[[2]] + l[[3]] + plot_layout(guides='collect'))
+	
+	for (s in unique(so@meta.data$Source)){
+		message(s)
+		print( summary(so@meta.data[so@meta.data$Source==s, c('Source', 'Phase')]) )
+	}
+}
+```
+
+
+
+# Adjust for Cell Cycle
+
+## Before
+
+Principal components calculated from cell-cycle genes.
+
+```{r ccpre, warning=FALSE, fig.width=8, fig.height=8}
+if (regress_cycle) {
+
+	# Find variable features.
+	# The selection of features is not used here, but this is needed for the side-effect of calculating the variances.
+	so <- FindVariableFeatures(so, selection.method = "vst")
+
+	# PCA on CC genes
+	so <- RunPCA(so, features = c(s.genes, g2m.genes))
+
+	p1 <- DimPlot(so, reduction = "pca", dims=c(1,2), pt.size = 0.1, group.by='Phase') +
+					coord_fixed(ratio=1) +
+					labs(title=NULL) +
+					theme_light() +
+					theme(panel.grid=element_blank())
+	p2 <- DimPlot(so, reduction = "pca", dims=c(1,3), pt.size = 0.1, group.by='Phase') +
+					coord_fixed(ratio=1) +
+					labs(title=NULL) +
+					theme_light() +
+					theme(panel.grid=element_blank())
+	p3 <- DimPlot(so, reduction = "pca", dims=c(2,3), pt.size = 0.1, group.by='Phase') +
+					coord_fixed(ratio=1) +
+					labs(title=NULL) +
+					theme_light() +
+					theme(panel.grid=element_blank())
+
+	print( ggMarginal(p1, groupColour=TRUE), newpage=TRUE)
+	print( ggMarginal(p2, groupColour=TRUE), newpage=TRUE)
+	print( ggMarginal(p3, groupColour=TRUE), newpage=TRUE)
+}
+```
+	
+## After
+
+Principal components calculated from cell-cycle genes, after regressing them out,
+
+```{r ccadj, warning=FALSE, fig.width=8, fig.height=8}
+if (regress_cycle) {
+	if (!ccadjusted) {
+		
+		# This takes a long time, maybe even an hour.
+		so <- ScaleData(so, vars.to.regress = c("S.Score", "G2M.Score"), features = rownames(so))  # Completely remove cycle.
+		# so <- ScaleData(so, vars.to.regress = "CC.Difference", features = rownames(so))          # Remove phases, but separate cycling from non-cycling.
+		
+		# Checkpoint
+		saveRDS(so, file = file.path(outdir, paste0(projectname, '_ccadjusted.RDS')))
+		ccadjust <- TRUE
+		
+	} else {
+		
+		message("Using pre-processed data that is already adjusted.")
+		so <- readRDS(file = file.path(outdir, paste0(projectname, '_ccadjusted.RDS')))
+	}
+	
+	
+	# PCA on CC genes, to see removal
+	so <- RunPCA(so, features = c(s.genes, g2m.genes))
+	
+	p1 <- DimPlot(so, reduction = "pca", dims=c(1,2), pt.size = 0.1, group.by='Phase') +
+					coord_fixed(ratio=1) +
+					labs(title=NULL) +
+					theme_light() +
+					theme(panel.grid=element_blank())
+	p2 <- DimPlot(so, reduction = "pca", dims=c(1,3), pt.size = 0.1, group.by='Phase') +
+					coord_fixed(ratio=1) +
+					labs(title=NULL) +
+					theme_light() +
+					theme(panel.grid=element_blank())
+	p3 <- DimPlot(so, reduction = "pca", dims=c(2,3), pt.size = 0.1, group.by='Phase') +
+					coord_fixed(ratio=1) +
+					labs(title=NULL) +
+					theme_light() +
+					theme(panel.grid=element_blank())
+	
+	print( ggMarginal(p1, groupColour=TRUE), newpage=TRUE)
+	print( ggMarginal(p2, groupColour=TRUE), newpage=TRUE)
+	print( ggMarginal(p3, groupColour=TRUE), newpage=TRUE)
+}
+```
+
+
+
+# Parameter scan
+
+```{r scan}
+if (scanparam){
+	nvariables <- c(50, 100, 250, 500, 1000, 2000)
+	dimlim <- c(5, 10, 15, 20, 35, 50)
+	nneighbours <- c(5, 10, 30, 50)
+	mindist <- c(0.01, 0.1, 0.3, 0.5)
+	combo <- expand.grid(nneighbours, mindist)
+	
+	message(file.path(outdir, paste0(projectname, '_parameter-scan_*.pdf')))
+	
+	mclapply(nvariables, function(nv){
+		# nv <- nvariables[1]
+		
+		pdf(file=file.path(outdir, paste0(projectname, '_parameter-scan_V', nv, '.pdf')), width=8, heigh=8)
+		
+		# Select variable genes
+		so <- FindVariableFeatures(so, selection.method = "vst", nfeatures = nv)
+		top1 <- head( VariableFeatures(so), 1)
+		print( LabelPoints(plot = VariableFeaturePlot(so), points = top1, repel=TRUE) )
+		
+		# PCA
+		so <- RunPCA(so, features = VariableFeatures(so))
+		ndims <- length(Stdev(so))
+		
+		print( scree(so) )
+		
+		p1 <- DimPlot(so, reduction = "pca", dims=c(1,2), pt.size = 0.01, group.by='Source') +
+					 	coord_fixed(ratio=1) +
+						labs(title=NULL) +
+						theme_light() +
+						theme(panel.grid=element_blank())
+		p2 <- DimPlot(so, reduction = "pca", dims=c(1,3), pt.size = 0.01, group.by='Source') +
+					 	coord_fixed(ratio=1) +
+						labs(title=NULL) +
+						theme_light() +
+						theme(panel.grid=element_blank())
+		p3 <- DimPlot(so, reduction = "pca", dims=c(2,3), pt.size = 0.01, group.by='Source') +
+					 	coord_fixed(ratio=1) +
+						labs(title=NULL) +
+						theme_light() +
+						theme(panel.grid=element_blank())
+		print( (p1 + labs(subtitle=nv)) / (p2 + p3) + plot_layout(guides='collect') )
+	
+		# UMAP
+		for (dl in unique(c(dimlim[dimlim <= ndims], ndims))) {
+			# dl <- unique(c(dimlim[dimlim <= ndims], ndims))[1]
+			l <- apply(combo, 1, function(r){
+				nn <- r[1]
+				md <- r[2]
+				
+				so <- RunUMAP(so, dims=1:dl, n.neighbors=nn, min.dist=md)
+
+				p1 <- DimPlot(so, reduction='umap', group.by='Source', pt.size=0.01) +
+					labs(title=NULL, x=NULL, y=NULL, subtitle=paste0('V',nv, ' D', dl, ' N', nn, ' d', md)) +
+					coord_fixed(ratio=1) +
+					theme_light() +
+					theme(panel.grid=element_blank())
+
+				return( p1 )
+			})
+			
+			print( Reduce(`+`, l) + plot_layout(guides='collect') )
+		}
+		
+		dev.off()
+		
+		return(TRUE)
+	}, mc.cores=min(6, length(nvariables)) )
+	
+	
+	# Stop here.
+	knitr::knit_exit()
+		
+} else {
+	
+	message('Scanning skipped. Dimensionality reduction parameters to be used:')
+	# # Defaults:
+	# nvariables <- 2000   
+	# dims <- 1:50
+	# nneighbours <- 30
+	# mindist <- 0.3
+	
+	# Custom:
+	nvariables <- 400     # USER-INPUT. data-dependent.
+	dims <- 1:50 					# USER-INPUT. data-dependent.
+	nneighbours <- 30			# USER-INPUT. data-dependent.
+	mindist <- 0.2				# USER-INPUT. data-dependent.
+	
+	print( list('Number of most variable genes' = nvariables, 
+					 'PCA dimensions for UMAP' = dims, 
+					 'UMAP number of neighbours' = nneighbours, 
+					 'UMAP minimum distance' = mindist) 
+	)
+}
+```
+
+
+
+# Dimensionality reduction
+
+## Variable genes
+
+```{r variable}
+if (!finalized){
+	# Find the number of highly variable features.
+	so <- FindVariableFeatures(so, selection.method = "vst", nfeatures = nvariables)
+	
+} else {
+
+	so <- readRDS(file = file.path(outdir, paste0(projectname, '_finalized.RDS')))
+}
+
+# Plot variable features with and without labels
+## Stock Seurat plot
+# print( LabelPoints(plot = VariableFeaturePlot(so), points=top, repel = TRUE) )
+## Custom version of the above. Peeked at its implementation to find the relevant data.
+# top <- unlist(priors)
+top <- head(VariableFeatures(so), 25)
+hvf.info <- HVFInfo(object = so, assay = NULL, selection.method = NULL,
+        status = TRUE)
+hvf.info["var.status"] <- c(paste0("no (", sum(!hvf.info$variable), ")"),
+														paste0("yes (", sum(!!hvf.info$variable), ")"))[unlist(x = hvf.info[, ncol(x = hvf.info)]) + 1]
+hvf.info <- hvf.info[, c(1, 3, 5)]
+
+p1 <- ggplot(hvf.info,
+			 aes(x=mean, y=variance.standardized, colour=var.status, label=row.names(hvf.info))) +
+	geom_point(shape=16) +
+	geom_text_repel(data=hvf.info[top,], aes(label=row.names(hvf.info[top,])),
+									min.segment.length=0, size=rel(2.5), force=10, colour='black', max.overlaps=1e4) +
+	scale_x_log10() +
+	annotation_logticks(base=10, sides='b') +
+	scale_colour_manual(values=c('black', 'red'), name='Variable') +
+	labs(x='Average Expression', y='Standardized Variance') +
+	theme_classic()
+
+print( p1 )
+```
+
+## PCA
+
+```{r pca}
+if (!finalized){
+	so <- RunPCA(so, features = VariableFeatures(so))
+	# so <- RunPCA(so, features = unlist(priors))
+}
+
+## Stock Seurat version
+# ElbowPlot( so )
+## Custom version of the above, again from peeking into the implementation to get the data.
+print( scree(so) )
+```
+
+
+### Top-loading features in the first 4 PCs.
+
+```{r pca_loaders, fig.height=8, fig.width=8}
+# Top loaders
+# print( so[["pca"]], dims = 1:npc, nfeatures = 10 )
+
+# Top loaders in top components
+print( VizDimLoadings(so, dims = 1:4, reduction = "pca") )
+
+# print( DimHeatmap(so, dims = 1:npc, cells = 500, balanced = TRUE) )
+```
+
+### All inputs together
+
+```{r pca_plot_pre, fig.height=8, fig.width=8}
+# Stock Seurat plots, with more informative labels
+pc_vars <- Stdev(object = so, reduction = 'pca') ^ 2  # From stdevs to % of total variance.
+pc_vars <- 100 * pc_vars / sum(pc_vars)
+
+p1 <- DimPlot(so, reduction = "pca", dims=c(1,2), pt.size = 0.1, group.by='orig.ident') +
+			 	coord_fixed(ratio=1) +
+				labs(title=NULL,
+						 x=paste0('PC_1 (', round(pc_vars[1], 1), '%)'),
+			 			 y=paste0('PC_2 (', round(pc_vars[2], 1), '%)')) +
+				theme_light() +
+				theme(panel.grid=element_blank())
+
+p2 <- DimPlot(so, reduction = "pca", dims=c(1,3), pt.size = 0.1, group.by='orig.ident') +
+			 	coord_fixed(ratio=1) +
+				labs(title=NULL,
+						 x=paste0('PC_1 (', round(pc_vars[1], 1), '%)'),
+			 			 y=paste0('PC_3 (', round(pc_vars[3], 1), '%)')) +
+				theme_light() +
+				theme(panel.grid=element_blank())
+
+p3 <- DimPlot(so, reduction = "pca", dims=c(2,3), pt.size = 0.1, group.by='orig.ident') +
+			 	coord_fixed(ratio=1) +
+				labs(title=NULL,
+						 x=paste0('PC_2 (', round(pc_vars[2], 1), '%)'),
+			 			 y=paste0('PC_3 (', round(pc_vars[3], 1), '%)')) +
+				theme_light() +
+				theme(panel.grid=element_blank())
+
+print(p1)
+print(p2)
+print(p3)
+```
+
+### Split by input
+
+```{r pca_plot, fig.height=24, fig.width=8}
+p1 <- DimPlot(so, reduction = "pca", dims=c(1,2), pt.size = 0.1, group.by='Phase', split.by='orig.ident') +
+		 	coord_fixed(ratio=1) +
+			labs(title=NULL,
+					 x=paste0('PC_1 (', round(pc_vars[1], 1), '%)'),
+		 			 y=paste0('PC_2 (', round(pc_vars[2], 1), '%)'))  +
+			theme_light() +
+			theme(panel.grid=element_blank())
+p2 <- DimPlot(so, reduction = "pca", dims=c(1,3), pt.size = 0.1, group.by='Phase', split.by='orig.ident') +
+		 	coord_fixed(ratio=1) +
+			labs(title=NULL,
+					 x=paste0('PC_1 (', round(pc_vars[1], 1), '%)'),
+		 			 y=paste0('PC_3 (', round(pc_vars[3], 1), '%)')) +
+			theme_light() +
+			theme(panel.grid=element_blank())
+p3 <- DimPlot(so, reduction = "pca", dims=c(2,3), pt.size = 0.1, group.by='Phase', split.by='orig.ident') +
+		 	coord_fixed(ratio=1) +
+			labs(title=NULL,
+					 x=paste0('PC_2 (', round(pc_vars[2], 1), '%)'),
+		 			 y=paste0('PC_3 (', round(pc_vars[3], 1), '%)')) +
+			theme_light() +
+			theme(panel.grid=element_blank())
+
+print(p1 + p2 + p3)
+```
+
+<!-- ```{r jackstraw} -->
+<!-- # Other methods to determine dimensionality of dataset. -->
+<!-- if (!soin['js']){ -->
+<!-- 	# message(paste('Significance cutoff for PC selection:', jackstrawpcut)) -->
+<!-- 	so <- JackStraw(so, num.replicate = 100, dims=ndims) # Needs several minutes -->
+<!-- 	so <- ScoreJackStraw(so, dims = 1:ndims) -->
+
+<!-- 	# Checkpoint. -->
+<!-- 	saveRDS(so, file = paste0(soout, '_js.RDS')) -->
+<!-- } -->
+
+<!-- # Stock Seurat plot -->
+<!-- # print( JackStrawPlot(so, dims=1:20) ) -->
+
+<!-- # An alternative less crowded plot -->
+<!-- pAll <- as.data.frame( JS(object = so[['pca']], slot = "empirical") ) -->
+<!-- pAll <- cbind(gene=rownames(pAll), data.frame(pAll, row.names=NULL)) -->
+<!-- data.plot <- pivot_longer(pAll, cols=names(pAll)[2:length(pAll)]) -->
+<!-- colnames(data.plot) <- c("Contig", "PC", "Value") -->
+<!-- score.df <- as.data.frame( JS(object = so[['pca']], slot = "overall") ) -->
+<!-- score.df[["pass"]] <- score.df[,'Score'] < 0.001 -->
+
+<!-- p1 <- ggplot(score.df, aes(x=PC, y=-log10(Score), colour=pass, group='a')) + -->
+<!-- 	geom_path(stat='identity')  + -->
+<!-- 	scale_colour_manual(values=c('TRUE'='black', 'FALSE'='green')) + -->
+<!-- 	coord_cartesian(ylim=c(0,NA)) + -->
+<!-- 	theme_light() -->
+
+<!-- print( p1 ) -->
+
+<!-- # identify PCs with p below cutoff. -->
+<!-- for(i in 1:nrow(score.df)){ -->
+<!-- 	if(!score.df[i, 'pass']) -->
+<!-- 		break -->
+<!-- } -->
+<!-- npc2 <- ifelse(i==ndims, i, i-1) -->
+<!-- message(paste('Number of significant dimensions:', npc2)) -->
+<!-- ``` -->
+
+## UMAP
+
+```{r umappre, fig.height=8, fig.width=8}
+if (!finalized){
+	so <- RunUMAP(so, dims=dims[dims %in% 1:length(pc_vars)])
+}
+```
+
+### All inputs together
+
+```{r umap, fig.height=8, fig.width=8}
+p1 <- DimPlot(so, reduction='umap', group.by='Source') +
+	coord_fixed(ratio=1) +
+	labs(title=NULL) +
+	theme_light() +
+	theme(panel.grid=element_blank())
+	
+print( p1 )
+```
+
+### Split by input
+
+```{r umap2, fig.height=8, fig.width=16}
+p1 <- DimPlot(so, reduction='umap', split.by='Source', group.by='Phase') +
+		coord_fixed(ratio=1) +
+		labs(title=NULL) +
+		theme_light() +
+		theme(panel.grid=element_blank())
+
+print( p1 )
+```
+
+
+
+# Clustering
+
+```{r clusterpre}
+if (!finalized){
+	so <- FindNeighbors(so, dims = dims[dims %in% 1:length(pc_vars)])
+	so <- FindClusters(so)
+	
+	# Checkpoint
+	saveRDS(so, file = file.path(outdir, paste0(projectname, '_finalized.RDS')))
+	finalized <- TRUE
+}
+
+message( paste('Clusters identified:', length(unique(so$seurat_clusters))) )
+message('Number of cells per cluster:')
+print( table(so$seurat_clusters, so$orig.ident) )
+```
+
+## UMAP
+
+### All inputs together
+
+```{r cluster, fig.height=8, fig.width=8}
+pcl <- DimPlot(so, reduction='umap', label=TRUE, pt.size = 0.1, group.by='seurat_clusters') +
+	coord_fixed(ratio=1) +
+	labs(title=NULL) +
+	theme_light() +
+	theme(panel.grid=element_blank())
+
+print( pcl )
+```
+
+### Split by input
+
+```{r cluster2, fig.height=8, fig.width=16}
+p1 <- DimPlot(so, reduction='umap', label=FALSE, pt.size = 0.1, group.by='seurat_clusters', split.by='Source') +
+	coord_fixed(ratio=1) +
+	labs(title=NULL) +
+	theme_light() +
+	theme(panel.grid=element_blank(),
+				legend.position='bottom')
+
+print( p1 )
+```
+
+## Cluster markers
+
+Genes uniquely up/down-regulated in each cluster.
+
+```{r clustmark, fig.height=10, fig.width=10}
+lfcthresh <- 1				# USER_INPUT
+pctexpthresh <- 0.5   # USER_INPUT
+message(paste('Minimum LFC:', lfcthresh))
+message(paste0('Minimum % of cells in which expressed: ', pctexpthresh, '%'))
+
+if (!DEtabled) {
+	# Find markers for every cluster compared to all remaining cells,
+	so.markers <- FindAllMarkers(so, only.pos = FALSE, min.pct = pctexpthresh, logfc.threshold = lfcthresh)
+	
+	# Checkpoint
+	write.table(so.markers, file=file.path(outdir, paste0(projectname, '_clustermarkers.tsv')), sep="\t", quote=FALSE, col.names=TRUE, row.names=TRUE)
+	DEtabled <- TRUE
+	
+} else {
+	
+	so.markers <- read.table(file=file.path(outdir, paste0(projectname, '_clustermarkers.tsv')), sep="\t", header=TRUE, stringsAsFactors=FALSE)
+}
+
+cm <- so.markers %>% 
+	mutate(abslfc = abs(avg_logFC)) %>% 
+	group_by(cluster) %>% 
+	top_n(n = 10, wt = abslfc)
+
+
+for (cl in unique(cm$cluster)){
+	# cl <- unique(cm$cluster)[1]
+	print(paste("Cluster:", cl))
+	subg <- unique(cm[cm$cluster==cl, ]$gene)
+	# Make colouring variable highlighting just this cluster
+	so@meta.data[['this_cluster']] <- as.character(so@meta.data[['seurat_clusters']]) == as.character(cl)
+	print( DimPlot(so, reduction='umap', group.by='this_cluster') + 
+				 	coord_fixed() +
+				 	labs(title=paste('Cluster', cl)) + 
+				 	theme(legend.position='none') )
+
+	for (x in rollslice(subg, 9)) {
+		# x <- rollslice(subg, 9)[[1]]
+		print( subg[x] )   # Make it easier to text-search the report for the relevant plots for a gene
+
+		print( FeaturePlot(so, features = subg[x], coord.fixed=TRUE) )
+
+		print( DotPlot(so, features = subg[x], group.by='seurat_clusters', scale.min=0, scale.max=100) )
+		#
+		# print( VlnPlot(so, slot='data', features = subg[x], pt.size=0.01, group.by='seurat_clusters') )
+		#
+		print( DotPlot(so, features = subg[x], group.by='Source', scale.min=0, scale.max=100) )
+		#
+		# print( VlnPlot(so, features = subg[x], pt.size=0.01, group.by='Source') + RotatedAxis() )
+	}
+}
+
+# Repeat
+pdf(file.path(outdir, paste0(projectname, '_clustermarkers.pdf')))
+
+for (cl in unique(cm$cluster)){
+	# cl <- unique(cm$cluster)[1]
+	print(paste("Cluster:", cl))
+	subg <- unique(cm[cm$cluster==cl, ]$gene)
+	# Make colouring variable highlighting just this cluster
+	so@meta.data[['this_cluster']] <- as.character(so@meta.data[['seurat_clusters']]) == as.character(cl)
+	print( DimPlot(so, reduction='umap', group.by='this_cluster') + 
+				 	coord_fixed() +
+				 	labs(title=paste('Cluster', cl)) + 
+				 	theme(legend.position='none') )
+
+	for (x in rollslice(subg, 9)) {
+		# x <- rollslice(subg, 9)[[1]]
+		# print( subg[x] )   # Make it easier to text-search the report for the relevant plots for a gene
+
+		print( FeaturePlot(so, features = subg[x], coord.fixed=TRUE) )
+
+		print( DotPlot(so, features = subg[x], group.by='this_cluster', scale.min=0, scale.max=100) )
+
+		print( VlnPlot(so, slot='data', features = subg[x], pt.size=0.01, group.by='seurat_clusters') )
+
+		print( DotPlot(so, features = subg[x], group.by='Source', scale.min=0, scale.max=100) )
+
+		print( VlnPlot(so, features = subg[x], pt.size=0.01, group.by='Source') + RotatedAxis() )
+	}
+}
+
+dev.off()
+```
+
+
+
+# Pre-selected markers
+
+```{r markers, fig.height=10, fig.width=10}
+for (y in names(priors)) {
+	# y <- names(priors)[2]
+	print(y)
+	subg <- priors[[y]]
+	print( DimPlot(so, reduction='umap', label=TRUE, group.by='seurat_clusters') +
+				 	coord_fixed() )
+	
+	for (x in rollslice(subg, 9)) {
+		# x <- rollslice(subg, 9)[[1]]
+		print( subg[x] )   # Make it easier to text-search the report for the relevant plots for a gene
+
+		print( FeaturePlot(so, reduction='umap', features = subg[x]) & coord_fixed(ratio=1) )
+		
+		print( DotPlot(so, features = subg[x], group.by='seurat_clusters', scale.min=0, scale.max=100) + RotatedAxis() )
+	
+		# print( VlnPlot(so, features = subg[x], pt.size=0.01, group.by='seurat_clusters') )
+		
+		print( DotPlot(so, features = subg[x], group.by='Source', scale.min=0, scale.max=100) )
+		
+		# print( VlnPlot(so, features = subg[x], pt.size=0.01, group.by='Source') + RotatedAxis() )
+	}	
+}
+
+# Repeat
+pdf(file.path(outdir, paste0(projectname, '_manualmarkers.pdf')))
+
+for (y in names(priors)) {
+	# y <- names(priors)[2]
+	print(y)
+	subg <- priors[[y]]
+	print( DimPlot(so, reduction='umap', label=TRUE, group.by='seurat_clusters') +
+				 	coord_fixed() )
+	
+	for (x in rollslice(subg, 9)) {
+		# x <- rollslice(subg, 9)[[1]]
+		# print( subg[x] )   # Make it easier to text-search the report for the relevant plots for a gene
+		
+		print( FeaturePlot(so, reduction='umap', features = subg[x]) & coord_fixed(ratio=1) )
+		
+		print( DotPlot(so, features = subg[x], group.by='seurat_clusters', scale.min=0, scale.max=100) + RotatedAxis() )
+	
+		print( VlnPlot(so, features = subg[x], pt.size=0.01, group.by='seurat_clusters') )
+		
+		print( DotPlot(so, features = subg[x], group.by='Source', scale.min=0, scale.max=100) )
+		
+		print( VlnPlot(so, features = subg[x], pt.size=0.01, group.by='Source') + RotatedAxis() )
+	}	
+}
+
+dev.off()
+
+```
+
+
+
+
+# Session
+
+```{r session}
+sessionInfo()
+```
