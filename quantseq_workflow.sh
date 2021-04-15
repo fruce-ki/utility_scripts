@@ -138,27 +138,28 @@ if [ "$dunk" -eq 1 ]; then
       threads=24
     fi
 
-    echo "$bam - MAP"
-    sbatch -J slamaln -o /dev/null -e /dev/null --qos=medium -c $threads --mem=$memory --wrap "slamdunk map -t $threads -r $ref -o ${outdir}/dunk/map -5 0 -n 100 --quantseq -ss ${outdir}/dunk/samplesheet.tsv"
-    wait_for_jobs slamaln
+    # echo "$bam - MAP"
+    # sbatch -J slamaln -o /dev/null -e /dev/null --qos=medium -c $threads --mem=$memory --wrap "slamdunk map -t $threads -r $ref -o ${outdir}/dunk/map -5 0 -n 100 --quantseq -ss ${outdir}/dunk/samplesheet.tsv"
+    # wait_for_jobs slamaln
 
-    echo "$bam - FILTER"
-    sbatch -J slamfltr -c $threads --mem=$memory -o /dev/null -e /dev/null --wrap "slamdunk filter -t $threads -o ${outdir}/dunk/filter -b $bed ${outdir}/dunk/map/*.bam"
-    wait_for_jobs slamfltr
+    # echo "$bam - FILTER"
+    # sbatch -J slamfltr -c $threads --mem=$memory -o /dev/null -e /dev/null --wrap "slamdunk filter -t $threads -o ${outdir}/dunk/filter -b $bed ${outdir}/dunk/map/*.bam"
+    # wait_for_jobs slamfltr
 
     if [ "$umilen" -gt 0 ]; then
         mkdir -p ${outdir}/dedup ${outdir}/dedup/tmp ${outdir}/dedup/map_sorted
 
-        echo "$bam - Sort and index"
-        fileutilities.py T $bamdir/*bam --loop sbatch ,-J samsort ,-o /dev/null ,-e /dev/null ,--wrap "'samtools sort -o ${outdir}/dedup/map_sorted/{cor}.bam {abs}'"
-        wait_for_jobs samsort
-        fileutilities.py T ${outdir}/dedup/map_sorted/*bam --loop sbatch ,-J samidx ,-o /dev/null ,-e /dev/null ,--wrap "'samtools index {abs}'"
-        wait_for_jobs samidx
+        # echo "$bam - Sort and index"
+        # fileutilities.py T $bamdir/*bam --loop sbatch ,-J samsort ,-o /dev/null ,-e /dev/null ,--wrap "'samtools sort -o ${outdir}/dedup/map_sorted/{cor}.bam {abs}'"
+        # wait_for_jobs samsort
+        # fileutilities.py T ${outdir}/dedup/map_sorted/*bam --loop sbatch ,-J samidx ,-o /dev/null ,-e /dev/null ,--wrap "'samtools index {abs}'"
+        # wait_for_jobs samidx
 
         echo ""
         echo "$bam - Removing duplicates"
-        fileutilities.py T ${outdir}/dedup/map_sorted/*.bam --loop sbatch ,--qos=medium ,-J umidedup ,-o /dev/null ,-e /dev/null umi_tools dedup ,-I {abs} ,-S ${outdir}/dedup/{cor}.deduped.bam ,-L ${outdir}/dedup/{cor}_dedup.log  ,--edit-distance-threshold=${mm_umi}
+        fileutilities.py T ${outdir}/dedup/map_sorted/*.bam --loop sbatch ,--qos=medium ,--mem=$memory ,-J umidedup umi_tools dedup ,-I {abs} ,-S ${outdir}/dedup/{cor}.deduped.bam ,-L ${outdir}/dedup/{cor}_dedup.log  ,--edit-distance-threshold=${mm_umi}
         wait_for_jobs umidedup
+        #  ,-o /dev/null ,-e /dev/null
     fi
 fi
 

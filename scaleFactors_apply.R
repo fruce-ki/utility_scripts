@@ -11,7 +11,7 @@ spec = matrix(c(
 ), byrow=TRUE, ncol=5)
 
 opt <- getopt(spec)
-# opt <- list(counts='/Volumes/groups/zuber/zubarchive/USERS/Kimon/anja/M10716_slamseq/process/slam/all_collapsed_readcount-only_xref.txt', factors='/Volumes/groups/zuber/zubarchive/USERS/Kimon/anja/M10716_slamseq/process/slam/spike_summary_counts_relevant.factors.txt', nid=3, outpref='/Volumes/groups/zuber/zubarchive/USERS/Kimon/anja/M10716_slamseq/process/slam/all_collapsed_readcount-only_xref')
+# opt <- list(counts='/Volumes/groups/zuber/zubarchive/USERS/Kimon/jakub/M11914_slamseq/process/slamdeep/all_collapsed_readCount-only_xref.txt', factors='/Volumes/groups/zuber/zubarchive/USERS/Kimon/jakub/M11914_slamseq/process/slamdeep/spike_summary_counts.factors.txt', nid=3, outpref='/Volumes/groups/zuber/zubarchive/USERS/Kimon/jakub/M11914_slamseq/process/slamdeep/all_collapsed_readCount-only_xref')
 
 
 if (is.null(opt$nid)) {

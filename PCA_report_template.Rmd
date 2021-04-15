@@ -14,7 +14,8 @@ params:
   prefix: "./null"                     # for the correlation matrices
   nidcols: 1
   idcol: 1
-  minL: 0.75            # Minimum component loading, for selection of features to report in PCA
+  topvars: 500           # Number of top-most variable features to use.
+  # minL: 0.75            # Minimum component loading. Not used currently.
   ntop: 50              # maximum number of hits to list
 editor_options:
   chunk_output_type: console
@@ -42,7 +43,7 @@ options(scipen=2)
 
 theme_set(theme_bw())
 
-# params <- list(cts=opt$countsFile, covars=opt$samplesFile, nidcols=opt$nidcols, idcol=opt$idcol, pdf=file.path(opt$resultsDir, sub('.txt|.tsv', '_pca.pdf', basename(opt$countsFile))), minL=0.75, ntop=50, prefix=file.path(opt$resultsDir, sub('.txt|.tsv', '', basename(opt$countsFile))) )
+# params <- list(cts=opt$countsFile, covars=opt$samplesFile, nidcols=opt$nidcols, idcol=opt$idcol, topvars=opt$nvar, pdf=file.path(opt$resultsDir, sub('.txt|.tsv', '_pca.pdf', basename(opt$countsFile))), minL=0.75, ntop=50, prefix=file.path(opt$resultsDir, sub('.txt|.tsv', '', basename(opt$countsFile))) )
 print(params)
 ```
 
@@ -247,132 +248,199 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", prefix
 
 # PCA
 # (scaling and centering of genes to one another, NOT samples to one another)
-do_pca <- function(countsmat, covars, center = TRUE, scale = TRUE, loadthresh = params$minL, prefix = paste0(params$prefix, '_pc')) {
-  # countsmat = counts
-
-  # Gene variances
+do_pca <- function(countsmat, covars, center = TRUE, scale = TRUE, topvars=params$topvars, prefix = paste0(params$prefix, '_pc')) {
+  # countsmat <- counts; covars <- covars
+  
   genevar <- data.table(name = rownames(countsmat),
                         Mean = rowMeans(countsmat),
-                        StDev = rowVars(countsmat) )
-
+                        StDev = rowSds(countsmat) )
+  
+  # Use only the most variable genes, and ensure they are variable.
+  setorder(genevar, -StDev)
+  topgenes = genevar[1:min(topvars, nrow(genevar)), ] [StDev>0, name]
+  subcmat <- countsmat[topgenes,]
+  
   # Rotate counts so genes are variables and samples are observations
-  countsmat <- t(countsmat) # rotate 270 so the final rotate for correlations results in the same sample order as the initial correlations
-
-  # Add covariates info
-  counts <- cbind(covars, as.data.table(countsmat))
-
-  # Calculate principal components (after getting rid of zero-variance genes that can't be standardized).
-
-  nonconstant <- which(apply(countsmat, 2, var)!=0)
-  countsmat <- countsmat[, nonconstant]
-  nvars <- dim(countsmat)[2]
-
-  pca <- prcomp(countsmat, center = center, scale. = scale)
-  srn <- sqrt(nrow(countsmat) - 1)
-  pc <- sweep(pca$x, 2, 1 / (pca$sdev * srn), FUN = '*')
+  subcmat <- t(subcmat)
+  nvars <- dim(subcmat)[2]
+  message(paste("Number of most variable features considered:", nvars))
+  
+  pca <- prcomp(subcmat, center = center, scale. = scale)
+  srn <- sqrt(nrow(subcmat) - 1)
+  
+  pc <- sweep(pca$x, 2, 1 / (pca$sdev * srn), FUN = '*')   # Unit-scaled like a standard biplot. This is how ggfortify plots pca.
+  # pc <- pca$x                                            # Unscaled. This is what DESeq2 plots.
+  ## Scaling doesn't seem to change the shape of the PCA plot. Just the axis range (and interpretation of the values).
+  
   pc <- cbind(pc, data.frame(sample = rownames(pc)))
   #covars <- cbind(covars, data.frame(sample = rownames(covars)))
   pc <- as.data.frame(merge(pc, covars, by="sample", all = TRUE))
   npc <- sum(pca$sdev > 1)
 
   # Screeplot.
+  
+  pcaimp <- data.table(PC = 1:length(colnames(pca$x)),
+                       Explained = summary(pca)$importance['Proportion of Variance', ] * 100,
+                       Cumulative = summary(pca)$importance['Cumulative Proportion', ] * 100)
+  pcaimp <- melt(pcaimp, id.vars='PC', variable.name='type', value.name='Variance')
+  pcaimp[, type := factor(type, ordered=TRUE, levels=c('Cumulative', 'Explained'))]
+  
+  pimp <- ggplot(pcaimp, aes(x=PC, y=Variance, colour=type, fill=type)) +
+    # facet_wrap(~ type, ncol=1) +
+    geom_line() +
+    geom_bar(stat='identity', colour='transparent', alpha=0.3) +
+    geom_text(data=pcaimp[type=='Explained',], inherit.aes=FALSE,
+              aes(x=PC, y=0, label=paste0(round(Variance, 1),"%")), angle=90, hjust=0, vjust=0, size=rel(3)) +
+    geom_text(data=pcaimp[type=='Cumulative' & PC>1, ], inherit.aes=FALSE,
+              aes(x=PC, y=0.95*Variance, label=paste0(round(Variance, 1),"%")), angle=90, vjust=0, hjust=1, size=rel(3)) +
+    scale_colour_manual(values=c(Explained='transparent', Cumulative='dodgerblue')) +
+    scale_fill_manual(values=c(Explained='grey60', Cumulative='transparent')) +
+    scale_x_continuous(breaks=seq.int(1, nrow(pcaimp), 2)) +
+    labs(title = "Scree plot", subtitle=paste0(nvars, " features, ", npc, " PCs"), 
+         x = "Principal Component", y='% Variance') +
+    theme(panel.grid=element_blank())
+    
+  
+  # Top loadings
 
-  pcaimp <- as.data.table(cbind(as.data.frame(t(summary(pca)$importance)),
-                  data.frame(PC = 1:length(colnames(pca$x)))))
-  pcaimp <- melt(pcaimp, variable.name = "type", value.name = "Proportion", id.vars = c("PC", "Standard deviation"))
-
-  pcmax=15
-  pimp <- ggplot(pcaimp[(PC<pcmax),], aes(x=PC, y=Proportion)) +
-    facet_grid(type ~ ., scales="free_y") +
-    geom_bar(aes(fill=type), stat="identity", width=0.5) +
-    geom_text_repel(aes(x=PC-0.4, label=paste0(round(Proportion*100, 1),"%"), colour=rev(type)), ylim=c(0,max(pcaimp[type=='Proportion of Variance', Proportion])), angle=90, vjust=0, size=rel(3)) +
-    geom_text_repel(aes(label=paste0(round(Proportion*100, 1),"%"), colour=type), ylim=c(0, max(pcaimp[type=='Cumulative Proportion', Proportion])), angle=90, vjust=0, direction= 'y', size=rel(3)) +
-    geom_line(aes(colour=type)) +
-    scale_fill_manual(values = c("grey50", "transparent")) +
-    scale_colour_manual(values = c("transparent", "grey25")) +
-    scale_x_continuous(breaks = seq(1, pcmax, 2)) +
-    labs(title = "PCA Screeplot", subtitle=paste0(nvars, " features, ", npc, " PCs"), x = "Principal Component") +
-    theme(axis.title.y = element_blank(),
-          legend.position = "none")
-
-  # Top loadings for the first 3 PCs.
-
-  loads <- as.data.table(t(t(pca$rotation) * pca$sdev))
+  # loads <- as.data.table(t(t(pca$rotation) * pca$sdev)) # ?????
+  loads <- as.data.table(pca$rotation)
+  
+  highloads <- lapply(loads, function(x){ order(abs(x), decreasing=TRUE) })
   loads[, rowID := rownames(pca$rotation)]
-  loads <- melt(loads, value.name = "Loading", id.vars="rowID", variable.name="PC")
-  loads[, absload := abs(Loading)]
-  lhigh <- loads$absload > loadthresh     # keep only high loadings
-  setorder(loads, PC, -absload)
-  sel1 <- loads[lhigh > loadthresh & PC=="PC1", rowID]
-  sel2 <- loads[lhigh > loadthresh & PC=="PC2", rowID]
-  sel3 <- loads[lhigh > loadthresh & PC=="PC3", rowID]
-  sel <- unique(loads[lhigh, rowID])
-
+  highloads <- lapply(highloads, function(x){loads$rowID[x]})
+  
+  # High loads in first 3 PCs
+  sel <- unique(unlist( lapply(highloads[1:npc], function(x){head(x, 10)}) ))
+  
   # Coefficient names.
 
   ig <- names(covars)
   ig <- ig[! ig %in% c('sample', 'Sample', 'name', 'Name', 'sizeFactor')]
 
-  # Means and Variances of the top loads in the first 3 PCs.
+  # Means and Variances of the selected genes
 
-  genevar = data.table(rowID = colnames(countsmat),
-                       Mean = colMeans(countsmat),
-                       StDev = colSds(countsmat) )
-  genevar[, istop:= rowID %in% sel]
-
-  pvar1 <- ggMarginal(ggplot(genevar, aes(x=Mean, y=StDev, label=rowID, colour=istop)) +
+  pvar1 <- ggMarginal(
+    ggplot(genevar, aes(x=Mean, y=StDev, label=name, colour=(name %in% colnames(subcmat)))) +
       geom_point(shape=16, size=0.8, alpha=0.5) +
       scale_x_log10() +
-      scale_colour_manual(values=c("black", "violetred")) +
+      scale_colour_manual(values=c("black", "violetred"), name='Selected') +
       scale_y_log10() +
-      labs(x="Mean", y="Standard Deviation", title=paste0("All features (", nvars, ")")) +
-      theme(legend.position = "none"),
+      labs(x="Mean", y="Standard Deviation", title=paste0("All features (", nrow(genevar), ")")),
     type = "histogram")
-
-  pvar2 <- ggplot(genevar[(istop),], aes(x=Mean, y=StDev, label=rowID)) +
-      geom_point(shape=16, size=0.8, alpha=0.5, colour="purple") +
-      labs(x="Mean", y="Standard Deviation",
-           title=paste0("High-loading features (", length(sel), ")"), subtitle = paste0("( >", loadthresh, ") in any of the first 3 PCs")) +
-      scale_x_log10() +
-      scale_y_log10()
 
   # Correlation of the samples for the selected features only.
 
-  pcor <- my_pairwise_internal_corels(t(countsmat[, sel]), samples=covars$sample, prefix=prefix)
+  pcor <- my_pairwise_internal_corels(countsmat[sel,], samples=covars$sample, prefix=prefix)
 
   # Plot first 3 PCs in 2D pairs.
   # Highlight one variable at a time.
+  
+  subload <- loads[rowID %in% unique(c(head(highloads$PC1, 10), head(highloads$PC2, 10))), .(rowID, PC1, PC2)]
   pc12 <- lapply(ig, function(varname) {
     return(
       ggplot(pc, aes_string(x="PC1", y="PC2", label="sample", colour=varname)) +
-        geom_point(alpha=0.8, size=rel(1.5)) +
+        geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
+        geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
+        # geom_segment(data=subload, inherit.aes=FALSE, colour='black', arrow=arrow(length=unit(0.1, 'cm')), alpha=0.2,
+        #              aes(x=0, y=0, xend=PC1, yend=PC2)) +
+        geom_point(alpha=0.8) +
+        # geom_text_repel(data=subload, inherit.aes=FALSE, aes(label=rowID, x=PC1, y=PC2),
+        #                 size=2, max.overlaps=100000000, ) +
         coord_fixed() +
-        labs(x=paste0("PC1 (", round(pcaimp[1,4]*100, 1), "%)"), y=paste0("PC2 (", round(pcaimp[2,4]*100, 1), "%)"))
+        labs(x=paste0("PC1 (", round(pcaimp[type=='Explained' & PC==1, Variance], 1), "%)"), 
+             y=paste0("PC2 (", round(pcaimp[type=='Explained' & PC==2, Variance], 1), "%)")) +
+        theme(panel.grid=element_blank())
+    )})
+  pc12v <- lapply(ig, function(varname) {
+    return(
+      ggplot(pc, aes_string(x="PC1", y="PC2", label="sample", colour=varname)) +
+        geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
+        geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
+        geom_segment(data=subload, inherit.aes=FALSE, colour='black', arrow=arrow(length=unit(0.1, 'cm')), alpha=0.2,
+                     aes(x=0, y=0, xend=PC1, yend=PC2)) +
+        geom_point(alpha=0.8) +
+        geom_text_repel(data=subload, inherit.aes=FALSE, aes(label=rowID, x=PC1, y=PC2),
+                        size=2, max.overlaps=100000000, ) +
+        coord_fixed() +
+        labs(x=paste0("PC1 (", round(pcaimp[type=='Explained' & PC==1, Variance], 1), "%)"), 
+             y=paste0("PC2 (", round(pcaimp[type=='Explained' & PC==2, Variance], 1), "%)")) +
+        theme(panel.grid=element_blank())
     )})
 
+  subload <- loads[rowID %in% unique(c(head(highloads$PC1, 10), head(highloads$PC3, 10))), .(rowID, PC1, PC3)]
   pc13 <- lapply(ig, function(varname) {
     return(
       ggplot(pc, aes_string(x="PC1", y="PC3", label="sample", colour=varname)) +
-        geom_point(alpha=0.8, size=rel(1.5)) +
+        geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
+        geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
+        # geom_segment(data=subload, inherit.aes=FALSE, colour='black', arrow=arrow(length=unit(0.1, 'cm')), alpha=0.2,
+        #              aes(x=0, y=0, xend=PC1, yend=PC3)) +
+        geom_point(alpha=0.8) +
+        # geom_text_repel(data=subload, inherit.aes=FALSE, aes(label=rowID, x=PC1, y=PC3),
+        #                 size=2, max.overlaps=100000000, ) +
         coord_fixed() +
-        labs(x=paste0("PC1 (", round(pcaimp[1,4]*100, 1), "%)"), y=paste0("PC3 (", round(pcaimp[3,4]*100, 1), "%)"))
+        labs(x=paste0("PC1 (", round(pcaimp[type=='Explained' & PC==1, Variance], 1), "%)"), 
+             y=paste0("PC3 (", round(pcaimp[type=='Explained' & PC==3, Variance], 1), "%)")) +
+        theme(panel.grid=element_blank())
+    )})
+  pc13v <- lapply(ig, function(varname) {
+    return(
+      ggplot(pc, aes_string(x="PC1", y="PC3", label="sample", colour=varname)) +
+        geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
+        geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
+        geom_segment(data=subload, inherit.aes=FALSE, colour='black', arrow=arrow(length=unit(0.1, 'cm')), alpha=0.2,
+                     aes(x=0, y=0, xend=PC1, yend=PC3)) +
+        geom_point(alpha=0.8) +
+        geom_text_repel(data=subload, inherit.aes=FALSE, aes(label=rowID, x=PC1, y=PC3),
+                        size=2, max.overlaps=100000000, ) +
+        coord_fixed() +
+        labs(x=paste0("PC1 (", round(pcaimp[type=='Explained' & PC==1, Variance], 1), "%)"), 
+             y=paste0("PC3 (", round(pcaimp[type=='Explained' & PC==3, Variance], 1), "%)")) +
+        theme(panel.grid=element_blank())
     )})
 
+
+  subload <- loads[rowID %in% unique(c(head(highloads$PC2, 10), head(highloads$PC3, 10))), .(rowID, PC2, PC3)]
   pc32 <- lapply(ig, function(varname) {
     return(
       ggplot(pc, aes_string(x="PC3", y="PC2", label="sample", colour=varname)) +
-        geom_point(alpha=0.8, size=rel(1.5)) +
+        geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
+        geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
+        # geom_segment(data=subload, inherit.aes=FALSE, colour='black', arrow=arrow(length=unit(0.1, 'cm')), alpha=0.2,
+        #              aes(x=0, y=0, xend=PC3, yend=PC2)) +
+        geom_point(alpha=0.8) +
+        # geom_text_repel(data=subload, inherit.aes=FALSE, aes(label=rowID, x=PC3, y=PC2),
+        #                 size=2, max.overlaps=100000000, ) +
         coord_fixed() +
-        labs(x=paste0("PC3 (", round(pcaimp[3,4]*100, 1), "%)"), y=paste0("PC2 (", round(pcaimp[2,4]*100, 1), "%)"))
+        labs(x=paste0("PC3 (", round(pcaimp[type=='Explained' & PC==3, Variance], 1), "%)"), 
+             y=paste0("PC2 (", round(pcaimp[type=='Explained' & PC==2, Variance], 1), "%)")) +
+        theme(panel.grid=element_blank())
+    )})
+  pc32v <- lapply(ig, function(varname) {
+    return(
+      ggplot(pc, aes_string(x="PC3", y="PC2", label="sample", colour=varname)) +
+        geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
+        geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
+        geom_segment(data=subload, inherit.aes=FALSE, colour='black', arrow=arrow(length=unit(0.1, 'cm')), alpha=0.2,
+                     aes(x=0, y=0, xend=PC3, yend=PC2)) +
+        geom_point(alpha=0.8) +
+        geom_text_repel(data=subload, inherit.aes=FALSE, aes(label=rowID, x=PC3, y=PC2),
+                        size=2, max.overlaps=100000000, ) +
+        coord_fixed() +
+        labs(x=paste0("PC3 (", round(pcaimp[type=='Explained' & PC==3, Variance], 1), "%)"), 
+             y=paste0("PC2 (", round(pcaimp[type=='Explained' & PC==2, Variance], 1), "%)")) +
+        theme(panel.grid=element_blank())
     )})
 
   return(list(pca=pca,
               nvars=nvars,
               nPC=npc,
               pimp=pimp,
-              load1=sel1, load2=sel2, load3=sel3,
+              highloads=highloads,
               pc_1_2=pc12, pc_1_3=pc13, pc_3_2=pc32,
-              pvar1=pvar1, pvar2=pvar2,
+              pc_1_2v=pc12v, pc_1_3v=pc13v, pc_3_2v=pc32v,
+              pvar1=pvar1,
               pcor1=pcor[['frnc']], pcor2=pcor[['drc']]
               ))
 }
@@ -416,6 +484,9 @@ all_pca <- do_pca(counts, covars)
 
 # print( paste("Num of Variables:", all_pca$nvars, ", Num of Principal Components:", all_pca$nPC) )
 
+# Selected features
+print( all_pca["pvar1"] )
+
 # Scree
 print(all_pca$pimp)
 ```
@@ -423,6 +494,7 @@ print(all_pca$pimp)
 ### PC 1 + PC 2
 
 ```{r pc12, fig.width=7, fig.height=7}
+print( all_pca[["pc_1_2v"]] )
 htmltools::tagList(lapply(all_pca[["pc_1_2"]], function(x) { ggplotly(x) }))
 # lapply(all_pca[["pc_1_2"]], function(x) { x })
 ```
@@ -430,6 +502,7 @@ htmltools::tagList(lapply(all_pca[["pc_1_2"]], function(x) { ggplotly(x) }))
 ### PC 1 + PC 3
 
 ```{r pc13, fig.width=7, fig.height=7}
+print( all_pca[["pc_1_3v"]] )
 htmltools::tagList(lapply(all_pca[["pc_1_3"]], function(x) { ggplotly(x) }))
 # lapply(all_pca[["pc_1_3"]], function(x) { x })
 ```
@@ -437,44 +510,38 @@ htmltools::tagList(lapply(all_pca[["pc_1_3"]], function(x) { ggplotly(x) }))
 ### PC 3 + PC 2
 
 ```{r pc32, fig.width=7, fig.height=7}
+print( all_pca[["pc_3_2v"]] )
 htmltools::tagList(lapply(all_pca[["pc_3_2"]], function(x) { ggplotly(x) }))
 # lapply(all_pca[["pc_3_2"]], function(x) { x })
 ```
 
 ## High loading features
 
-Features with loading >= `r params$minL`.
-
-```{r}
-print( all_pca["pvar1"] )
-print( all_pca["pvar2"] )
-```
-
 ## Top high-loading features in the first 3 PCs
 
-Only the `r params$ntop` highest-loading features with loading >= `r params$minL` are listed here, in order of decreasing loading.
+Only the `r params$ntop` highest-loading features are listed here, in order of decreasing loading.
 
 ### PC1
 
 ```{r pc1}
-head(all_pca[["load1"]], n=params$ntop)
+head(all_pca$highloads[["PC1"]], n=params$ntop)
 ```
 
 ### PC2
 
 ```{r pc2}
-head(all_pca[["load2"]], n=params$ntop)
+head(all_pca$highloads[["PC2"]], n=params$ntop)
 ```
 
 ### PC3
 
 ```{r pc3}
-head(all_pca[["load3"]], n=params$ntop)
+head(all_pca$highloads[["PC3"]], n=params$ntop)
 ```
 
 ## Filtered correlation
 
-Calculated using only the features with loading >= `r params$minL` in any of the first 3 PCs.
+Calculated using only the selected top variable featurs.
 
 ```{r fig.width=16, fig.height=16}
 print( all_pca[["pcor1"]] )

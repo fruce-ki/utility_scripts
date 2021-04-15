@@ -154,7 +154,7 @@ if [ "$post" -eq 1 ]; then
     # wait_for_jobs alleyoop
     sbatch -J alleyoop -o /dev/null -e /dev/null --wrap "alleyoop summary -t ${outdir}/dunk/count/ -o ${outdir}/alleyoop/summary/summary.txt ${outdir}/dunk/filter/*bam"
     wait_for_jobs alleyoop
-
+    
     echo "$bam - MultiQC"
     sbatch -o /dev/null -e /dev/null multiqc -f -o ${outdir}/multiqc_alleyoop ${outdir}/fastqc_post ${outdir}/alleyoop/summary ${outdir}/alleyoop/rates ${outdir}/alleyoop/tcperreadpos ${outdir}/alleyoop/tcperutrpos ${outdir}/alleyoop/utrrates
 
@@ -167,10 +167,10 @@ if [ "$post" -eq 1 ]; then
     fileutilities.py T ${outdir}/dunk/count --dir 'filtered_tcount.rpmu.txt$' | fileutilities.py P -i -r --appnd > ${outdir}/all_utr_rpmu.txt
     # After merging on rowID, the Name field needs to be deduplicated and then brought first to merge with the xref.
     dedup_table_field.R ${outdir}/all_utr_rpmu.txt Name
-    fileutilities.py T ${outdir}/all_utr_rpmu_dedup.tsv -r --cols 1 0 2:$(fileutilities.py T ${outdir}/all_utr_rpmu_dedup.tsv --cntcols | cut -f 1) > ${outdir}/all_utr_rpmu.txt
+    fileutilities.py T ${outdir}/all_utr_rpmu_dedup.tsv -r --cols 1 0 2:$(($(fileutilities.py T ${outdir}/all_utr_rpmu_dedup.tsv --cntcols | cut -f 1) - 1)) > ${outdir}/all_utr_rpmu.txt
     rm ${outdir}/all_utr_rpmu_dedup.tsv
 
-    if [ -e "${xref}" ] ; then
+    if ! [ -z "${xref}" ] ; then
       # Merge xref on gene identifier. But genes are not unique row identifiers for the UTR results, so I can't use my usual fileutilities/pandas.
       echo "$bam - Adding crossreferencing IDs"
       slamseq_xref.R ${outdir} 'all_utr_rpmu.txt' $xref 1 1
@@ -178,13 +178,21 @@ if [ "$post" -eq 1 ]; then
     fi
 
     # Extract the data slices needed for subsequent PCA and DE analyses.
-    fileutilities.py T ${outdir}/all_collapsed_rpmu_xref.txt -r --cols $(head ${outdir}/all_collapsed_rpmu_xref.txt -n 1 | fileutilities.py D -s $'\t' --swap "\n" | perl -e '$i=0; while($_=<>) {if($_=~/RPM(?!u)|Entrez|Id|Name/) {print $i."\n"}; $i++}' | fileutilities.py D -s "\n" --swap , | perl -e 'while(<>){chomp;chop; print}') | fileutilities.py D -s '.RPM' --swap '' > ${outdir}/all_collapsed_RPM-only_xref.txt
+    fileutilities.py T ${outdir}/all_collapsed_rpmu.txt -r --cols $(head ${outdir}/all_collapsed_rpmu.txt -n 1 | fileutilities.py D -s $'\t' --swap "\n" | perl -e '$i=0; while($_=<>) {if($_=~/RPM(?!u)|Entrez|Id|Name|gene_name/) {print $i."\n"}; $i++}' | fileutilities.py D -s "\n" --swap , | perl -e 'while(<>){chomp;chop; print}') | fileutilities.py D -s '.RPM' --swap '' > ${outdir}/all_collapsed_RPM-only.txt
+    fileutilities.py T ${outdir}/all_collapsed_rpmu.txt -r --cols $(head ${outdir}/all_collapsed_rpmu.txt -n 1 | fileutilities.py D -s $'\t' --swap "\n" | perl -e '$i=0; while($_=<>) {if($_=~/RPMu|Entrez|Id|Name|gene_name/) {print $i."\n"}; $i++}' | fileutilities.py D -s "\n" --swap , | perl -e 'while(<>){chomp;chop; print}') | fileutilities.py D -s '.RPMu' --swap '' > ${outdir}/all_collapsed_RPMu-only.txt
+    fileutilities.py T ${outdir}/all_collapsed_rpmu.txt -r --cols $(head ${outdir}/all_collapsed_rpmu.txt -n 1 | fileutilities.py D -s $'\t' --swap "\n" | perl -e '$i=0; while($_=<>) {if($_=~/readCount|Entrez|Id|Name|gene_name/) {print $i."\n"}; $i++}' | fileutilities.py D -s "\n" --swap , | perl -e 'while(<>){chomp;chop; print}') | fileutilities.py D -s '.readCount' --swap '' > ${outdir}/all_collapsed_readCount-only.txt
+    fileutilities.py T ${outdir}/all_collapsed_rpmu.txt -r --cols $(head ${outdir}/all_collapsed_rpmu.txt -n 1 | fileutilities.py D -s $'\t' --swap "\n" | perl -e '$i=0; while($_=<>) {if($_=~/tcReadCount|Entrez|Id|Name|gene_name/) {print $i."\n"}; $i++}' | fileutilities.py D -s "\n" --swap , | perl -e 'while(<>){chomp;chop; print}') | fileutilities.py D -s '.tcReadCount' --swap '' > ${outdir}/all_collapsed_tcReadCount-only.txt
 
-    fileutilities.py T ${outdir}/all_collapsed_rpmu_xref.txt -r --cols $(head ${outdir}/all_collapsed_rpmu_xref.txt -n 1 | fileutilities.py D -s $'\t' --swap "\n" | perl -e '$i=0; while($_=<>) {if($_=~/RPMu|Entrez|Id|Name/) {print $i."\n"}; $i++}' | fileutilities.py D -s "\n" --swap , | perl -e 'while(<>){chomp;chop; print}') | fileutilities.py D -s '.RPMu' --swap '' > ${outdir}/all_collapsed_RPMu-only_xref.txt
+    if ! [ -z "${xref}" ] ; then
+      # Merge xref on gene identifier.
+      echo "$bam - Adding crossreferencing IDs"
+      slamseq_xref.R ${outdir} 'all_collapsed_RPM-only.txt' $xref 1 1
+      slamseq_xref.R ${outdir} 'all_collapsed_RPMu-only.txt' $xref 1 1
+      slamseq_xref.R ${outdir} 'all_collapsed_readCount-only.txt' $xref 1 1
+      slamseq_xref.R ${outdir} 'all_collapsed_tcReadCount-only.txt' $xref 1 1
 
-    fileutilities.py T ${outdir}/all_collapsed_rpmu_xref.txt -r --cols $(head ${outdir}/all_collapsed_rpmu_xref.txt -n 1 | fileutilities.py D -s $'\t' --swap "\n" | perl -e '$i=0; while($_=<>) {if($_=~/readCount|Entrez|Id|Name/) {print $i."\n"}; $i++}' | fileutilities.py D -s "\n" --swap , | perl -e 'while(<>){chomp;chop; print}') | fileutilities.py D -s '.readCount' --swap '' > ${outdir}/all_collapsed_readCount-only_xref.txt
-
-    fileutilities.py T ${outdir}/all_collapsed_rpmu_xref.txt -r --cols $(head ${outdir}/all_collapsed_rpmu_xref.txt -n 1 | fileutilities.py D -s $'\t' --swap "\n" | perl -e '$i=0; while($_=<>) {if($_=~/tcReadCount|Entrez|Id|Name/) {print $i."\n"}; $i++}' | fileutilities.py D -s "\n" --swap , | perl -e 'while(<>){chomp;chop; print}') | fileutilities.py D -s '.tcReadCount' --swap '' > ${outdir}/all_collapsed_tcReadCount-only_xref.txt
+      rm ${outdir}/all_collapsed_RPM-only.txt ${outdir}/all_collapsed_RPMu-only.txt ${outdir}/all_collapsed_readCount-only.txt ${outdir}/all_collapsed_tcReadCount-only.txt
+    fi
 
     # Apply scaling factors
     if [ "$spikes" -eq 1 ]; then
