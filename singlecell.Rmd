@@ -1,0 +1,1489 @@
+---
+title: "Single Cell Analysis"
+author: "Kimon Froussios"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+set.seed(12357)
+```
+
+```{r start}
+library(Seurat)
+library(ggplot2)
+library(ggExtra)
+library(GGally)
+library(patchwork)
+library(dplyr)
+library(tidyr)
+library(Matrix)
+library(matrixStats)
+library(parallel)
+library(inflection)
+library(data.table)
+# library(future)
+require(cowplot)
+require(ggrepel)
+
+# plan("multiprocess", workers = 4)
+# options(future.rng.onMisuse = "ignore")  #, future.globals.maxSize = 2000 * 1024^2)
+
+
+#
+# SEARCH KEY for parameter values requiring manual decision: "USER-INPUT"
+#
+
+
+# Checkpoints
+imported <- FALSE
+filtered <- FALSE
+ccadjusted <- FALSE
+finalized <- FALSE
+DEtabled <- FALSE
+scanparam <- TRUE
+#
+# imported <- TRUE
+# filtered <- TRUE
+# ccadjusted <- TRUE
+# scanparam <- FALSE
+# finalized <- TRUE
+# DEtabled <- TRUE
+
+# Extra steps
+custom_filter <- FALSE
+regress_cycle <- FALSE
+partial_regress <- FALSE
+#
+custom_filter <- TRUE
+regress_cycle <- TRUE
+# partial_regress <- TRUE
+```
+
+```{r info}
+datadirs <- c(control = '~/Desktop/markus_SC/control/raw_feature_bc_matrix/',
+							Kdm2b = '~/Desktop/markus_SC/kdm2b/raw_feature_bc_matrix',
+							Rc3h1 = '~/Desktop/markus_SC/Rc3h1/raw_feature_bc_matrix')
+
+projectname = 'OT1_Kdm2b-Rc3h1_ultimate'
+outdir <- '~/Desktop/markus_SC'
+
+# Markers of interest
+# USER-INPUT
+positivefilter <- c('Cd8a', 'Cd8b1', 'Cd3d')     # CD8 Tcell markers
+negativefilter <- c('Cd4')
+# KOfilter <- c(control=NA_character_, Kdm2b='Kdm2b', Rc3h1='Rc3h1')    # names must match the condition names in datadirs
+KOfilter <- c(control=NA_character_, Kdm2b=NA_character_, Rc3h1=NA_character_)    # names must match the condition names in datadirs
+filtercheck <- c('Cd2', 'Cd3e', 'Kdm2b', 'Rc3h1')
+priors <- list(selection=c(positivefilter, negativefilter, filtercheck, KOfilter),
+							 # transgenes=c('Blasti_variant','GFP_variant','hSpCas9','Hygro_variant','Luc2','mCherry','Neo',
+							 # 						  'Puro_variant','rtTA3','LTR3_LENC','mirE_polyA_LENC','NLS_Cre','ERT2','IRES'),
+							 Kdm2b_up=c("Osr2","Cd24a","Onecut2","Fbxo2"),
+							 Rc3h1_up=c("Icos","Ctla4","Tnf","Il10", "Ccl5","Lfng","Tm2d3","Polr1c"),
+							 exhaustion=c("Entpd1","Havcr2","Tigit","Lag3", "Pdcd1","Batf","Tox","Id2","Ctla4"),
+							 effectors=c("Ccl3","Prf1","Fasl","Gzmb","Gzmk","Ccl5"),
+							 naive_memory=c("Ly6c2","Cxcr3","Id3","Slamf6", "Il2ra","Xcl1","Cd44","Tcf7", "Ccr7","S1pr1","Lef1","Il7r","Sell")
+							 )
+
+# Cell-cycle genes. https://doi.org/10.1080/2162402X.2020.1737369 supplemented with a couple more genes from the Seurat vignette.
+# USER_INPUT
+cccore <- read.table('~/Desktop/markus_SC/cellcycle.txt', stringsAsFactors=FALSE)[[1]]
+
+# Core cell cycle genes by phase.  According to Seurat vignette.          
+# USER_INPUT
+s.genes <- c('Mcm4','Exo1','Slbp','Gmnn','Cdc45','Msh2','Mcm6','Rrm2','Pold3','Blm','Ubr7','Mcm5','Clspn','Hells',
+						 'Nasp','Rpa2','Rad51ap1','Tyms','Rrm1','Rfc2','Prim1','Brip1','Usp1','Ung','Pola1','Mcm2','Fen1','Tipin',
+						 'Pcna','Cdca7','Uhrf1','Casp8ap2','Cdc6','Dscc1','Wdr76','E2f8','Dtl','Ccne2','Atad2','Gins2','Chaf1b',
+						 'Pcna-ps2')       
+g2m.genes <- c('Nuf2','Psrc1','Ncapd2','Ccnb2','Smc4','Lbr','Tacc3','Cenpa','Kif23','Cdca2','Anp32e','G2e3','Cdca3',
+							 'Anln','Cenpe','Gas2l3','Tubb4b','Cenpf','Dlgap5','Hjurp','Cks1brt','Gtse1','Bub1','Birc5','Ube2c',
+							 'Rangap1','Hmmr','Ect2','Tpx2','Ckap5','Cbx5','Nek2','Ttk','Cdca8','Nusap1','Ctcf','Cdc20','Cks2',
+							 'Mki67','Tmpo','Ckap2l','Aurkb','Kif2c','Cdk1','Kif20b','Top2a','Aurka','Ckap2','Hmgb2','Cdc25c',
+							 'Ndc80','Kif11')
+
+
+varcutoff <- 80   # % variance explained cutoff in deciding number of top components
+```
+
+```{r functions}
+plot_number_of_features <- function(DF = so@meta.data) {
+		p1 <- ggplot(DF,
+					 aes(x=Source, y=nFeature_RNA, fill=Source)) +
+			geom_jitter(width=0.3, height=0, size=rel(0.5), shape=16, alpha=0.4, colour='grey50') +
+			geom_violin(draw_quantiles=c(0.25, 0.5, 0.75), colour='black', alpha=0.2, size=rel(0.5)) +
+			coord_cartesian(ylim=c(0,NA)) +
+			guides(colour=FALSE) +
+			labs(x=NULL, y=NULL, title='# of Genes') +
+			theme_light() + 
+			theme(axis.text.x=element_text(angle=45, hjust=1, vjust=1),
+						legend.position='none')
+		
+		p2 <- ggplot(DF,
+					 aes(x=Source, y=nCount_RNA, fill=Source)) +
+			geom_jitter(width=0.3, height=0, size=rel(0.5), shape=16, alpha=0.4, colour='grey50') +
+			geom_violin(draw_quantiles=c(0.25, 0.5, 0.75), colour='black', alpha=0.2, size=rel(0.5)) +
+			coord_cartesian(ylim=c(0,NA)) +
+			guides(colour=FALSE) +
+			labs(x=NULL, y=NULL, title='# of Molecules') +
+			theme_light() + 
+			theme(axis.text.x=element_text(angle=45, hjust=1, vjust=1),
+						legend.position='none')
+		
+		p3 <- ggplot(DF,
+					 aes(x=Source, y=percent.mt, fill=Source)) +
+			# geom_hline(yintercept=10, colour='red') +
+			geom_jitter(width=0.3, height=0, size=rel(0.5), shape=16, alpha=0.4, colour='grey50') +
+			geom_violin(draw_quantiles=c(0.25, 0.5, 0.75), colour='black', alpha=0.2, size=rel(0.5)) +
+			coord_cartesian(ylim=c(0,NA)) +
+			guides(colour=FALSE) +
+			labs(x=NULL, y=NULL, title='% of Mt contamination') +
+			theme_light() + 
+			theme(axis.text.x=element_text(angle=45, hjust=1, vjust=1),
+						legend.position='none')
+		
+		p4 <- ggplot(DF,
+					 aes(x=Source, y=percent.ribo, fill=Source)) +
+			# geom_hline(yintercept=10, colour='red') +
+			geom_jitter(width=0.3, height=0, size=rel(0.5), shape=16, alpha=0.4, colour='grey50') +
+			geom_violin(draw_quantiles=c(0.25, 0.5, 0.75), colour='black', alpha=0.2, size=rel(0.5)) +
+			coord_cartesian(ylim=c(0,NA)) +
+			guides(colour=FALSE) +
+			labs(x=NULL, y=NULL, title='% of Ribosomal presence') +
+			theme_light() + 
+			theme(axis.text.x=element_text(angle=45, hjust=1, vjust=1),
+						legend.position='none')
+		
+		return( list(p1, p2, p3, p4) )
+	}
+
+plot_qc_correlations <- function(DF=so@meta.data){
+		n <- unique(DF$Source)
+		DF$Source <- factor(DF$Source, ordered=TRUE, labels=n)
+		
+		featcor <- function(f1='nFeature_RNA', f2='percent.mt'){
+			paste(vapply(n, function(x) {
+							sel <- DF$Source %in% x
+							round(cor(DF[, f1][sel], DF[, f2][sel]), 2)
+						}, numeric(1)),
+						collapse=', ')
+		}
+		
+		p1 <- ggplot(DF,
+					 aes(y=nFeature_RNA, x=percent.mt, colour=Source)) +
+			facet_grid( . ~ Source) +
+			geom_point(shape=16, alpha=0.5, size=rel(0.5)) +
+			scale_colour_discrete(name='Sample', guide='none') + 
+			guides(colour='none') +
+			coord_cartesian(ylim=c(0,NA), xlim=c(0,NA)) +
+			labs(y='# of Genes',x='% of Mt contamination', title='Correlation', subtitle=featcor('nFeature_RNA', 'percent.mt')) +
+			theme_classic() + 
+			theme(axis.text.x=element_text(angle=90, hjust=0.5, vjust=1))
+		
+		p2 <- ggplot(DF,
+					 aes(y=nFeature_RNA, x=percent.ribo, colour=Source)) +
+			facet_grid( . ~ Source) +
+			geom_point(shape=16, alpha=0.5, size=rel(0.5)) +
+			scale_colour_discrete(name='Sample', guide='none') + 
+			guides(colour='none') +
+			coord_cartesian(ylim=c(0,NA), xlim=c(0,NA)) +
+			labs(y='# of Genes', x='% of Ribosomal presence', title='Correlation', subtitle=featcor('nFeature_RNA', 'percent.ribo')) +
+			theme_classic() + 
+			theme(axis.text.x=element_text(angle=90, hjust=0.5, vjust=1))
+		
+		p3 <- ggplot(DF,
+					 aes(x=nCount_RNA, y=nFeature_RNA, colour=Source)) +
+			facet_grid( . ~ Source) +
+			geom_point(shape=16, alpha=0.5, size=rel(0.5)) +
+			scale_colour_discrete(name='Sample', guide='none') + 
+			coord_cartesian(ylim=c(0,NA), xlim=c(0,NA)) +
+			labs(x='# of Molecules', y='# of Genes', title='Correlation', subtitle=featcor('nFeature_RNA', 'nCount_RNA')) +
+			theme_classic() + 
+			theme(axis.text.x=element_text(angle=90, hjust=0.5, vjust=1))
+		
+		
+		return( list(p1, p2, p3) )
+}
+
+plot_variancemeans <- function(so, features=NULL, title=NULL){
+	hvf.info <- HVFInfo(object = so, assay = NULL, selection.method = NULL,
+        status = TRUE)
+	if (!is.null(features)){
+		hvf.info["var.status"] <- rownames(hvf.info) %in% features
+		top <- rownames(hvf.info[VariableFeatures(so),])
+		top <- head(top[top %in% features], 25)
+		clr <- 'red'
+	} else {
+		hvf.info["var.status"] <- c(paste0("no (", sum(!hvf.info$variable), ")"),
+																paste0("yes (", sum(!!hvf.info$variable), ")"))[unlist(x = hvf.info[, ncol(x = hvf.info)]) + 1]
+		top <- head(VariableFeatures(so), 25)
+		clr <- 'dodgerblue'
+		title='Selection of highest variance'
+	}
+	hvf.info <- hvf.info[order(hvf.info$variance.standardized, decreasing=TRUE),]
+	limitrank <- which(rownames(hvf.info) == head(rownames(hvf.info[top,]), 1)) # Highest rank of the selection
+	
+	p1 <- ggplot(hvf.info,
+				 aes(x=mean, y=variance.standardized, colour=var.status, label=row.names(hvf.info))) +
+		geom_point(shape=16) +
+		geom_text_repel(data=hvf.info[top,], aes(label=row.names(hvf.info[top,])),
+										min.segment.length=0, size=rel(2.5), force=10, colour=clr, max.overlaps=1e4) +
+		scale_x_log10() +
+		annotation_logticks(base=10, sides='b') +
+		scale_colour_manual(values=c('grey50', 'red'), name='Selected') +   # TRUE/"yes" are ordered second after FALSE/'no'
+		labs(x='Average Expression', y='Standardized Variance', title=title) +
+		theme_classic()
+	
+	if (!is.null(features)){
+		p1 <- p1 + labs(subtitle=paste("highest rank:", limitrank))
+	}
+	
+	return(p1)
+}
+
+clean_candidates <- function(x, mito=NULL, ribo=NULL, cccore=NULL, ccextra=NULL, verbose=TRUE){
+	# Remove cell cycle genes from the pool.
+	if (!is.null(ribo)){
+		if (verbose) message('Removing ribosomal genes from the variables.')
+		x <- x[! x %in% ribo]
+		if (verbose) message(paste(length(x), 'features remain.'))
+	} else if (verbose){
+		sel <- x[x %in% ribo]
+		message(paste(length(sel), 'of the highly variable genes are ribosomal:'))
+		print(sel)
+	}
+	
+	if (!is.null(mito)){
+		if (verbose) message('Removing mitochondrial genes from the variables.')
+		x <- x[! x %in%mito]
+		if (verbose) message(paste(length(x), 'features remain.'))
+	} else if (verbose){
+		sel <- x[x %in% mito]
+		message(paste(length(sel), 'of the highly variable genes are mitochondrial:'))
+		print(sel)
+	}
+	
+	if (!is.null(cccore)){
+		if (verbose) message("Removing any cell cycle genes from the variables.")
+		x <- x[! x %in% cccore]
+		if (verbose) message(paste(length(x), 'features remain.'))
+	} else if (verbose){
+		sel <- x[x %in% cccore]
+		message(paste(length(sel), 'of the highly variable genes are associated with the cell cycle:'))
+		print(sel)
+	}
+	
+	if (!is.null(ccextra)){
+		if (verbose) message("Removing genes closely correlated with the cell cycle from the analysis pool:")
+		if (verbose) print(intersect(x, ccextra))
+		x <- x[! x %in% ccextra]
+		if (verbose) message(paste(length(x), 'features remain.'))
+	} else if (verbose){
+		sel <- x[x %in% ccextra]
+		message(paste(length(sel), 'of the highly variable genes correlate highly with the cell cycle:'))
+		print(sel)
+	}
+	
+	return(x)
+}
+
+varscan <- function(so, n, exclude=NULL, varcutoff=varcutoff) {
+	message(paste("Cumulative variance explainec cutoff:", varcutoff))
+	
+	v <- as.data.frame(t(as.data.frame( mclapply(n, function(x){
+		so <- FindVariableFeatures(so, selection.method = "vst", nfeatures = x)
+		topvariables <- VariableFeatures(so)
+		if(!is.null(exclude)) {
+			topvariables <- clean_candidates(topvariables, mito=exclude, verbose=FALSE)
+		}
+		
+		so <- RunPCA(so, features = topvariables, npcs=50)
+		pc_vars <- Stdev(object = so, reduction = 'pca') ^ 2  # From stdevs to % of total variance.
+		pc_vars <- 100 * pc_vars / sum(pc_vars)
+		cv <- cumsum(pc_vars)
+		elbow <- uik(1:50, pc_vars)
+		return(c( pc_vars[1] -  pc_vars[2], 
+							pc_vars[1] +  pc_vars[2], 
+							head(which(cv>=varcutoff), 1),
+							tail(which(pc_vars>=1), 1),
+							elbow, 
+							cv[elbow] ))
+	}, mc.cores=4))))
+	names(v) <- c('diff_1_2', 'sum_1_2', 'sum_to_80', 'over_1', 'elbow', 'elbow_var')
+
+	candidates <- c(minover1 = n[ min(which(v$over_1 == min(v$over_1))) ],
+								kover1 = uik(x=n, y=v$over_1),
+								minsum80 = n[ min(which(v$sum_to_80 == min(v$sum_to_80))) ],
+								ksumto80 = uik(x=n, y=v$sum_to_80),
+								ksum2 = uik(x=n, y=v$sum_1_2),
+								kelbow = uik(x=n, y=v$elbow_var),
+								mindiff2 = n[which(v$diff_1_2 == min(v$diff_1_2))],
+								kdiff2 = uik(x=n, y=v$diff_1_2))
+								
+	p1 <- ggplot(v) +
+		geom_vline(xintercept=candidates['ksum2'], linetype='dotted', colour='blue') +
+		geom_vline(xintercept=candidates['kelbow'], linetype='dotted', colour='forestgreen') +
+		geom_vline(xintercept=candidates['mindiff2'], linetype='dashed', colour='black', alpha=0.2) +
+		geom_vline(xintercept=candidates['kdiff2'], linetype='dotted', colour='black') +
+		geom_vline(xintercept=candidates['minover1'], linetype='dashed', colour='purple', alpha=0.2) +
+		geom_vline(xintercept=candidates['kover1'], linetype='dotted', colour='purple') +
+		geom_vline(xintercept=candidates['minsum80'], linetype='dashed', colour='magenta', alpha=0.2) +
+		geom_vline(xintercept=candidates['ksum80'], linetype='dotted', colour='magenta') +
+		geom_line(aes(x=n, y=sum_1_2, colour='by first 2 componenets')) +
+		geom_line(aes(x=n, y=elbow_var, colour='by scree elbow point')) +
+		geom_line(aes(x=n, y=diff_1_2, colour='difference between first 2 components')) +
+		scale_x_sqrt(breaks=c(100,500,1000,2000,5000,10000,15000,20000)) +
+		scale_colour_manual(values=c(`by first 2 componenets`='forestgreen', 
+																 `by scree elbow point`='blue',
+																 `difference between first 2 components`='black')) +
+		coord_cartesian(ylim=c(0,NA)) +
+		labs(x='Number of features', y='% Variance explained') +
+		theme_light() + 
+		theme(legend.position='bottom', legend.direction='vertical', legend.title=element_blank(),
+					panel.grid=element_blank())
+	
+	p2 <- ggplot(v) +
+		geom_vline(xintercept=candidates['ksum2'], linetype='dotted', colour='blue') +
+		geom_vline(xintercept=candidates['kelbow'], linetype='dotted', colour='forestgreen') +
+		geom_vline(xintercept=candidates['mindiff2'], linetype='dashed', colour='black', alpha=0.2) +
+		geom_vline(xintercept=candidates['kdiff2'], linetype='dotted', colour='black') +
+		geom_vline(xintercept=candidates['minover1'], linetype='dashed', colour='purple', alpha=0.2) +
+		geom_vline(xintercept=candidates['kover1'], linetype='dotted', colour='purple') +
+		geom_vline(xintercept=candidates['minsum80'], linetype='dashed', colour='magenta', alpha=0.2) +
+		geom_vline(xintercept=candidates['ksum80'], linetype='dotted', colour='magenta') +
+		geom_line(aes(x=n, y=sum_to_80, colour='cumulatively reaching 80% variance explained')) +
+		geom_line(aes(x=n, y=over_1, colour='explaining at least 1% variance each')) +
+		geom_line(aes(x=n, y=elbow, colour='at scree elbow point')) +
+		scale_x_sqrt(breaks=c(100,500,1000,2000,5000,10000,15000,20000)) +
+		scale_colour_manual(values=c(`cumulatively reaching variance explained cutoff`='magenta', 
+																 `explaining at least 1% variance each`='purple',
+																 `at scree elbow point`='orange')) +
+		coord_cartesian(ylim=c(0,NA)) +
+		labs(x='Number of features', y='Number of components') +
+		theme_light() + theme(legend.position='bottom', legend.direction='vertical', legend.title=element_blank(),
+					panel.grid=element_blank())
+	
+	print( p1 / p2 + plot_layout(guides='collect') )
+
+	return(v)
+}
+
+plotscan <- function(so, topvariables, split=FALSE,
+										 nv=500, dimlim=c(5, 10, 20, 50), nneighbours=c(30), mindist=c(0.2), resolutions=c(0.3, 0.8, 1.2)) {
+
+	pdf(file=file.path(outdir, paste0(projectname, '_parameter-scan_V', nv, '-', length(topvariables), '.pdf')), width=12, heigh=12)
+	
+		# PCA
+		so <- RunPCA(so, features = topvariables)
+		ndims <- length(Stdev(so))
+		print( (plot_variancemeans(so, topvariables) + labs(title=length(topvariables), subtitle=NULL)) / scree(so)[[1]] )
+		
+		p1 <- DimPlot(so, reduction = "pca", dims=c(1,2), pt.size = 0.1, split.by='Source') +
+					 	coord_fixed(ratio=1) +
+						labs(title=NULL) +
+						theme_light() +
+						theme(panel.grid=element_blank())
+		p2 <- DimPlot(so, reduction = "pca", dims=c(1,3), pt.size = 0.1, split.by='Source') +
+					 	coord_fixed(ratio=1) +
+						labs(title=NULL) +
+						theme_light() +
+						theme(panel.grid=element_blank())
+		print( (p1 + labs(subtitle=length(topvariables))) / p2 + plot_layout(guides='collect') )
+	
+		# UMAPs
+		combo <- expand.grid(nneighbours, unique(c(dimlim[dimlim <= ndims], ndims)))
+		for (md in mindist) {
+			# md <- 0.2
+			for (nn in nneighbours){
+				# l <- apply(combo, 1, function(r){
+					# nn <- r[[1]]
+					# dl <- r[[2]]
+				for(res in resolutions){
+				l	<- lapply(unique(c(dimlim[dimlim <= ndims], ndims)), function(dl) {
+						
+						so <- RunUMAP(so, dims=1:dl, n.neighbors=nn, min.dist=md)
+						
+						so <- FindNeighbors(so, dims=1:dl)
+						so <- FindClusters(so, resolution=res)
+						if (split){
+							p3 <- DimPlot(so, reduction='umap', group.by='seurat_clusters', pt.size=0.1, split.by='Source') +
+								theme(legend.position='none')
+						} else {
+							p3 <- DimPlot(so, reduction='umap', group.by='seurat_clusters', pt.size=0.1)
+						}
+						p3 <- p3 + coord_fixed(ratio=1) +
+							labs(title=NULL, x=NULL, y=NULL, 
+									 subtitle=paste0('V',nv, 
+									 								' D', dl, 
+									 								' N', nn, 
+									 								' d', md, 
+									 								' r', res, 
+									 								' c:', length(unique(so@meta.data$seurat_clusters)) )) 
+						return( p3 )
+					})
+						
+					P <- Reduce(`+`, l) + plot_layout(guides='collect')
+					print( P )
+				}
+			}
+		}
+		
+	dev.off()
+}
+		
+scan_param <- function(so=so,  split=FALSE, nvariables=c(200, 500, 1000, 2000), dimlim=c(5, 10, 20, 50), 
+											 nneighbours=c(5, 10, 30, 50), mindist=c(0.01, 0.1, 0.3, 0.5), resolutions=c(0.3, 0.8, 1.2),
+											 exclude=NULL, maybe_exclude=NULL){
+	# nvariables=500; nneighbours=30; mindist=0.2; resolutions=0.3; exclude=c(cccore, ribogenes, mtgenes); maybe_exclude=ccextra
+	
+	message(file.path(outdir, paste0(projectname, '_parameter-scan_*.pdf')))
+	
+	mclapply(nvariables, function(nv){
+		# nv <- nvariables[1]
+		
+		# Select variable genes
+		so <- FindVariableFeatures(so, selection.method = "vst", nfeatures = nv)
+		topvariables <- VariableFeatures(so)
+		
+		# Before exclusions
+		plotscan(so, topvariables, split, nv, dimlim, nneighbours, mindist, resolutions)
+		
+		# Apply exclusions
+		if (!is.null(exclude)) {
+			topvariables1 <- clean_candidates(topvariables, verbose=FALSE, mito=exclude) # the parameter doesn't matter without verbose messages
+		}
+		if (!is.null(maybe_exclude)) {
+			topvariables2 <- clean_candidates(topvariables1, verbose=FALSE, mito=maybe_exclude) # the parameter doesn't  matter without verbose messages
+		}
+		
+		# After mandatory exclusions
+		if (length(topvariables1) < length(topvariables)){
+			plotscan(so, topvariables1, split, nv, dimlim, nneighbours, mindist, resolutions)
+		}
+		
+		# After additional exclusions
+		if (length(topvariables2) < length(topvariables1)) {
+			plotscan(so, topvariables2, split, nv, dimlim, nneighbours, mindist, resolutions)
+		}
+		
+		
+		return(TRUE)
+	}, mc.cores=min(4, length(nvariables)) )
+}
+
+scree <- function (so, cutoff=80) {
+	pc_vars <- Stdev(object = so, reduction = 'pca') ^ 2  # From stdevs to % of total variance.
+	pc_vars <- 100 * pc_vars / sum(pc_vars)
+	ndims <- length(pc_vars)
+	pc_vars <- data.frame(PC = 1:ndims, var = pc_vars, cumvar = cumsum(pc_vars))
+	
+	# Pick the top most informative components, by individual contribution or combined contribution, whichever happens first.
+	npc <- min(tail(which(pc_vars$var > 1), 1), head(which(pc_vars$cumvar > cutoff), 1))
+	# Find the elbow
+	elbow <- uik(pc_vars$PC, pc_vars$var)
+	
+	vnpc <-pc_vars[pc_vars$PC==npc, "cumvar"]
+	velb <- pc_vars[pc_vars$PC==elbow, "cumvar"]
+	
+	p1 <- ggplot(data = pc_vars) +
+						geom_vline(xintercept=npc, linetype='dotted', colour='red') +
+						geom_vline(xintercept=elbow, linetype='dashed', colour='blue') +
+						geom_hline(yintercept=vnpc, linetype='dotted', colour='red') +
+						geom_hline(yintercept=velb, linetype='dashed', colour='blue') +
+				    geom_bar(aes(x=PC, y=var), stat='identity', width=0.7, fill='grey70') +
+						geom_line(aes(x=PC, y=cumvar), colour='dodgerblue') +
+						geom_point(aes(x=PC, y=cumvar), colour='dodgerblue', size=1) +
+						geom_text(aes(label=paste(round(var,2), '%'), y=var + 2, x=PC), angle=90, hjust=0, size=rel(2.2)) +
+						labs(x='PC', y='% Variance', subtitle=paste('Elbow:', elbow, 'PCs', round(velb, 2), '% .',
+				    																						'Top informative:', npc, 'PCs', round(vnpc, 2), '%')) +
+					  theme_light() + theme(panel.grid=element_blank())
+	
+	return( list(scree=p1, npc=npc, elbow=elbow) )
+}
+
+my_cont_ggpairs_pointFn <- function(data, mapping, ptargs=list(), ...) {
+  ggplot(data = data, mapping = mapping, ...) +
+    do.call(geom_point, ptargs) +
+    theme_bw()
+}
+
+my_cont_ggpairs_densFn <- function(data, mapping, densargs=list(), ...) {
+  ggplot(data = data, mapping = mapping) +
+    do.call(geom_density, densargs) +
+    theme_bw() + 
+		theme(panel.grid=element_blank())
+}
+
+plot_grid_pcs <- function(so, comps=1:5, flip=FALSE) {
+	griddata <- as.data.frame(so@reductions$pca@cell.embeddings[, comps])
+	if (flip) {   # densities on the phases instead of on the sources
+		print(
+			ggpairs(data=griddata, title="CC.Phase \\ Source",
+				mapping=aes(fill=so@meta.data$Source, colour=so@meta.data$Phase),     # rows are in same order across tables
+				lower=list(continuous = wrap(my_cont_ggpairs_pointFn, ptargs=list(size=0.5, alpha=0.5))),
+				upper=list(continuous = wrap(my_cont_ggpairs_pointFn, ptargs=list(shape=21, size=0.5, alpha=0.5, colour='transparent'))),
+				diag=list(continuous = wrap(my_cont_ggpairs_densFn, densargs=list(alpha=0.5, fill="transparent")))
+		  )
+		)
+	} else {
+		print(
+			ggpairs(data=griddata, title="Source \\ CC.Phase",
+				mapping=aes(colour=so@meta.data$Source, fill=so@meta.data$Phase),     # rows are in same order across tables
+				lower=list(continuous = wrap(my_cont_ggpairs_pointFn, ptargs=list(size=0.5, alpha=0.5))),
+				upper=list(continuous = wrap(my_cont_ggpairs_pointFn, ptargs=list(shape=21, size=0.5, alpha=0.5, colour='transparent'))),
+				diag=list(continuous = wrap(my_cont_ggpairs_densFn, densargs=list(alpha=0.5, fill="transparent")))
+		  )
+		)
+	}
+}
+
+do_clusters <- function(so, d=1:50, resolution=0.8, nneighbours=30, mindist=0.3){
+	message(paste('PCs:', paste(d, collapse=', ')))
+	message(paste('Clustering resolution:', resolution))
+	message(paste('Number of neighbours:', nneighbours))
+	message(paste('Minimum distance:', mindist))
+
+	so <- RunUMAP(so, dims=d, n.neighbors=nneighbours, min.dist=mindist)
+
+	p1 <- DimPlot(so, reduction='umap', group.by='Source') +
+		coord_fixed(ratio=1) +
+		labs(title=NULL) +
+		theme_light() +
+		theme(panel.grid=element_blank())
+		
+  p2 <- DimPlot(so, reduction='umap', group.by='Source', split.by='Source') +
+		coord_fixed(ratio=1) +
+		labs(title=NULL) +
+		theme_light() +
+		theme(panel.grid=element_blank())
+		
+	print( p1 / p2 + plot_layout(guides='collect') )
+	
+	# p1 <- DimPlot(so, reduction='umap', group.by='Phase') +
+	# 		coord_fixed(ratio=1) +
+	# 		labs(title=NULL) +
+	# 		theme_light() +
+	# 		theme(panel.grid=element_blank())
+	# 
+	# print(p1)
+	# 
+	# p2 <- DimPlot(so, reduction='umap', group.by='Phase', split.by='Phase') +
+	# 		coord_fixed(ratio=1) +
+	# 		labs(title=NULL) +
+	# 		theme_light() +
+	# 		theme(panel.grid=element_blank())
+	# 
+	# print( p1 / p2 + plot_layout(guides='collect') )
+	# 
+	so <- FindNeighbors(so, dims=d)
+	so <- FindClusters(so, resolution=resolution)
+	
+	message( paste('Clusters identified:', length(unique(so$seurat_clusters))) )
+	p1 <- DimPlot(so, reduction='umap', label=TRUE, group.by='seurat_clusters') +
+		coord_fixed(ratio=1) +
+		labs(title=NULL) +
+		theme_light() +
+		theme(panel.grid=element_blank(),
+					legend.position='none')
+	
+	p2 <- DimPlot(so, reduction='umap', label=FALSE, group.by='seurat_clusters', split.by='Source') +
+		coord_fixed(ratio=1) +
+		labs(title=NULL) +
+		theme_light() +
+		theme(panel.grid=element_blank(),
+					legend.position='none')
+
+	print( p1 / p2 )
+
+	DF <- table(so$seurat_clusters, so$Source)
+	DF <- as.data.frame(cbind(DF, rowSums(DF)))
+	names(DF)[ncol(DF)] <- 'Total'
+	# message('Number of cells per cluster:')
+	# print(DF)
+	DF['Cluster'] <- factor(rownames(DF), ordered=TRUE, levels=rownames(DF))
+	p1 <- ggplot(melt(as.data.table(DF), id.vars='Cluster', value.name='cells', variable.name='Source'),
+				 aes(x=Source, y=Cluster, fill=cells)) +
+		geom_tile() +
+		geom_text(aes(label=cells), size=rel(2.5)) +
+		scale_fill_gradient(low='darkgreen', high='gold') +
+		labs(title='Number of cells', x=NULL) +
+		theme_bw() +
+		theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
+					legend.position='none')
+	
+	frac1 <- sweep(DF[, 1:(ncol(DF)-1)], 2, colSums(DF[, 1:(ncol(DF)-1)]), `/`) * 100
+	frac1['Cluster'] <- factor(rownames(frac1), ordered=TRUE, levels=rownames(frac1))
+	p2 <- ggplot(melt(as.data.table(frac1), id.vars='Cluster', value.name='pct', variable.name='Source'),
+							 aes(x=Source, y=Cluster, fill=pct)) +
+		geom_tile() +
+		geom_text(aes(label=round(pct, 1)), size=rel(2.5)) +
+		scale_fill_gradient(low='darkblue', high='gold') +
+		labs(title='% of cells by condition', x=NULL, y=NULL) +
+		theme_bw() +
+		theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
+					legend.position='none')
+	
+	frac2 <- sweep(frac1[, 1:(ncol(frac1)-2)], 1, rowSums(frac1[, 1:(ncol(frac1)-2)]), `/`) * 100
+	frac2['Cluster'] <- factor(rownames(frac2), ordered=TRUE, levels=rownames(frac2))
+	p3 <- ggplot(melt(as.data.table(frac2), id.vars='Cluster', value.name='pct', variable.name='Source'),
+							 aes(x=Source, y=Cluster, fill=pct)) +
+		geom_tile() +
+		geom_text(aes(label=round(pct, 1)), size=rel(2.5)) +
+		scale_fill_gradient(low='darkblue', high='gold') +
+		labs(title='% of cells by cluster', subtitle='(normalized for condition)', x=NULL, y=NULL) +
+		theme_bw() +
+		theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
+					legend.position='none')
+	
+	print( p1 | p2 | p3 )
+	
+	return(so)
+}
+
+
+# Rolling slice, to limit the number of genes per plot.
+rollslice <- function(A,B) {
+  l <- length(A)
+  s <- as.integer(l/B)  # number of slices
+  if (s * B < l) {
+    s <- s + 1
+  }
+  
+  lapply(1:s, function(D){
+    ((D-1)*B + 1):min(l, D*B)
+  })
+}
+
+
+do_de <- function(so, DEtabled=FALSE, lfcthresh=0.25, pctexpthresh=0.25, diffpct=-Inf, odr=outdir, pjn=projectname, suffix=NULL) {
+	if (!DEtabled) {
+		# Find markers for every cluster compared to all remaining cells,
+		so.markers <- FindAllMarkers(so, only.pos = FALSE, min.pct = pctexpthresh, logfc.threshold = lfcthresh, min.diff.pct = diffpct)
+		
+		# Checkpoint
+		write.table(so.markers, file=file.path(odr, paste0(pjn, '_clustermarkers_', suffix, '.tsv')), 
+								sep="\t", quote=FALSE, col.names=TRUE, row.names=TRUE)
+		DEtabled <- TRUE
+		
+	} else {
+		
+		so.markers <- read.table(file=file.path(odr, paste0(pjn, '_clustermarkers_', suffix, '.tsv')), 
+														 sep="\t", header=TRUE, stringsAsFactors=FALSE)
+	}
+	
+	cm <- so.markers %>% 
+		mutate(abslfc = abs(avg_logFC)) %>%
+		filter(! gene %in% c(mtgenes, ribogenes, cccore, ccextra)) %>%
+		group_by(cluster) %>%
+		top_n(n = 18, wt = avg_logFC) %>% 
+		# top_n(n = 18, wt = abslfc) %>%    # negative LFCs tend to not be cluster-specific, because of averaging across all the other clusters
+		ungroup()
+	
+	
+	for (cl in unique(cm$cluster)){
+		# cl <- unique(cm$cluster)[1]
+		print(paste("Cluster:", cl))
+		subg <- unique(cm[cm$cluster==cl, ]$gene)
+		# Make colouring variable highlighting just this cluster
+		so@meta.data[['this_cluster']] <- as.character(so@meta.data[['seurat_clusters']]) == as.character(cl)
+		# print( (DimPlot(so, reduction='pca', group.by='this_cluster') + coord_fixed() +
+		# 					scale_colour_manual(values=c('black', 'magenta')) +
+		# 					labs(title=paste('Cluster', cl)) + theme(legend.position='none' )) |
+		# 			 (DimPlot(so, reduction='pca', group.by='Source') + coord_fixed() )
+		# )
+		print( (DimPlot(so, reduction='umap', group.by='this_cluster', label=FALSE) + 
+						coord_fixed() + scale_colour_manual(values=c('black', 'magenta')) +
+						labs(title=paste('Cluster', cl)) + theme(legend.position='none' )) /
+				 (DimPlot(so, reduction='umap', group.by='Source', split.by='Source') + 
+				  	coord_fixed() + theme(legend.position='none' ) + labs(title=NULL) )
+		)
+
+		for (x in rollslice(subg, 9)) {
+			# x <- rollslice(subg, 9)[[1]]
+			print( subg[x] )   # Make it easier to text-search the report for the relevant plots for a gene
+	
+			print( FeaturePlot(so, reduction='umap', features = subg[x], coord.fixed=TRUE) )
+			
+			print( DotPlot(so, features = subg[x], group.by='seurat_clusters', scale.min=0, scale.max=100) + RotatedAxis()  )
+			#
+			# print( VlnPlot(so, slot='data', features = subg[x], pt.size=0.01, group.by='seurat_clusters') + RotatedAxis()  )
+			#
+			
+			print( RidgePlot(so, features=subg[x], group.by='Source', stack=FALSE) & labs(y=NULL, x=NULL) )
+			# 
+			# print( DotPlot(so, features = subg[x], group.by='Source', scale.min=0, scale.max=100) + RotatedAxis()  )
+			#
+			# print( VlnPlot(so, features = subg[x], pt.size=0.01, group.by='Source') + RotatedAxis() )
+		}
+	}
+}
+```
+
+
+
+
+
+# Import data
+
+```{r import}
+if (!imported) {
+	mincells = 10      # USER_INPUT
+	minfeat = 200     # USER_INPUT
+
+	message(paste('Data:', paste(datadirs, collapse=', ')))
+	message(paste('Min # cells:', mincells))
+	message(paste('Min # features per cell at import:', minfeat))
+
+	# Import data pre-processed with 10X CellRanger
+	CR <- Read10X(data.dir=datadirs, gene.column=2, unique.features=TRUE, strip.suffix = TRUE) 
+	
+	# Create seurat object.
+	# Inconsistent nesting structure created by Read10X. If multiple measurement types are integrated, there is an extra nesting layer, that is not kept when there is only one measurement type.
+	if ('Gene Expression' %in% names(CR)){
+		# Multiple measurement types (ie, RNA and protein) in the imported data
+		so <- CreateSeuratObject(counts = CR[`Gene Expression`], 
+														 min.cells=mincells, project=projectname, min.features=minfeat)
+	} else {
+		# Just a single measurement type (probably "Gene Expression" ?)
+		so <- CreateSeuratObject(counts = CR, min.cells=mincells, project=projectname, min.features=minfeat)
+	}
+	
+	so@meta.data[["Source"]] = so@meta.data[["orig.ident"]]
+	
+	# Checkpoint.
+	saveRDS(so, file = file.path(outdir, paste0(projectname, '_imported.RDS')))
+	imported <- TRUE
+	
+} else {
+	
+	so <- readRDS(file = file.path(outdir, paste0(projectname, '_imported.RDS')))
+}
+
+print( so )
+```
+
+
+
+
+
+
+# QC
+
+## Input summary
+
+```{r qc_input1, fig.width=15, fig.height=15}
+# if (!filtered) {
+	
+	## The number of unique genes and total molecules are automatically calculated during CreateSeuratObject
+	
+	# Contamination with mitochondrial genes
+	so[['percent.mt']] <- PercentageFeatureSet(so, pattern='^MT-|^mt-|^Mt-')
+	
+	# Ribosomal genes
+	so[['percent.ribo']] <- PercentageFeatureSet(so, pattern='^Rp[ls]|^rp[ls]|^RP[LS]')
+	
+	# Count summaries.
+	for (s in unique(so@meta.data$Source)){
+		message(s)
+		print( summary(so@meta.data[so@meta.data$Source==s, c('nFeature_RNA', 'nCount_RNA', 'percent.mt', 'Source')]) )
+	}
+	
+	l <- plot_number_of_features(so@meta.data)
+	print( l[[1]] + l[[2]] + l[[3]] + l[[4]] + plot_layout(guides='collect'))
+# }
+```
+
+```{r qc_inpu2, fig.width=10, fig.height=6}
+# if (!filtered) {
+	# Correlations. Only number of molecules and number of genes should correlate.
+	l <- plot_qc_correlations(so@meta.data)
+	print( l[[1]] + l[[2]] + l[[3]] + plot_layout(guides='collect'))
+# }
+```
+
+## Quality filters
+
+```{r qc_filter, fig.height=8, fig.width=8}
+expressedgenes <- rownames(so)[rowSums(so@assays$RNA@counts > 0) > 0]
+mtgenes <- rownames(so)[grepl('^MT-|^mt-|^Mt-', perl=TRUE, rownames(so))]                   # USER_INPUT
+nonmtgenes <- rownames(so)[!grepl('^MT-|^mt-|^Mt-', perl=TRUE, rownames(so))]               # USER_INPUT
+ribogenes <- rownames(so)[grepl('^RP[LS]|^rp[ls]|^Rp[ls]', perl=TRUE, rownames(so))]        # USER_INPUT
+nonribogenes <- rownames(so)[!grepl('^RP[LS]|^rp[ls]|^Rp[ls]', perl=TRUE, rownames(so))]    # USER_INPUT
+	
+so <- NormalizeData(so, normalization.method = "LogNormalize", scale.factor = 1e6)
+so <- ScaleData(so, features = rownames(so))
+so <- FindVariableFeatures(so, nfeatures=nrow(so))
+p1 <- plot_variancemeans(so, mtgenes, 'Mitochondrial variances')
+p2 <- plot_variancemeans(so, ribogenes, 'Ribosomal variances')
+print(p1 / p2 + plot_layout(guides='collect'))
+
+if (!filtered) {
+	# Remove unwanted cells
+	minfeat <- 1000      # USER-INPUT
+	maxfeat <- 5000      # USER-INPUT
+	maxmt <- 8           # USER-INPUT
+	maxribo <- 50        # USER-INPUT
+	maxmols <- 30000     # USER-INPUT
+	minmols <- minfeat   # USER-INPUT    (it can be bigger than minfeat, but it doesn't make sense to be smaller)
+	
+	message('Removing cells with high abundance of ribosomal and mitochondrial genes.')
+	message(paste('Selected lower threshold:', minfeat, 'features'))
+	message(paste('Selected upper cutoff:', maxfeat, 'features'))
+	message(paste('Selected lower threshold:', minmols, 'molecules'))
+	message(paste('Selected upper cutoff:', maxmols, 'molecules'))
+	message(paste('Max mitochondrial contamination allowed:', maxmt, '%'))
+	message(paste('Max ribosomal presence allowed:', maxribo, '%'))
+	
+	# Remove cells with high/low number of features
+	so <- subset(so, subset = nFeature_RNA > minfeat & nFeature_RNA < maxfeat &
+  # and cells with too many sequenced molecules
+  	            nCount_RNA < maxmols & nCount_RNA >= minmols &
+	# and cells with high mitochondrial/ribosomal presence
+							 	percent.mt < maxmt & percent.ribo < maxribo)
+	
+	# Remove non-expressed genes.
+	message( paste('Expressed genes:', length(expressedgenes)) )
+	so <- subset(so, features = expressedgenes)
+	
+	# Don't save here. Save after scaling the data.
+	# saveRDS(so, file = file.path(outdir, paste0(projectname, '_filtered.RDS')))
+	# filtered <- TRUE
+	
+} else {
+	
+	message("Using pre-processed data that's already filtered.")
+	so <- readRDS(file = file.path(outdir, paste0(projectname, '_filtered.RDS')))
+}
+```
+
+```{r qc_filtered, fig.width=15, fig.height=15}
+# Count summaries.
+for (s in unique(so@meta.data$Source)){
+	message(s)
+	print( summary(so@meta.data[so@meta.data$Source==s, c('nFeature_RNA', 'nCount_RNA', 'percent.mt', 'Source')]) )
+}
+	
+l <- plot_number_of_features(so@meta.data)
+print( l[[1]] + l[[2]] + l[[3]] + l[[4]] + plot_layout(guides='collect'))
+```
+
+## Custom filters
+
+
+### Shared marker filtering
+
+Applies to all inputs.
+
+```{r custom_filter1, fig.width=15, fig.height=15}
+if (!custom_filter) {
+	message("No additional filtering specified.")
+} else {
+	if (!filtered) {
+		print( VlnPlot(so, features=priors$selection, group.by='Source', pt.size=0.01) &
+					 	coord_cartesian(ylim=c(0,NA)) & labs(x=NULL) )
+	} else {
+		message("Using already filtered data.")
+	}
+}
+```
+
+```{r custom_filter2, fig.width=15, fig.height=15}
+if (custom_filter) {
+	if(!filtered) {
+		expthresh <- 2.5      # USER-INPUT min log expression level
+		
+		if (!is.null(positivefilter)){
+			sel <- so@assays$RNA@data[positivefilter, ] >= expthresh
+	
+			if(is.null(dim(sel))){
+				so <- subset(so, cells = colnames(so)[sel] )
+			} else {
+				## USER_INPUT choose filtering method
+				
+				# message(paste('Keep cells expressing ALL of', paste(positivefilter,  collapse=','), 'above', expthresh))
+				# so <- subset(so, cells = colnames(so)[colSums(sel) == length(positivefilter)] )
+				
+				message(paste('Keep cells expressing ANY of', paste(positivefilter,  collapse=','), 'above', expthresh))
+				so <- subset(so, cells = colnames(so)[colSums(sel) >= 1] )
+			}
+		}
+		
+		if (!is.null(negativefilter)) {
+			# USER-INPUT choose filtering method
+			
+			# message(paste('Reject cells expressing', paste(negativefilter,  collapse=','), 'above', expthresh))
+			# sel <- so@assays$RNA@data[negativefilter, ] < expthresh
+			
+			message(paste('Reject cells expressing', paste(negativefilter,  collapse=',')))
+			sel <- so@assays$RNA@data[negativefilter, ] == 0
+			
+			if(is.null(dim(sel))){
+				so <- subset(so, cells = colnames(so)[sel] )
+			} else {
+				so <- subset(so, cells = colnames(so)[colSums(sel) >= 1] )
+			}
+		}
+	} else {
+		message("Using already filtered data.")
+	}
+		
+	print( VlnPlot(so, features=priors$selection, group.by='Source', pt.size=0.01) &
+					 	coord_cartesian(ylim=c(0,NA)) & labs(x=NULL) )
+	
+	# Don't save here yet either
+	# saveRDS(so, file = file.path(outdir, paste0(projectname, '_filtered.RDS')))
+	# filtered <- TRUE
+	
+	# Count summaries.
+	for (s in unique(so@meta.data$Source)){
+		message(s)
+		print( summary(so@meta.data[so@meta.data$Source==s, c('nFeature_RNA', 'nCount_RNA', 'percent.mt', 'Source')]) )
+	}
+		
+	l <- plot_number_of_features(so@meta.data)
+	print( l[[1]] + l[[2]] + l[[3]] + l[[4]] + plot_layout(guides='collect'))
+	
+	# l <- plot_qc_correlations(so@meta.data)
+	# print( l[[1]] + l[[2]] + l[[3]] + plot_layout(guides='collect'))
+}
+```
+
+### Knock-out filtering
+
+Individual for each input.
+
+```{r ko}
+if (custom_filter){
+	if (!filtered && any(!is.na(KOfilter))) {
+		print( VlnPlot(so, features=KOfilter, split.by='Source') & labs(x='Samples') )
+		
+		expthresh <- 2.5      # USER-INPUT min log expression level
+		message(paste("Retaining detection <=", expthresh))
+		
+		cellsbysource <- lapply(names(KOfilter), function(x){
+			colnames(so)[so@meta.data$Source == x]
+		})
+		names(cellsbysource) <- names(KOfilter)
+		
+		sel <- lapply(names(KOfilter), function(x){
+			if (!is.na(KOfilter[x])) {
+				cellsbysource[[x]] [ which(so@assays$RNA@data[KOfilter[x], cellsbysource[[x]]] <= expthresh) ]
+			} else {
+				cellsbysource[[x]]
+			}
+		})
+		names(sel) <- names(KOfilter)
+		
+		v <- paste0(round(vapply(sel, length, integer(1)) / vapply(cellsbysource, length, integer(1)), 3) * 100, "%")
+		names(v) <- names(KOfilter)
+		print( v )
+		
+		so <- subset(so, cells=unlist(sel))
+		print( VlnPlot(so, features=KOfilter, split.by='Source') & labs(x='Samples') )
+		
+		# Count summaries.
+		for (s in unique(so@meta.data$Source)){
+			message(s)
+			print( summary(so@meta.data[so@meta.data$Source==s, c('nFeature_RNA', 'nCount_RNA', 'percent.mt', 'Source')]) )
+		}
+	} else {
+		message('Already filtered?')
+	}
+} else {
+	message('No custom filtering')
+}
+```
+
+## Scaling
+
+```{r scale}
+if (!filtered){
+	normscalefactor=1e6    # USER-INPUT
+
+	# Normalize counts across cells
+	message(paste('Log-normalization to:', normscalefactor))
+	so <- NormalizeData(so, normalization.method = "LogNormalize", scale.factor = normscalefactor)
+	
+	# Standardize expressions
+	so <- ScaleData(so, features = rownames(so))
+	
+	# Checkpoint.
+	saveRDS(so, file = file.path(outdir, paste0(projectname, '_filtered.RDS')))
+}
+```
+
+## Cell cycle phases
+
+```{r qc_cc}
+# Identify cell cycle phase of each cell
+if (!is.null(s.genes) && !is.null(g2m.genes)) {
+	so <- CellCycleScoring(so, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+	so$CC.Difference <- so$S.Score - so$G2M.Score
+	
+	# CC phase summary
+	for (s in unique(so@meta.data$Source)){
+		message(s)
+		print( summary(so@meta.data[so@meta.data$Source==s, c('Source', 'Phase')]) )
+	}
+} else {
+	message("No cell cycle gene lists were provided.")
+}
+```
+
+## Variances of cell cyle
+
+GO-term annotated cell cycle genes, and genes whose expression correlates highly with them.
+
+```{r ccvar, fig.width=8, fig.height=8}
+if (!filtered){
+	# Find genes that correlate highly with the cell cycle genes.
+	corthresh <- 0.5     # USER-INPUT
+	
+	# https://stackoverflow.com/questions/5888287/running-cor-or-any-variant-over-a-sparse-matrix-in-r
+	sparse.cor <- function(x){
+	  n <- nrow(x)
+	  m <- ncol(x)
+	  ii <- unique(x@i)+1 # rows with a non-zero element
+	
+	  Ex <- colMeans(x)
+	  nozero <- as.vector(x[ii,]) - rep(Ex,each=length(ii))        # colmeans
+	
+	  covmat <- ( crossprod(matrix(nozero,ncol=m)) +
+	              crossprod(t(Ex))*(n-length(ii))
+	            )/(n-1)
+	  sdvec <- sqrt(diag(covmat))
+	  covmat/crossprod(t(sdvec))
+	}
+	
+	cm <- sparse.cor(t(so@assays$RNA@data))  # This takes several minutes (regular matrix takes forever)...
+	cm <- as.matrix(cm)
+	cm <- cm[cccore,]
+	cml <- cm >= corthresh
+	sel <- apply(cml, 2, function(x){ any(x, na.rm=TRUE) })
+	message(paste(sum(sel), "genes correlate with coeficient >", corthresh, "with the", length(cccore), "provided cell cycle genes:"))
+	ccextra <- colnames(cml)[sel]
+	print(ccextra)
+	
+	# Checkpoint
+	saveRDS(ccextra, file = file.path(outdir, paste0(projectname, '_ccextra.RDS')))
+} else  {
+	message('Using precomputed list of cell cycle correlated genes.')
+	ccextra <- readRDS( file = file.path(outdir, paste0(projectname, '_ccextra.RDS')))
+}
+
+p1 <- plot_variancemeans(so, features=cccore, title='Core cell cycle genes')
+p2 <- plot_variancemeans(so, features=ccextra, title='Cell cycle correlated genes')
+
+print(p1 / p2 + plot_layout(guides='collect'))
+
+filtered <- TRUE
+```
+
+
+
+
+
+
+# Cell Cycle
+
+The density distributions show which principal components can separate the cell cycle phases, i.e. which components explain variance attributable to the cell cycle.
+
+## PCA without any adjustment
+
+Principal components from 1000 most variable genes, highlighted by cell cycle phase.
+
+```{r ccpre1, fig.width=12, fig.height=12}
+so <- FindVariableFeatures(so, nfeatures=1000)
+sel <- VariableFeatures(so)
+so <- RunPCA(so, features = sel)
+
+## Use the density distributions to see which components encode for the cell cycle phases.
+pcs <- as.data.table(so@reductions$pca@cell.embeddings)
+pcs[, Source := so@meta.data$Source]
+pcs[, Phase := so@meta.data$Phase]
+pcs <- melt(pcs, variable.name="PC", value.name="Embedings", id.vars=c('Source', 'Phase'))
+							
+p1 <- ggplot(pcs, aes(x=Embedings, colour=Phase)) +
+	facet_wrap(~ PC, scales="free_x") +
+	geom_density() +
+	theme_minimal()
+
+print( p1 )
+
+# ## PCA plots
+# plot_grid_pcs(so, comps= custom_pcs[c(1:5)])
+```
+
+## PCA after regressing out
+
+```{r ccadj}
+if (regress_cycle) {
+	if (!ccadjusted) {
+		
+		# This takes a long time, maybe even an hour.
+		if (!partial_regress){
+			# Completely remove cycle.
+			so <- ScaleData(so, vars.to.regress = c("S.Score", "G2M.Score"), features = rownames(so))
+		} else {
+			# Remove phases, but separate cycling from non-cycling.
+			so$CC.Difference <- so$S.Score - so$G2M.Score
+			so <- ScaleData(so, vars.to.regress = "CC.Difference", features = rownames(so))          
+		}
+		
+		# Checkpoint
+		saveRDS(so, file = file.path(outdir, paste0(projectname, '_ccadjusted.RDS')))
+		ccadjusted <- TRUE
+		
+	} else {
+		
+		message("Using pre-processed data that is already adjusted.")
+		so <- readRDS(file = file.path(outdir, paste0(projectname, '_ccadjusted.RDS')))
+	}
+} else {
+	message("No adjustment requested.")
+}
+```
+
+```{r ccpost1, fig.height=12, fig.width=12}	
+if (regress_cycle){
+	so <- FindVariableFeatures(so, nfeatures=1000)
+	sel <- VariableFeatures(so)
+	so <- RunPCA(so, features = sel)
+
+	## Use the density distributions to see which components encode for the cell cycle phases.
+	pcs <- as.data.table(so@reductions$pca@cell.embeddings)
+	pcs[, Source := so@meta.data$Source]
+	pcs[, Phase := so@meta.data$Phase]
+	pcs <- melt(pcs, variable.name="PC", value.name="Embedings", id.vars=c('Source', 'Phase'))
+								
+	p1 <- ggplot(pcs, aes(x=Embedings, colour=Phase)) +
+		facet_wrap(~ PC, scales="free_x") +
+		geom_density() +
+		theme_minimal()
+	
+	print( p1 )
+	
+	# ## PCA plots
+	# plot_grid_pcs(so, comps= custom_pcs[c(1:5)])
+}
+```
+
+
+
+
+
+
+
+# Dimensionality reduction
+
+## Variable genes
+
+### Scan for cutoff values
+
+Find optimal number of genes that maximizes variance explained by first components,
+
+#### without exclusion 
+
+of mitochondrial, ribosomal, cell cycle and cell-cycle-correlated genes:
+
+```{r nvarscan1, fig.height=6, fig.width=8}
+n <- unique(c(seq.int(100, 1000, 100), seq(1000, 2000, 250), seq(2000, 5000, 500)))
+n <- n[n < nrow(so)]
+
+if (scanparam){
+	v <- varscan(so, n)
+	
+	# Checkpoint
+	saveRDS(v, file = file.path(outdir, paste0(projectname, '_varscan1.RDS')))	
+	
+} else {
+	message("Using pre-computed scan.")
+	v <- readRDS(file = file.path(outdir, paste0(projectname, '_varscan1.RDS')))	
+}
+```
+
+#### after exclusion 
+
+of mitochondrial, ribosomal, cell cycle and cell-cycle-correlated genes:
+
+```{r nvarscan2, fig.height=6, fig.width=8}
+if (scanparam){
+	v <- varscan(so, n, exclude=c(mtgenes, ribogenes, cccore, ccextra))
+
+	# Checkpoint
+	saveRDS(v, file = file.path(outdir, paste0(projectname, '_varscan2.RDS')))
+
+} else {
+	message("Using pre-computed scan.")
+	v <- readRDS(file = file.path(outdir, paste0(projectname, '_varscan2.RDS')))	
+}
+
+candidates <- c(minover1 = n[ min(which(v$over_1 == min(v$over_1))) ],
+								kover1 = uik(x=n, y=v$over_1),
+								minsum80 = n[ min(which(v$sum_to_80 == min(v$sum_to_80))) ],
+								ksumto80 = uik(x=n, y=v$sum_to_80),
+								ksum2 = uik(x=n, y=v$sum_1_2),
+								kelbow = uik(x=n, y=v$elbow_var),
+								mindiff2 = n[which(v$diff_1_2 == min(v$diff_1_2))],
+								kdiff2 = uik(x=n, y=v$diff_1_2))
+```
+
+<!-- ### Explore parameter values -->
+
+<!-- ```{r scan} -->
+<!-- if (scanparam){ -->
+<!-- 	message('Exploring UMAP parameters') -->
+<!-- 	steps <- c(250, 500, 1000, 1500, 2000, 5000) -->
+<!-- 	scan_param(so,  -->
+<!-- 						 #nvariables=unique(candidates[order(candidates)]), -->
+<!-- 						 nvariables=steps[steps <= nrow(so)], -->
+<!-- 						 mindist=c(0.2), nneighbours=c(10, 30, 50),  -->
+<!-- 						 resolutions=c(0.3, 0.8, 1.3),                                                # USER-INPUT -->
+<!-- 						 exclude=c(mtgenes, ribogenes, cccore), maybe_exclude=ccextra, split=TRUE)    # USER-INPUT -->
+
+<!-- 	# Stop here. -->
+<!-- 	knitr::knit_exit() -->
+
+<!-- } else { -->
+<!-- 	message('Exploration skipped. (Already done previously?)') -->
+<!-- } -->
+<!-- ``` -->
+
+### Commit
+
+```{r variable, fig.height=8, fig.width=8}
+# Choose PCA/UMAP/clustering parameters to use.
+nvariables <- candidates['mindiff2']  # USER-INPUT, data-dependent
+dims <- 1:50                          # Obsolete as user-defined sub-selection, but baked into code that I don;t want to fix right now.
+                                      #   Look at custom_pcs in the pca_plot chunk a bit further down instead.
+message(paste("Starting with", nvariables, "most variable features."))
+
+# Find the number of highly variable features.
+so <- FindVariableFeatures(so, selection.method = "vst", nfeatures = nvariables, 
+													 mean.cutoff=c(0.25, NA), dispersion.cutoff=c(0, NA))
+topvariable <- VariableFeatures(so)
+
+# Remove undesireable genes.
+# USER-INPUT   (choose what to exclude)
+# topvariable <- clean_candidates(topvariable, mito=mtgenes, ribo=ribogenes, cccore=cccore, verbose=TRUE)
+topvariable <- clean_candidates(topvariable, mito=mtgenes, ribo=ribogenes, cccore=cccore, ccextra=ccextra, verbose=TRUE)
+
+
+top <- head(topvariable, 25)
+hvf.info <- HVFInfo(object = so, assay = NULL, selection.method = NULL,
+        status = TRUE)
+hvf.info["var.status"] <- row.names(hvf.info) %in% topvariable
+
+hvf.info["var.status_text"] <- NA_character_
+hvf.info[hvf.info$var.status, "var.status_text"] <- paste0("yes (",  sum(hvf.info$var.status), ")")
+hvf.info[!hvf.info$var.status, "var.status_text"] <- paste0("no (", sum(!hvf.info$var.status), ")")
+
+hvf.info <- hvf.info[, c(1, 3, 6)]
+
+p1 <- ggplot(hvf.info,
+			 aes(x=mean, y=variance.standardized, colour=var.status_text, label=row.names(hvf.info))) +
+	geom_point(shape=16) +
+	geom_text_repel(data=hvf.info[top,], aes(label=row.names(hvf.info[top,])),
+									min.segment.length=0, size=rel(2.5), force=10, colour='black', max.overlaps=1e4) +
+	scale_x_log10() +
+	annotation_logticks(base=10, sides='b') +
+	scale_colour_manual(values=c('black', 'red'), name='Variable') +
+	labs(x='Average Expression', y='Standardized Variance') +
+	theme_classic()
+
+print( p1 )
+```
+
+## PCA
+
+```{r pca}
+# message("PCA with 50 components.")
+so <- RunPCA(so, features = topvariable, npcs=50)
+scr <- scree(so, 80)
+print( scr$scree )
+
+npc <- scr$npc
+```
+
+The density plots show which principal components can distinguish between the input sources, i.e. which components explain variance in the data that pertains to the treatments.
+
+```{r pca_plot_pre, fig.height=12, fig.width=12}
+pc_vars <- Stdev(object = so, reduction = 'pca') ^ 2  # From stdevs to % of total variance.
+pc_vars <- 100 * pc_vars / sum(pc_vars)
+
+
+## Use the density distributions to see which components encode for the treatment groups and cell cycle phases.
+pcs <- as.data.table(so@reductions$pca@cell.embeddings)
+pcs[, Source := so@meta.data$Source]
+pcs[, Phase := so@meta.data$Phase]
+pcs <- melt(pcs, variable.name="PC", value.name="Embedings", id.vars=c('Source', 'Phase'))
+							
+p1 <- ggplot(pcs, aes(x=Embedings, colour=Source)) +
+	facet_wrap(~ PC, scales="free_x") +
+	geom_density() +
+	theme_minimal()
+
+print( p1 )
+```
+
+```{r pca_plot, fig.height=12, fig.width=12}
+## First 5 components
+plot_grid_pcs(so)
+
+## Selected components
+custom_pcs <- c(3:6, 8:13, 17, 19, 23:25)                         # USER-INPUT
+message(paste("Manually chosen PCs for UMAP projection:", paste(custom_pcs, collapse=", "), ", accounting for", round(sum(pc_vars[custom_pcs]), 2), "% of the variation."))
+
+# plot_grid_pcs(so, comps= custom_pcs[c(1:5)])
+plot_grid_pcs(so, comps= c(6, 8, 10, 11))                        # USER-INPUT
+```
+
+## UMAP
+
+Tuned to break up clusters that consist of multiple non-overlapping subgroups that are differentially present between conditions,
+potentially at the cost of also breaking up clusters that are more homogeneous.
+
+### Using all 50 components
+
+```{r umap0, fig.height=12, fig.width=12}
+d <- dims[dims %in% 1:length(pc_vars)]
+resolution <- 1.8                                     # USER INPUT
+nneighbours <- 30                                     # USER INPUT
+mindist <- 0.1                                       # USER INPUT
+
+so <- do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours)
+
+# Checkpoint
+saveRDS(so, file = file.path(outdir, paste0(projectname, '_alldim.RDS')))
+```
+
+### Using top informative components
+
+```{r umap2, fig.height=12, fig.width=12}
+d <- dims[dims %in% 1:npc]
+resolution <- 1.1                                     # USER INPUT
+nneighbours <- 30                                     # USER INPUT
+mindist <- 0.1                                       # USER INPUT
+
+so2 <- do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours)
+
+# Checkpoint
+saveRDS(so2, file = file.path(outdir, paste0(projectname, '_topdim.RDS')))
+```
+
+### Using the selected components
+
+```{r umap1, fig.height=12, fig.width=12}
+d <- custom_pcs[custom_pcs %in% 1:length(pc_vars)]
+resolution <- 1.2                                     # USER INPUT
+nneighbours <- 30                                     # USER INPUT
+mindist <- 0.1                                       # USER INPUT
+
+so3 <- do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours)
+
+# Checkpoint
+saveRDS(so3, file = file.path(outdir, paste0(projectname, '_customdim.RDS')))
+
+finalized <- TRUE
+```
+
+
+
+
+
+
+
+
+
+# Markers
+
+## Cluster markers
+
+Genes uniquely up/down-regulated in each cluster. 
+
+```{r dethresh}
+lfcthresh <- 0.25				# USER_INPUT
+pctexpthresh <- 0.25    # USER_INPUT
+diffpct <- -Inf         # USER_INPUT     (for low-res clusters with diverse content, maybe do not limit this)
+message(paste('Minimum LFC:', lfcthresh))
+message(paste0('Minimum fraction of cells in which gene is expressed, in at least one of the pairwise compared groups: ', pctexpthresh))
+message(paste('Minimum difference in cell fraction: ', diffpct))
+```
+
+<!-- ### All 50 components -->
+
+<!-- ```{r clustmark, fig.height=10, fig.width=10} -->
+<!-- do_de(so, DEtabled=DEtabled, lfcthresh=lfcthresh, pctexpthresh=pctexpthresh, diffpct=diffpct, suffix='alldim') -->
+<!-- ``` -->
+
+<!-- ### Top informative components -->
+
+<!-- ```{r clustmark2, fig.height=10, fig.width=10} -->
+<!-- do_de(so2, DEtabled=DEtabled, lfcthresh=lfcthresh, pctexpthresh=pctexpthresh, diffpct=diffpct, suffix='topdim') -->
+<!-- ``` -->
+
+### Selected components
+
+```{r clustmark3, fig.height=10, fig.width=10}
+do_de(so3, DEtabled=DEtabled, lfcthresh=lfcthresh, pctexpthresh=pctexpthresh, diffpct=diffpct, suffix='customdim')
+```
+
+
+## Pre-selected markers
+
+```{r markers, fig.height=10, fig.width=10}
+so <- readRDS(file.path(outdir, paste0(projectname, '_customdim.RDS')))
+
+for (y in names(priors)) {
+	# y <- names(priors)[1]
+	print(y)
+	subg <- priors[[y]]
+	subg <- subg[!is.na(subg)]
+	
+	print( p1 <- plot_variancemeans(so, features=subg, title=NULL) )
+	
+	# print( (DimPlot(so, reduction='pca', group.by='seurat_clusters') + coord_fixed() + theme(legend.position='none' )) |
+	# 			 (DimPlot(so, reduction='pca', group.by='Source') + coord_fixed() )
+	# )
+	print( (DimPlot(so, reduction='umap', group.by='seurat_clusters', label=TRUE) + 
+						coord_fixed() + theme(legend.position='none') ) /
+				 (DimPlot(so, reduction='umap', group.by='Source', split.by='Source') + 
+				  	coord_fixed() + theme(legend.position='none' ) + labs(title=NULL) )
+	)
+
+
+	for (x in rollslice(subg, 9)) {
+		# x <- rollslice(subg, 9)[[1]]
+		print( subg[x] )   # Make it easier to text-search the report for the relevant plots for a gene
+
+		print( FeaturePlot(so, reduction='umap', features = subg[x], coord.fixed=TRUE) )
+		
+		print( DotPlot(so, features = subg[x], group.by='seurat_clusters', scale.min=0, scale.max=100) + RotatedAxis()  )
+		#
+		# print( VlnPlot(so, slot='data', features = subg[x], pt.size=0.01, group.by='seurat_clusters') + RotatedAxis()  )
+		#
+		
+		print( RidgePlot(so, features=subg[x], group.by='Source', stack=FALSE) & labs(y=NULL, x=NULL) )
+		# 
+		# print( DotPlot(so, features = subg[x], group.by='Source', scale.min=0, scale.max=100) + RotatedAxis()  )
+		#
+		# print( VlnPlot(so, features = subg[x], pt.size=0.01, group.by='Source') + RotatedAxis() )
+	}	
+}
+```
+
+
+
+
+# Session
+
+```{r session}
+sessionInfo()
+```
