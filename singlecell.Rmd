@@ -15,9 +15,7 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 
 set.seed(12357)
-```
 
-```{r start}
 library(Seurat)
 library(ggplot2)
 library(ggExtra)
@@ -36,8 +34,9 @@ require(ggrepel)
 
 # plan("multiprocess", workers = 4)
 # options(future.rng.onMisuse = "ignore")  #, future.globals.maxSize = 2000 * 1024^2)
+```
 
-
+```{r start}
 #
 # SEARCH KEY for parameter values requiring manual decision: "USER-INPUT"
 #
@@ -51,12 +50,12 @@ finalized <- FALSE
 DEtabled <- FALSE
 scanparam <- TRUE
 #
-# imported <- TRUE
-# filtered <- TRUE
-# ccadjusted <- TRUE
-# scanparam <- FALSE
-# finalized <- TRUE
-# DEtabled <- TRUE
+imported <- TRUE
+filtered <- TRUE
+ccadjusted <- TRUE
+scanparam <- FALSE
+finalized <- TRUE
+DEtabled <- TRUE
 
 # Extra steps
 custom_filter <- FALSE
@@ -212,36 +211,33 @@ plot_qc_correlations <- function(DF=so@meta.data){
 		return( list(p1, p2, p3) )
 }
 
-plot_variancemeans <- function(so, features=NULL, title=NULL){
+plot_variancemeans <- function(so, features=NULL, topn=25){
 	hvf.info <- HVFInfo(object = so, assay = NULL, selection.method = NULL,
         status = TRUE)
-	if (!is.null(features)){
-		hvf.info["var.status"] <- rownames(hvf.info) %in% features
-		top <- rownames(hvf.info[VariableFeatures(so),])
-		top <- head(top[top %in% features], 25)
-		clr <- 'red'
-	} else {
-		hvf.info["var.status"] <- c(paste0("no (", sum(!hvf.info$variable), ")"),
-																paste0("yes (", sum(!!hvf.info$variable), ")"))[unlist(x = hvf.info[, ncol(x = hvf.info)]) + 1]
-		top <- head(VariableFeatures(so), 25)
-		clr <- 'dodgerblue'
-		title='Selection of highest variance'
-	}
 	hvf.info <- hvf.info[order(hvf.info$variance.standardized, decreasing=TRUE),]
-	limitrank <- which(rownames(hvf.info) == head(rownames(hvf.info[top,]), 1)) # Highest rank of the selection
 	
-	p1 <- ggplot(hvf.info,
-				 aes(x=mean, y=variance.standardized, colour=var.status, label=row.names(hvf.info))) +
-		geom_point(shape=16) +
+	if (!is.null(features)){
+		hvf.info["highlight"] <- rownames(hvf.info) %in% features
+	} else {
+		hvf.info["highlight"] <- hvf.info[, "variable"]
+	}
+	top <- head(rownames(hvf.info)[hvf.info[, "highlight"]], topn)
+	limitrank <- which(rownames(hvf.info) == top[1]) # Highest rank of the selection
+	
+	p1 <- ggplot(NULL,
+				 aes(x=mean, y=variance.standardized, colour=highlight)) +
+		geom_point(data=hvf.info[!hvf.info$highlight, ], shape=16, size=rel(1), alpha=0.4) +
+		geom_point(data=hvf.info[hvf.info$highlight, ], shape=16, size=rel(1)) +
 		geom_text_repel(data=hvf.info[top,], aes(label=row.names(hvf.info[top,])),
-										min.segment.length=0, size=rel(2.5), force=10, colour=clr, max.overlaps=1e4) +
+										min.segment.length=0, size=rel(2.5), force=10, colour='black', max.overlaps=1e4) +
 		scale_x_log10() +
 		annotation_logticks(base=10, sides='b') +
-		scale_colour_manual(values=c('grey50', 'red'), name='Selected') +   # TRUE/"yes" are ordered second after FALSE/'no'
-		labs(x='Average Expression', y='Standardized Variance', title=title) +
-		theme_classic()
+		scale_colour_manual(values=c('grey50', 'red'), name='in Selection') +   # TRUE/"yes" are ordered second after FALSE/'no'
+		labs(x='Average Expression', y='Standardized Variance', title=paste0("Variance of selected features (", sum(hvf.info$highlight), "/", nrow(hvf.info), ")")) +
+		theme_classic() +
+		theme(legend.position="none")
 	
-	if (!is.null(features)){
+	if (limitrank > 1){
 		p1 <- p1 + labs(subtitle=paste("highest rank:", limitrank))
 	}
 	
@@ -294,39 +290,24 @@ clean_candidates <- function(x, mito=NULL, ribo=NULL, cccore=NULL, ccextra=NULL,
 	return(x)
 }
 
-varscan <- function(so, n, exclude=NULL, varcutoff=varcutoff) {
-	message(paste("Cumulative variance explainec cutoff:", varcutoff))
-	
-	v <- as.data.frame(t(as.data.frame( mclapply(n, function(x){
-		so <- FindVariableFeatures(so, selection.method = "vst", nfeatures = x)
-		topvariables <- VariableFeatures(so)
-		if(!is.null(exclude)) {
-			topvariables <- clean_candidates(topvariables, mito=exclude, verbose=FALSE)
-		}
-		
-		so <- RunPCA(so, features = topvariables, npcs=50)
-		pc_vars <- Stdev(object = so, reduction = 'pca') ^ 2  # From stdevs to % of total variance.
-		pc_vars <- 100 * pc_vars / sum(pc_vars)
-		cv <- cumsum(pc_vars)
-		elbow <- uik(1:50, pc_vars)
-		return(c( pc_vars[1] -  pc_vars[2], 
-							pc_vars[1] +  pc_vars[2], 
-							head(which(cv>=varcutoff), 1),
-							tail(which(pc_vars>=1), 1),
-							elbow, 
-							cv[elbow] ))
-	}, mc.cores=4))))
-	names(v) <- c('diff_1_2', 'sum_1_2', 'sum_to_80', 'over_1', 'elbow', 'elbow_var')
+sparse.cor <- function(x){
+	# https://stackoverflow.com/questions/5888287/running-cor-or-any-variant-over-a-sparse-matrix-in-r
+  
+	n <- nrow(x)
+  m <- ncol(x)
+  ii <- unique(x@i)+1 # rows with a non-zero element
 
-	candidates <- c(minover1 = n[ min(which(v$over_1 == min(v$over_1))) ],
-								kover1 = uik(x=n, y=v$over_1),
-								minsum80 = n[ min(which(v$sum_to_80 == min(v$sum_to_80))) ],
-								ksumto80 = uik(x=n, y=v$sum_to_80),
-								ksum2 = uik(x=n, y=v$sum_1_2),
-								kelbow = uik(x=n, y=v$elbow_var),
-								mindiff2 = n[which(v$diff_1_2 == min(v$diff_1_2))],
-								kdiff2 = uik(x=n, y=v$diff_1_2))
-								
+  Ex <- colMeans(x)
+  nozero <- as.vector(x[ii,]) - rep(Ex,each=length(ii))        # colmeans
+
+  covmat <- ( crossprod(matrix(nozero,ncol=m)) +
+              crossprod(t(Ex))*(n-length(ii))
+            )/(n-1)
+  sdvec <- sqrt(diag(covmat))
+  covmat/crossprod(t(sdvec))
+}
+	
+varscanplot <- function(v, candidates){
 	p1 <- ggplot(v) +
 		geom_vline(xintercept=candidates['ksum2'], linetype='dotted', colour='blue') +
 		geom_vline(xintercept=candidates['kelbow'], linetype='dotted', colour='forestgreen') +
@@ -358,11 +339,11 @@ varscan <- function(so, n, exclude=NULL, varcutoff=varcutoff) {
 		geom_vline(xintercept=candidates['kover1'], linetype='dotted', colour='purple') +
 		geom_vline(xintercept=candidates['minsum80'], linetype='dashed', colour='magenta', alpha=0.2) +
 		geom_vline(xintercept=candidates['ksum80'], linetype='dotted', colour='magenta') +
-		geom_line(aes(x=n, y=sum_to_80, colour='cumulatively reaching 80% variance explained')) +
+		geom_line(aes(x=n, y=sum_to_80, colour='required for variance explained target')) +
 		geom_line(aes(x=n, y=over_1, colour='explaining at least 1% variance each')) +
 		geom_line(aes(x=n, y=elbow, colour='at scree elbow point')) +
 		scale_x_sqrt(breaks=c(100,500,1000,2000,5000,10000,15000,20000)) +
-		scale_colour_manual(values=c(`cumulatively reaching variance explained cutoff`='magenta', 
+		scale_colour_manual(values=c(`required for variance explained target`='magenta', 
 																 `explaining at least 1% variance each`='purple',
 																 `at scree elbow point`='orange')) +
 		coord_cartesian(ylim=c(0,NA)) +
@@ -370,7 +351,43 @@ varscan <- function(so, n, exclude=NULL, varcutoff=varcutoff) {
 		theme_light() + theme(legend.position='bottom', legend.direction='vertical', legend.title=element_blank(),
 					panel.grid=element_blank())
 	
-	print( p1 / p2 + plot_layout(guides='collect') )
+	print( p1 / p2 + plot_layout(guides='collect') )	
+}
+
+varscan <- function(so, n, exclude=NULL, varcutoff=80) {
+	# message(paste("Cumulative variance explained cutoff:", varcutoff))
+	
+	v <- as.data.frame(t(as.data.frame( mclapply(n, function(x){
+		so <- FindVariableFeatures(so, selection.method = "vst", nfeatures = x)
+		topvariables <- VariableFeatures(so)
+		if(!is.null(exclude)) {
+			topvariables <- clean_candidates(topvariables, mito=exclude, verbose=FALSE)
+		}
+		
+		so <- RunPCA(so, features = topvariables, npcs=50)
+		pc_vars <- Stdev(object = so, reduction = 'pca') ^ 2  # From stdevs to % of total variance.
+		pc_vars <- 100 * pc_vars / sum(pc_vars)
+		cv <- cumsum(pc_vars)
+		elbow <- uik(1:50, pc_vars)
+		return(c( pc_vars[1] -  pc_vars[2], 
+							pc_vars[1] +  pc_vars[2], 
+							head(which(cv>=varcutoff), 1),
+							tail(which(pc_vars>=1), 1),
+							elbow, 
+							cv[elbow] ))
+	}, mc.cores=4))))
+	names(v) <- c('diff_1_2', 'sum_1_2', 'sum_to_80', 'over_1', 'elbow', 'elbow_var')
+
+	candidates <- c(minover1 = n[ min(which(v$over_1 == min(v$over_1))) ],
+								kover1 = uik(x=n, y=v$over_1),
+								minsum80 = n[ min(which(v$sum_to_80 == min(v$sum_to_80))) ],
+								ksumto80 = uik(x=n, y=v$sum_to_80),
+								ksum2 = uik(x=n, y=v$sum_1_2),
+								kelbow = uik(x=n, y=v$elbow_var),
+								mindiff2 = n[which(v$diff_1_2 == min(v$diff_1_2))],
+								kdiff2 = uik(x=n, y=v$diff_1_2))
+								
+	varscanplot(v, candidates)
 
 	return(v)
 }
@@ -552,6 +569,20 @@ do_clusters <- function(so, d=1:50, resolution=0.8, nneighbours=30, mindist=0.3)
 
 	so <- RunUMAP(so, dims=d, n.neighbors=nneighbours, min.dist=mindist)
 
+	p1 <- DimPlot(so, reduction='umap', group.by='Phase') +
+			coord_fixed(ratio=1) +
+			labs(title=NULL) +
+			theme_light() +
+			theme(panel.grid=element_blank())
+
+	p2 <- DimPlot(so, reduction='umap', group.by='Phase', split.by='Phase') +
+			coord_fixed(ratio=1) +
+			labs(title=NULL) +
+			theme_light() +
+			theme(panel.grid=element_blank())
+
+	print( p1 / p2 + plot_layout(guides='collect') )
+
 	p1 <- DimPlot(so, reduction='umap', group.by='Source') +
 		coord_fixed(ratio=1) +
 		labs(title=NULL) +
@@ -566,22 +597,6 @@ do_clusters <- function(so, d=1:50, resolution=0.8, nneighbours=30, mindist=0.3)
 		
 	print( p1 / p2 + plot_layout(guides='collect') )
 	
-	# p1 <- DimPlot(so, reduction='umap', group.by='Phase') +
-	# 		coord_fixed(ratio=1) +
-	# 		labs(title=NULL) +
-	# 		theme_light() +
-	# 		theme(panel.grid=element_blank())
-	# 
-	# print(p1)
-	# 
-	# p2 <- DimPlot(so, reduction='umap', group.by='Phase', split.by='Phase') +
-	# 		coord_fixed(ratio=1) +
-	# 		labs(title=NULL) +
-	# 		theme_light() +
-	# 		theme(panel.grid=element_blank())
-	# 
-	# print( p1 / p2 + plot_layout(guides='collect') )
-	# 
 	so <- FindNeighbors(so, dims=d)
 	so <- FindClusters(so, resolution=resolution)
 	
@@ -701,7 +716,7 @@ do_de <- function(so, DEtabled=FALSE, lfcthresh=0.25, pctexpthresh=0.25, diffpct
 		print( (DimPlot(so, reduction='umap', group.by='this_cluster', label=FALSE) + 
 						coord_fixed() + scale_colour_manual(values=c('black', 'magenta')) +
 						labs(title=paste('Cluster', cl)) + theme(legend.position='none' )) /
-				 (DimPlot(so, reduction='umap', group.by='Source', split.by='Source') + 
+				 (DimPlot(so, reduction='umap', group.by='this_cluster', split.by='Source') + 
 				  	coord_fixed() + theme(legend.position='none' ) + labs(title=NULL) )
 		)
 
@@ -1001,7 +1016,16 @@ if (custom_filter){
 }
 ```
 
-## Scaling
+
+
+
+
+
+
+
+# Cell Cycle
+
+## Cell cycle phases
 
 ```{r scale}
 if (!filtered){
@@ -1019,8 +1043,6 @@ if (!filtered){
 }
 ```
 
-## Cell cycle phases
-
 ```{r qc_cc}
 # Identify cell cycle phase of each cell
 if (!is.null(s.genes) && !is.null(g2m.genes)) {
@@ -1033,7 +1055,7 @@ if (!is.null(s.genes) && !is.null(g2m.genes)) {
 		print( summary(so@meta.data[so@meta.data$Source==s, c('Source', 'Phase')]) )
 	}
 } else {
-	message("No cell cycle gene lists were provided.")
+	message("No cell cycle phase gene lists were provided.")
 }
 ```
 
@@ -1046,52 +1068,37 @@ if (!filtered){
 	# Find genes that correlate highly with the cell cycle genes.
 	corthresh <- 0.5     # USER-INPUT
 	
-	# https://stackoverflow.com/questions/5888287/running-cor-or-any-variant-over-a-sparse-matrix-in-r
-	sparse.cor <- function(x){
-	  n <- nrow(x)
-	  m <- ncol(x)
-	  ii <- unique(x@i)+1 # rows with a non-zero element
-	
-	  Ex <- colMeans(x)
-	  nozero <- as.vector(x[ii,]) - rep(Ex,each=length(ii))        # colmeans
-	
-	  covmat <- ( crossprod(matrix(nozero,ncol=m)) +
-	              crossprod(t(Ex))*(n-length(ii))
-	            )/(n-1)
-	  sdvec <- sqrt(diag(covmat))
-	  covmat/crossprod(t(sdvec))
-	}
-	
 	cm <- sparse.cor(t(so@assays$RNA@data))  # This takes several minutes (regular matrix takes forever)...
 	cm <- as.matrix(cm)
+	
+	# Checkpoint
+	saveRDS(cm, file = file.path(outdir, paste0(projectname, '_genecorrel.RDS')))
+	# cm <- readRDS(file.path(outdir, paste0(projectname, '_genecorrel.RDS')))
+	
 	cm <- cm[cccore,]
 	cml <- cm >= corthresh
 	sel <- apply(cml, 2, function(x){ any(x, na.rm=TRUE) })
-	message(paste(sum(sel), "genes correlate with coeficient >", corthresh, "with the", length(cccore), "provided cell cycle genes:"))
 	ccextra <- colnames(cml)[sel]
+	ccextra <- ccextra[! ccextra %in% cccore]
+	message(paste(sum(sel), "genes correlate with coeficient >", corthresh, "with the", length(cccore), "provided cell cycle genes:"))
 	print(ccextra)
 	
 	# Checkpoint
 	saveRDS(ccextra, file = file.path(outdir, paste0(projectname, '_ccextra.RDS')))
+	
 } else  {
+	
 	message('Using precomputed list of cell cycle correlated genes.')
 	ccextra <- readRDS( file = file.path(outdir, paste0(projectname, '_ccextra.RDS')))
 }
 
-p1 <- plot_variancemeans(so, features=cccore, title='Core cell cycle genes')
-p2 <- plot_variancemeans(so, features=ccextra, title='Cell cycle correlated genes')
+p1 <- plot_variancemeans(so, features=cccore, topn=10)
+p2 <- plot_variancemeans(so, features=ccextra, topn=10)
 
 print(p1 / p2 + plot_layout(guides='collect'))
 
 filtered <- TRUE
 ```
-
-
-
-
-
-
-# Cell Cycle
 
 The density distributions show which principal components can separate the cell cycle phases, i.e. which components explain variance attributable to the cell cycle.
 
@@ -1181,7 +1188,7 @@ if (regress_cycle){
 
 
 
-# Dimensionality reduction
+# Dimension reduction
 
 ## Variable genes
 
@@ -1189,16 +1196,21 @@ if (regress_cycle){
 
 Find optimal number of genes that maximizes variance explained by first components,
 
+```{r}
+message(paste("Cumulative variance explained cutoff:", varcutoff))
+
+# Steps for the scan
+n <- unique(c(seq.int(100, 1000, 100), seq(1000, 2000, 250), seq(2000, 5000, 500)))
+n <- n[n < nrow(so)]
+```
+
 #### without exclusion 
 
 of mitochondrial, ribosomal, cell cycle and cell-cycle-correlated genes:
 
 ```{r nvarscan1, fig.height=6, fig.width=8}
-n <- unique(c(seq.int(100, 1000, 100), seq(1000, 2000, 250), seq(2000, 5000, 500)))
-n <- n[n < nrow(so)]
-
 if (scanparam){
-	v <- varscan(so, n)
+	v <- varscan(so, n=n, varcutoff=varcutoff)
 	
 	# Checkpoint
 	saveRDS(v, file = file.path(outdir, paste0(projectname, '_varscan1.RDS')))	
@@ -1206,6 +1218,17 @@ if (scanparam){
 } else {
 	message("Using pre-computed scan.")
 	v <- readRDS(file = file.path(outdir, paste0(projectname, '_varscan1.RDS')))	
+	
+	candidates <- c(minover1 = n[ min(which(v$over_1 == min(v$over_1))) ],
+								kover1 = uik(x=n, y=v$over_1),
+								minsum80 = n[ min(which(v$sum_to_80 == min(v$sum_to_80))) ],
+								ksumto80 = uik(x=n, y=v$sum_to_80),
+								ksum2 = uik(x=n, y=v$sum_1_2),
+								kelbow = uik(x=n, y=v$elbow_var),
+								mindiff2 = n[which(v$diff_1_2 == min(v$diff_1_2))],
+								kdiff2 = uik(x=n, y=v$diff_1_2))
+
+	varscanplot(v, candidates)
 }
 ```
 
@@ -1215,7 +1238,7 @@ of mitochondrial, ribosomal, cell cycle and cell-cycle-correlated genes:
 
 ```{r nvarscan2, fig.height=6, fig.width=8}
 if (scanparam){
-	v <- varscan(so, n, exclude=c(mtgenes, ribogenes, cccore, ccextra))
+	v <- varscan(so, n=n, varcutoff=varcutoff, exclude=c(mtgenes, ribogenes, cccore, ccextra))
 
 	# Checkpoint
 	saveRDS(v, file = file.path(outdir, paste0(projectname, '_varscan2.RDS')))
@@ -1225,6 +1248,7 @@ if (scanparam){
 	v <- readRDS(file = file.path(outdir, paste0(projectname, '_varscan2.RDS')))	
 }
 
+# Outside the else{} because I need these values regardless of how I get them.
 candidates <- c(minover1 = n[ min(which(v$over_1 == min(v$over_1))) ],
 								kover1 = uik(x=n, y=v$over_1),
 								minsum80 = n[ min(which(v$sum_to_80 == min(v$sum_to_80))) ],
@@ -1233,6 +1257,10 @@ candidates <- c(minover1 = n[ min(which(v$over_1 == min(v$over_1))) ],
 								kelbow = uik(x=n, y=v$elbow_var),
 								mindiff2 = n[which(v$diff_1_2 == min(v$diff_1_2))],
 								kdiff2 = uik(x=n, y=v$diff_1_2))
+
+if (!scanparam){ # varscan prints this already
+	varscanplot(v, candidates)
+}
 ```
 
 <!-- ### Explore parameter values -->
@@ -1276,29 +1304,7 @@ topvariable <- VariableFeatures(so)
 topvariable <- clean_candidates(topvariable, mito=mtgenes, ribo=ribogenes, cccore=cccore, ccextra=ccextra, verbose=TRUE)
 
 
-top <- head(topvariable, 25)
-hvf.info <- HVFInfo(object = so, assay = NULL, selection.method = NULL,
-        status = TRUE)
-hvf.info["var.status"] <- row.names(hvf.info) %in% topvariable
-
-hvf.info["var.status_text"] <- NA_character_
-hvf.info[hvf.info$var.status, "var.status_text"] <- paste0("yes (",  sum(hvf.info$var.status), ")")
-hvf.info[!hvf.info$var.status, "var.status_text"] <- paste0("no (", sum(!hvf.info$var.status), ")")
-
-hvf.info <- hvf.info[, c(1, 3, 6)]
-
-p1 <- ggplot(hvf.info,
-			 aes(x=mean, y=variance.standardized, colour=var.status_text, label=row.names(hvf.info))) +
-	geom_point(shape=16) +
-	geom_text_repel(data=hvf.info[top,], aes(label=row.names(hvf.info[top,])),
-									min.segment.length=0, size=rel(2.5), force=10, colour='black', max.overlaps=1e4) +
-	scale_x_log10() +
-	annotation_logticks(base=10, sides='b') +
-	scale_colour_manual(values=c('black', 'red'), name='Variable') +
-	labs(x='Average Expression', y='Standardized Variance') +
-	theme_classic()
-
-print( p1 )
+print( plot_variancemeans(so, features=topvariable, topn=25) )
 ```
 
 ## PCA
@@ -1314,7 +1320,7 @@ npc <- scr$npc
 
 The density plots show which principal components can distinguish between the input sources, i.e. which components explain variance in the data that pertains to the treatments.
 
-```{r pca_plot_pre, fig.height=12, fig.width=12}
+```{r pca_plot_pre, fig.height=15, fig.width=15}
 pc_vars <- Stdev(object = so, reduction = 'pca') ^ 2  # From stdevs to % of total variance.
 pc_vars <- 100 * pc_vars / sum(pc_vars)
 
@@ -1324,6 +1330,13 @@ pcs <- as.data.table(so@reductions$pca@cell.embeddings)
 pcs[, Source := so@meta.data$Source]
 pcs[, Phase := so@meta.data$Phase]
 pcs <- melt(pcs, variable.name="PC", value.name="Embedings", id.vars=c('Source', 'Phase'))
+
+p1 <- ggplot(pcs, aes(x=Embedings, colour=Phase)) +
+	facet_wrap(~ PC, scales="free_x") +
+	geom_density() +
+	theme_minimal()
+
+print( p1 )
 							
 p1 <- ggplot(pcs, aes(x=Embedings, colour=Source)) +
 	facet_wrap(~ PC, scales="free_x") +
@@ -1339,25 +1352,23 @@ plot_grid_pcs(so)
 
 ## Selected components
 custom_pcs <- c(3:6, 8:13, 17, 19, 23:25)                         # USER-INPUT
+
 message(paste("Manually chosen PCs for UMAP projection:", paste(custom_pcs, collapse=", "), ", accounting for", round(sum(pc_vars[custom_pcs]), 2), "% of the variation."))
 
 # plot_grid_pcs(so, comps= custom_pcs[c(1:5)])
-plot_grid_pcs(so, comps= c(6, 8, 10, 11))                        # USER-INPUT
+plot_grid_pcs(so, comps= c(6, 8:11))                        # USER-INPUT
 ```
 
 ## UMAP
 
-Tuned to break up clusters that consist of multiple non-overlapping subgroups that are differentially present between conditions,
-potentially at the cost of also breaking up clusters that are more homogeneous.
-
 ### Using all 50 components
 
 ```{r umap0, fig.height=12, fig.width=12}
-d <- dims[dims %in% 1:length(pc_vars)]
-resolution <- 1.8                                     # USER INPUT
+resolution <- 2.0                                     # USER INPUT
 nneighbours <- 30                                     # USER INPUT
 mindist <- 0.1                                       # USER INPUT
 
+d <- dims[dims %in% 1:length(pc_vars)]
 so <- do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours)
 
 # Checkpoint
@@ -1367,11 +1378,11 @@ saveRDS(so, file = file.path(outdir, paste0(projectname, '_alldim.RDS')))
 ### Using top informative components
 
 ```{r umap2, fig.height=12, fig.width=12}
-d <- dims[dims %in% 1:npc]
-resolution <- 1.1                                     # USER INPUT
+resolution <- 1.2                                     # USER INPUT
 nneighbours <- 30                                     # USER INPUT
 mindist <- 0.1                                       # USER INPUT
 
+d <- dims[dims %in% 1:npc]
 so2 <- do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours)
 
 # Checkpoint
@@ -1381,15 +1392,20 @@ saveRDS(so2, file = file.path(outdir, paste0(projectname, '_topdim.RDS')))
 ### Using the selected components
 
 ```{r umap1, fig.height=12, fig.width=12}
-d <- custom_pcs[custom_pcs %in% 1:length(pc_vars)]
-resolution <- 1.2                                     # USER INPUT
+resolution <- 1.4                                    # USER INPUT
 nneighbours <- 30                                     # USER INPUT
 mindist <- 0.1                                       # USER INPUT
 
+d <- custom_pcs[custom_pcs %in% 1:length(pc_vars)]
 so3 <- do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours)
 
 # Checkpoint
 saveRDS(so3, file = file.path(outdir, paste0(projectname, '_customdim.RDS')))
+
+fwrite(dcast(as.data.table(table(so@meta.data[, c("Source", "seurat_clusters")])),
+						 Source ~ seurat_clusters, value.var="N"),
+			 file=file.path(outdir, paste0(projectname, '_clustertallies_customdim.tsv')),
+			 sep="\t", quote=FALSE, row.names=FALSE, col.names=TRUE)
 
 finalized <- TRUE
 ```
@@ -1415,6 +1431,10 @@ diffpct <- -Inf         # USER_INPUT     (for low-res clusters with diverse cont
 message(paste('Minimum LFC:', lfcthresh))
 message(paste0('Minimum fraction of cells in which gene is expressed, in at least one of the pairwise compared groups: ', pctexpthresh))
 message(paste('Minimum difference in cell fraction: ', diffpct))
+
+# so <- readRDS(file.path(outdir, paste0(projectname, '_alldim.RDS')))
+# so <- readRDS(file.path(outdir, paste0(projectname, '_topdim.RDS')))
+so <- readRDS(file.path(outdir, paste0(projectname, '_customdim.RDS')))
 ```
 
 <!-- ### All 50 components -->
@@ -1431,23 +1451,21 @@ message(paste('Minimum difference in cell fraction: ', diffpct))
 
 ### Selected components
 
-```{r clustmark3, fig.height=10, fig.width=10}
-do_de(so3, DEtabled=DEtabled, lfcthresh=lfcthresh, pctexpthresh=pctexpthresh, diffpct=diffpct, suffix='customdim')
+```{r clustmark, fig.height=10, fig.width=10}
+do_de(so, DEtabled=DEtabled, lfcthresh=lfcthresh, pctexpthresh=pctexpthresh, diffpct=diffpct, suffix='customdim')
 ```
 
 
 ## Pre-selected markers
 
 ```{r markers, fig.height=10, fig.width=10}
-so <- readRDS(file.path(outdir, paste0(projectname, '_customdim.RDS')))
-
 for (y in names(priors)) {
 	# y <- names(priors)[1]
 	print(y)
 	subg <- priors[[y]]
 	subg <- subg[!is.na(subg)]
 	
-	print( p1 <- plot_variancemeans(so, features=subg, title=NULL) )
+	print( p1 <- plot_variancemeans(so, features=subg, topn=18) )
 	
 	# print( (DimPlot(so, reduction='pca', group.by='seurat_clusters') + coord_fixed() + theme(legend.position='none' )) |
 	# 			 (DimPlot(so, reduction='pca', group.by='Source') + coord_fixed() )
