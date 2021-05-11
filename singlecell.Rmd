@@ -1,5 +1,5 @@
 ---
-title: "Single Cell Analysis"
+title: "Single Cell initial analysis"
 author: "Kimon Froussios"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
@@ -34,69 +34,90 @@ require(ggrepel)
 
 # plan("multiprocess", workers = 4)
 # options(future.rng.onMisuse = "ignore")  #, future.globals.maxSize = 2000 * 1024^2)
+
+imported <- FALSE
+filtered <- FALSE
+preprocessed <- FALSE
+DEtabled <- FALSE
+scanparam <- TRUE
+custom_filter <- FALSE
+regress_cycle <- FALSE
+partial_regress <- FALSE
 ```
 
 ```{r start}
 #
-# SEARCH KEY for parameter values requiring manual decision: "USER-INPUT"
+## SEARCH KEY for parameter values requiring manual decision: "USER-INPUT"
 #
 
+## Checkpoints
 
-# Checkpoints
-imported <- FALSE
-filtered <- FALSE
-ccadjusted <- FALSE
-finalized <- FALSE
-DEtabled <- FALSE
-scanparam <- TRUE
-#
-imported <- TRUE
-filtered <- TRUE
-ccadjusted <- TRUE
-scanparam <- FALSE
-finalized <- TRUE
-DEtabled <- TRUE
+# imported <- TRUE
+# filtered <- TRUE
+# preprocessed <- TRUE
+# scanparam <- FALSE
+# DEtabled <- TRUE
 
-# Extra steps
-custom_filter <- FALSE
-regress_cycle <- FALSE
-partial_regress <- FALSE
-#
+## Extra steps
+
 custom_filter <- TRUE
 regress_cycle <- TRUE
 # partial_regress <- TRUE
 ```
 
 ```{r info}
-datadirs <- c(control = '~/Desktop/markus_SC/control/raw_feature_bc_matrix/',
-							Kdm2b = '~/Desktop/markus_SC/kdm2b/raw_feature_bc_matrix',
-							Rc3h1 = '~/Desktop/markus_SC/Rc3h1/raw_feature_bc_matrix')
+datadirs <- c(cd45NTT = '/Users/kimon.froussios/Desktop/anais/108155',
+							bulkNTT = '/Users/kimon.froussios/Desktop/anais/108156',
+							cd45RTT = '/Users/kimon.froussios/Desktop/anais/108157',
+							bulkRTT = '/Users/kimon.froussios/Desktop/anais/108158')
 
-projectname = 'OT1_Kdm2b-Rc3h1_ultimate'
-outdir <- '~/Desktop/markus_SC'
+projectname = 'yumm3.3'
+outdir <- '~/Desktop/anais'
 
-# Markers of interest
-# USER-INPUT
-positivefilter <- c('Cd8a', 'Cd8b1', 'Cd3d')     # CD8 Tcell markers
-negativefilter <- c('Cd4')
-# KOfilter <- c(control=NA_character_, Kdm2b='Kdm2b', Rc3h1='Rc3h1')    # names must match the condition names in datadirs
-KOfilter <- c(control=NA_character_, Kdm2b=NA_character_, Rc3h1=NA_character_)    # names must match the condition names in datadirs
-filtercheck <- c('Cd2', 'Cd3e', 'Kdm2b', 'Rc3h1')
-priors <- list(selection=c(positivefilter, negativefilter, filtercheck, KOfilter),
+# Markers of interest        # USER-INPUT
+
+# Must express.
+positivefilter <- list(cd45NTT=NA_character_,
+											 bulkNTT=c('Ptprc'),
+											 cd45RTT=NA_character_,
+											 bulkRTT=c('Ptprc'))
+
+# Must NOT express.
+negativefilter <- list(cd45NTT=NA_character_,
+											 bulkNTT=NA_character_,
+											 cd45RTT=NA_character_,
+											 bulkRTT=NA_character_)
+# Given that SC seq generally doesn't detect all the expressed genes in every cell, it is not a very good idea to remove (contaminant) cells that express an undesireable marker.
+# Likely, the marker will not be detected in all the contaminant cells, so some will still sneak through and create mystery clusters.
+# Therefore, it may be better to leave all the contaminants in, so the eones wheere the marker is deteected can be used as proxies to flag the relevant clusters.
+# Unless multiple markers can be used, for redundancy in identifying contaminant cells.
+
+# Markers relevant to identifying contaminants, but not used to filter.
+filtercheck <- list(c('Sox9', 'Pecam1', 'Pdgfra'))
+
+# Markers to highlight.
+priors <- list(selection=c(positivefilter, negativefilter, filtercheck),
 							 # transgenes=c('Blasti_variant','GFP_variant','hSpCas9','Hygro_variant','Luc2','mCherry','Neo',
 							 # 						  'Puro_variant','rtTA3','LTR3_LENC','mirE_polyA_LENC','NLS_Cre','ERT2','IRES'),
-							 Kdm2b_up=c("Osr2","Cd24a","Onecut2","Fbxo2"),
-							 Rc3h1_up=c("Icos","Ctla4","Tnf","Il10", "Ccl5","Lfng","Tm2d3","Polr1c"),
-							 exhaustion=c("Entpd1","Havcr2","Tigit","Lag3", "Pdcd1","Batf","Tox","Id2","Ctla4"),
-							 effectors=c("Ccl3","Prf1","Fasl","Gzmb","Gzmk","Ccl5"),
-							 naive_memory=c("Ly6c2","Cxcr3","Id3","Slamf6", "Il2ra","Xcl1","Cd44","Tcf7", "Ccr7","S1pr1","Lef1","Il7r","Sell")
+							 DC=c("Itgax", "Itgam", "Cd24a", "Itgae", "Clec9a", "Xcr1", "Sirpa", "Ptprc", "Cd209a"),
+							 CD8=c("Cd3e", "Cd8a", "Tcf7", "Sell", "Cd28", "Ctla4", "Entpd1", "Cd69", "Havcr2", "Pdcd1", "Tox", "Cd3e", "Cd4"),
+							 other=c("Klrd1", "Ly6g", "Adgre1", "Itgam", "Csf1r"),
+							 DC_extras=c("H2-K1", "H2-Ke6", "H2-Oa", "H2-DMa", "H2-DMb2", "H2-DMb1", "H2-Ob", "H2-Ab1",
+							 						"H2-Aa", "H2-Eb1", "H2-Eb2", "H2-D1", "H2-Q1", "H2-Q2", "H2-Q4" , "H2-Q6",
+							 						"H2-Q7", "H2-Q10", "H2-T24", "H2-T23", "H2-T22", "H2-T3", "H2-M9", "H2-M3",
+							 						"H2-M2", "Irf8", "Cd40", "Cd80", "Cd86", "Il12a", "Il12b", "Batf3", "Ccr7")
 							 )
+priors$selection <- unlist(unique(priors$selection[!is.na(priors$selection)]))
+
+cellstocount <- list(c("Itgae", "Clec9a", "Xcr1"),
+										 priors$DC_extras)
+
 
 # Cell-cycle genes. https://doi.org/10.1080/2162402X.2020.1737369 supplemented with a couple more genes from the Seurat vignette.
 # USER_INPUT
-cccore <- read.table('~/Desktop/markus_SC/cellcycle.txt', stringsAsFactors=FALSE)[[1]]
+cccore <- read.table('~/Desktop/anais/cellcycle.txt', stringsAsFactors=FALSE)[[1]]
 
-# Core cell cycle genes by phase.  According to Seurat vignette.          
+# Core (mouse) cell cycle genes by phase.  According to Seurat vignette.          
 # USER_INPUT
 s.genes <- c('Mcm4','Exo1','Slbp','Gmnn','Cdc45','Msh2','Mcm6','Rrm2','Pold3','Blm','Ubr7','Mcm5','Clspn','Hells',
 						 'Nasp','Rpa2','Rad51ap1','Tyms','Rrm1','Rfc2','Prim1','Brip1','Usp1','Ung','Pola1','Mcm2','Fen1','Tipin',
@@ -207,8 +228,55 @@ plot_qc_correlations <- function(DF=so@meta.data){
 			theme_classic() + 
 			theme(axis.text.x=element_text(angle=90, hjust=0.5, vjust=1))
 		
+		p4 <- ggplot(DF,
+					 aes(x=percent.mt, y=percent.ribo, colour=Source)) +
+			facet_grid( . ~ Source) +
+			geom_point(shape=16, alpha=0.5, size=rel(0.5)) +
+			scale_colour_discrete(name='Sample', guide='none') + 
+			coord_cartesian(ylim=c(0,NA), xlim=c(0,NA)) +
+			labs(x='% Mitochondrial', y='% Ribosomal', title='Correlation', subtitle=featcor('percent.mt', 'percent.ribo')) +
+			theme_classic() + 
+			theme(axis.text.x=element_text(angle=90, hjust=0.5, vjust=1))
 		
-		return( list(p1, p2, p3) )
+		return( list(p1, p2, p3, p4) )
+}
+
+plot_qc_detection <- function(so, detectionthresh=0){
+	cellsbysource <- lapply(sources, function(x){
+		rownames(so@meta.data[so@meta.data$Source==x,])})
+	names(cellsbysource) <- sources
+	
+	detectionstats <- Reduce(rbind, 
+													 lapply(names(cellsbysource), function(n){
+		countmat <- copy(so@assays$RNA@counts[, cellsbysource[[n]]])
+		countmat[countmat <= detectionthresh] <- NA_integer_
+		DF <- data.frame(Source = n,
+										 pct.Cells = rowMeans(!is.na(countmat))*100,
+										 mean.readCount = rowMeans(countmat, na.rm=TRUE)
+		)
+		DF
+	}))
+	
+	p1 <- ggplot(detectionstats, aes(x=mean.readCount, fill=Source)) +
+		facet_grid(. ~ Source) +
+		geom_histogram(bins=20, colour="black") +
+		scale_x_log10() +
+		annotation_logticks(sides="b") +
+		theme_bw() + 
+		labs(x=NULL, y="Genes") +
+		theme(legend.position="none")
+	
+	p2 <- ggplot(detectionstats, aes(x=mean.readCount, y=pct.Cells, colour=Source)) +
+		facet_grid(. ~ Source) +
+		geom_point(shape=16, size=0.8, alpha=0.3) +
+		scale_x_log10() +
+		annotation_logticks(sides="b") +
+		theme_bw() + 
+		theme(legend.position="none",
+					strip.background.x=element_blank(),
+					strip.text.x=element_blank())
+	
+	p1 / p2
 }
 
 plot_variancemeans <- function(so, features=NULL, topn=25){
@@ -244,10 +312,10 @@ plot_variancemeans <- function(so, features=NULL, topn=25){
 	return(p1)
 }
 
-clean_candidates <- function(x, mito=NULL, ribo=NULL, cccore=NULL, ccextra=NULL, verbose=TRUE){
+clean_candidates <- function(x, mito=NULL, ribo=NULL, cccore=NULL, ccextra=NULL, verbose=TRUE, expthresh=0.003){
 	# Remove cell cycle genes from the pool.
 	if (!is.null(ribo)){
-		if (verbose) message('Removing ribosomal genes from the variables.')
+		if (verbose) message('Removing any ribosomal genes.')
 		x <- x[! x %in% ribo]
 		if (verbose) message(paste(length(x), 'features remain.'))
 	} else if (verbose){
@@ -257,7 +325,7 @@ clean_candidates <- function(x, mito=NULL, ribo=NULL, cccore=NULL, ccextra=NULL,
 	}
 	
 	if (!is.null(mito)){
-		if (verbose) message('Removing mitochondrial genes from the variables.')
+		if (verbose) message('Removing any mitochondrial genes.')
 		x <- x[! x %in%mito]
 		if (verbose) message(paste(length(x), 'features remain.'))
 	} else if (verbose){
@@ -267,7 +335,7 @@ clean_candidates <- function(x, mito=NULL, ribo=NULL, cccore=NULL, ccextra=NULL,
 	}
 	
 	if (!is.null(cccore)){
-		if (verbose) message("Removing any cell cycle genes from the variables.")
+		if (verbose) message("Removing any known cell cycle genes.")
 		x <- x[! x %in% cccore]
 		if (verbose) message(paste(length(x), 'features remain.'))
 	} else if (verbose){
@@ -277,7 +345,7 @@ clean_candidates <- function(x, mito=NULL, ribo=NULL, cccore=NULL, ccextra=NULL,
 	}
 	
 	if (!is.null(ccextra)){
-		if (verbose) message("Removing genes closely correlated with the cell cycle from the analysis pool:")
+		if (verbose) message("Removing genes closely correlated with the cell cycle.")
 		if (verbose) print(intersect(x, ccextra))
 		x <- x[! x %in% ccextra]
 		if (verbose) message(paste(length(x), 'features remain.'))
@@ -286,6 +354,10 @@ clean_candidates <- function(x, mito=NULL, ribo=NULL, cccore=NULL, ccextra=NULL,
 		message(paste(length(sel), 'of the highly variable genes correlate highly with the cell cycle:'))
 		print(sel)
 	}
+	
+	if (verbose) message("Removing genes with very low average expression:")
+	x <- x[which(rowMeans(so@assays$RNA@counts[x, ]) >= expthresh)]
+	if (verbose) message(paste(length(x), 'features remain.'))
 	
 	return(x)
 }
@@ -561,7 +633,7 @@ plot_grid_pcs <- function(so, comps=1:5, flip=FALSE) {
 	}
 }
 
-do_clusters <- function(so, d=1:50, resolution=0.8, nneighbours=30, mindist=0.3){
+do_clusters <- function(so, d=1:50, resolution=0.8, nneighbours=30, mindist=0.3, clusterplotonly=FALSE){
 	message(paste('PCs:', paste(d, collapse=', ')))
 	message(paste('Clustering resolution:', resolution))
 	message(paste('Number of neighbours:', nneighbours))
@@ -569,38 +641,40 @@ do_clusters <- function(so, d=1:50, resolution=0.8, nneighbours=30, mindist=0.3)
 
 	so <- RunUMAP(so, dims=d, n.neighbors=nneighbours, min.dist=mindist)
 
-	p1 <- DimPlot(so, reduction='umap', group.by='Phase') +
-			coord_fixed(ratio=1) +
-			labs(title=NULL) +
-			theme_light() +
-			theme(panel.grid=element_blank())
-
-	p2 <- DimPlot(so, reduction='umap', group.by='Phase', split.by='Phase') +
-			coord_fixed(ratio=1) +
-			labs(title=NULL) +
-			theme_light() +
-			theme(panel.grid=element_blank())
-
-	print( p1 / p2 + plot_layout(guides='collect') )
-
-	p1 <- DimPlot(so, reduction='umap', group.by='Source') +
-		coord_fixed(ratio=1) +
-		labs(title=NULL) +
-		theme_light() +
-		theme(panel.grid=element_blank())
-		
-  p2 <- DimPlot(so, reduction='umap', group.by='Source', split.by='Source') +
-		coord_fixed(ratio=1) +
-		labs(title=NULL) +
-		theme_light() +
-		theme(panel.grid=element_blank())
-		
-	print( p1 / p2 + plot_layout(guides='collect') )
-	
 	so <- FindNeighbors(so, dims=d)
 	so <- FindClusters(so, resolution=resolution)
-	
 	message( paste('Clusters identified:', length(unique(so$seurat_clusters))) )
+	
+	if (!clusterplotonly) {
+		p1 <- DimPlot(so, reduction='umap', group.by='Phase') +
+				coord_fixed(ratio=1) +
+				labs(title=NULL) +
+				theme_light() +
+				theme(panel.grid=element_blank())
+	
+		p2 <- DimPlot(so, reduction='umap', group.by='Phase', split.by='Phase') +
+				coord_fixed(ratio=1) +
+				labs(title=NULL) +
+				theme_light() +
+				theme(panel.grid=element_blank())
+	
+		print( p1 / p2 + plot_layout(guides='collect') )
+	
+		p1 <- DimPlot(so, reduction='umap', group.by='Source') +
+			coord_fixed(ratio=1) +
+			labs(title=NULL) +
+			theme_light() +
+			theme(panel.grid=element_blank())
+			
+	  p2 <- DimPlot(so, reduction='umap', group.by='Source', split.by='Source') +
+			coord_fixed(ratio=1) +
+			labs(title=NULL) +
+			theme_light() +
+			theme(panel.grid=element_blank())
+			
+		print( p1 / p2 + plot_layout(guides='collect') )
+	}
+	
 	p1 <- DimPlot(so, reduction='umap', label=TRUE, group.by='seurat_clusters') +
 		coord_fixed(ratio=1) +
 		labs(title=NULL) +
@@ -608,58 +682,72 @@ do_clusters <- function(so, d=1:50, resolution=0.8, nneighbours=30, mindist=0.3)
 		theme(panel.grid=element_blank(),
 					legend.position='none')
 	
+	if (clusterplotonly) {
+		p1 <- p1 + labs(subtitle=resolution)
+	}
+	
 	p2 <- DimPlot(so, reduction='umap', label=FALSE, group.by='seurat_clusters', split.by='Source') +
 		coord_fixed(ratio=1) +
 		labs(title=NULL) +
 		theme_light() +
 		theme(panel.grid=element_blank(),
 					legend.position='none')
-
+	
 	print( p1 / p2 )
 
-	DF <- table(so$seurat_clusters, so$Source)
-	DF <- as.data.frame(cbind(DF, rowSums(DF)))
-	names(DF)[ncol(DF)] <- 'Total'
-	# message('Number of cells per cluster:')
-	# print(DF)
-	DF['Cluster'] <- factor(rownames(DF), ordered=TRUE, levels=rownames(DF))
-	p1 <- ggplot(melt(as.data.table(DF), id.vars='Cluster', value.name='cells', variable.name='Source'),
-				 aes(x=Source, y=Cluster, fill=cells)) +
-		geom_tile() +
-		geom_text(aes(label=cells), size=rel(2.5)) +
-		scale_fill_gradient(low='darkgreen', high='gold') +
-		labs(title='Number of cells', x=NULL) +
-		theme_bw() +
-		theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
-					legend.position='none')
-	
-	frac1 <- sweep(DF[, 1:(ncol(DF)-1)], 2, colSums(DF[, 1:(ncol(DF)-1)]), `/`) * 100
-	frac1['Cluster'] <- factor(rownames(frac1), ordered=TRUE, levels=rownames(frac1))
-	p2 <- ggplot(melt(as.data.table(frac1), id.vars='Cluster', value.name='pct', variable.name='Source'),
-							 aes(x=Source, y=Cluster, fill=pct)) +
-		geom_tile() +
-		geom_text(aes(label=round(pct, 1)), size=rel(2.5)) +
-		scale_fill_gradient(low='darkblue', high='gold') +
-		labs(title='% of cells by condition', x=NULL, y=NULL) +
-		theme_bw() +
-		theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
-					legend.position='none')
-	
-	frac2 <- sweep(frac1[, 1:(ncol(frac1)-2)], 1, rowSums(frac1[, 1:(ncol(frac1)-2)]), `/`) * 100
-	frac2['Cluster'] <- factor(rownames(frac2), ordered=TRUE, levels=rownames(frac2))
-	p3 <- ggplot(melt(as.data.table(frac2), id.vars='Cluster', value.name='pct', variable.name='Source'),
-							 aes(x=Source, y=Cluster, fill=pct)) +
-		geom_tile() +
-		geom_text(aes(label=round(pct, 1)), size=rel(2.5)) +
-		scale_fill_gradient(low='darkblue', high='gold') +
-		labs(title='% of cells by cluster', subtitle='(normalized for condition)', x=NULL, y=NULL) +
-		theme_bw() +
-		theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
-					legend.position='none')
-	
-	print( p1 | p2 | p3 )
-	
-	return(so)
+	if (!clusterplotonly) {
+		DF <- table(so$seurat_clusters, so$Source)
+		DF <- as.data.frame(cbind(DF, rowSums(DF)))
+		names(DF)[ncol(DF)] <- 'Total'
+		# message('Number of cells per cluster:')
+		# print(DF)
+		DF['Cluster'] <- factor(rownames(DF), ordered=TRUE, levels=rownames(DF))
+		p1 <- ggplot(melt(as.data.table(DF), id.vars='Cluster', value.name='cells', variable.name='Source'),
+					 aes(x=Source, y=Cluster, fill=cells)) +
+			geom_tile() +
+			geom_text(aes(label=cells), size=rel(2.5)) +
+			scale_fill_gradient(low='darkgreen', high='gold') +
+			labs(title='Number of cells', x=NULL) +
+			theme_bw() +
+			theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
+						legend.position='none')
+		
+		frac1 <- sweep(DF[, 1:(ncol(DF)-1)], 2, colSums(DF[, 1:(ncol(DF)-1)]), `/`) * 100
+		tmp <- as.matrix(frac1[, 1:(ncol(frac1)-1)])
+		m1 <- mean(c(min(tmp), max(tmp)))
+		frac1['Cluster'] <- factor(rownames(frac1), ordered=TRUE, levels=rownames(frac1))
+		p2 <- ggplot(melt(as.data.table(frac1), id.vars='Cluster', value.name='pct', variable.name='Source'),
+								 aes(x=Source, y=Cluster, fill=pct)) +
+			geom_tile() +
+			geom_text(aes(label=round(pct, 1), colour=pct>=m1), size=rel(2.5)) +
+			scale_fill_gradient(low='darkblue', high='gold') +
+			scale_colour_manual(values=c("white", "black")) +
+			labs(title='% of cells by condition', x=NULL, y=NULL) +
+			theme_bw() +
+			theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
+						legend.position='none')
+		
+		frac2 <- sweep(frac1[, 1:(ncol(frac1)-2)], 1, rowSums(frac1[, 1:(ncol(frac1)-2)]), `/`) * 100
+		tmp <- as.matrix(frac2)
+		m2 <- mean(c(min(tmp), max(tmp)))
+		frac2['Cluster'] <- factor(rownames(frac2), ordered=TRUE, levels=rownames(frac2))
+		p3 <- ggplot(melt(as.data.table(frac2), id.vars='Cluster', value.name='pct', variable.name='Source'),
+								 aes(x=Source, y=Cluster, fill=pct)) +
+			geom_tile() +
+			geom_text(aes(label=round(pct, 1), colour=pct>=m2), size=rel(2.5)) +
+			scale_fill_gradient(low='darkblue', high='gold') +
+			scale_colour_manual(values=c("white", "black")) +
+			labs(title='% of cells by cluster', subtitle='(normalized for condition)', x=NULL, y=NULL) +
+			theme_bw() +
+			theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5),
+						legend.position='none')
+		
+		print( p1 | p2 | p3 )
+		
+		return(so)
+	} else {
+		return(NULL)
+	}
 }
 
 
@@ -715,9 +803,10 @@ do_de <- function(so, DEtabled=FALSE, lfcthresh=0.25, pctexpthresh=0.25, diffpct
 		# )
 		print( (DimPlot(so, reduction='umap', group.by='this_cluster', label=FALSE) + 
 						coord_fixed() + scale_colour_manual(values=c('black', 'magenta')) +
-						labs(title=paste('Cluster', cl)) + theme(legend.position='none' )) /
-				 (DimPlot(so, reduction='umap', group.by='this_cluster', split.by='Source') + 
-				  	coord_fixed() + theme(legend.position='none' ) + labs(title=NULL) )
+						labs(title=paste('Cluster', cl)) + theme(legend.position='none' ))   /
+				   (DimPlot(so, reduction='umap', group.by='this_cluster', split.by='Source') + 
+				  	coord_fixed() + scale_colour_manual(values=c('black', 'magenta')) +
+				  	labs(title=NULL) + theme(legend.position='none' ))
 		)
 
 		for (x in rollslice(subg, 9)) {
@@ -794,96 +883,102 @@ print( so )
 ## Input summary
 
 ```{r qc_input1, fig.width=15, fig.height=15}
-# if (!filtered) {
-	
-	## The number of unique genes and total molecules are automatically calculated during CreateSeuratObject
-	
-	# Contamination with mitochondrial genes
-	so[['percent.mt']] <- PercentageFeatureSet(so, pattern='^MT-|^mt-|^Mt-')
-	
-	# Ribosomal genes
-	so[['percent.ribo']] <- PercentageFeatureSet(so, pattern='^Rp[ls]|^rp[ls]|^RP[LS]')
-	
-	# Count summaries.
-	for (s in unique(so@meta.data$Source)){
-		message(s)
-		print( summary(so@meta.data[so@meta.data$Source==s, c('nFeature_RNA', 'nCount_RNA', 'percent.mt', 'Source')]) )
-	}
-	
-	l <- plot_number_of_features(so@meta.data)
-	print( l[[1]] + l[[2]] + l[[3]] + l[[4]] + plot_layout(guides='collect'))
-# }
+## The number of unique genes and total molecules are automatically calculated during CreateSeuratObject
+
+# Contamination with mitochondrial genes
+so[['percent.mt']] <- PercentageFeatureSet(so, pattern='^MT-|^mt-|^Mt-')
+
+# Ribosomal genes
+so[['percent.ribo']] <- PercentageFeatureSet(so, pattern='^Rp[ls]|^rp[ls]|^RP[LS]')
+
+
+
+# Count summaries.
+# summary(so@meta.data[so@meta.data$Source==s, c('Source', 'nFeature_RNA', 'nCount_RNA', 'percent.mt', 'percent.ribo')])
+sources <- unique(so@meta.data$Source)
+rawstats <- lapply (sources, function(s){
+	# summary(so@meta.data[so@meta.data$Source==s, c('nFeature_RNA', 'nCount_RNA', 'percent.mt', 'percent.ribo', 'Source')])
+	summary(so@meta.data[so@meta.data$Source==s, c('Source', 'nFeature_RNA', 'nCount_RNA')])
+})
+names(rawstats) <- sources
+print( rawstats )
+
+l <- plot_number_of_features(so@meta.data)
+print( l[[1]] + l[[2]] + l[[3]] + l[[4]] + plot_layout(guides='collect'))
 ```
 
-```{r qc_inpu2, fig.width=10, fig.height=6}
-# if (!filtered) {
-	# Correlations. Only number of molecules and number of genes should correlate.
-	l <- plot_qc_correlations(so@meta.data)
-	print( l[[1]] + l[[2]] + l[[3]] + plot_layout(guides='collect'))
-# }
+```{r qc_input2, fig.width=8, fig.height=8}
+# Correlations. Only number of molecules and number of genes should correlate.
+l <- plot_qc_correlations(so@meta.data)
+print( (l[[1]] | l[[2]]) / (l[[3]] ) + plot_layout(guides='collect'))
 ```
 
-## Quality filters
+```{r qc_input3, fig.width=12, fig.height=8}
+# What raw count constitutes enough evidence to consider a gene detected?
+detectionthresh <- 0   # USER-INPUT
+
+print(plot_qc_detection(so, detectionthresh))
+```
+
+## General quality filters
 
 ```{r qc_filter, fig.height=8, fig.width=8}
-expressedgenes <- rownames(so)[rowSums(so@assays$RNA@counts > 0) > 0]
-mtgenes <- rownames(so)[grepl('^MT-|^mt-|^Mt-', perl=TRUE, rownames(so))]                   # USER_INPUT
-nonmtgenes <- rownames(so)[!grepl('^MT-|^mt-|^Mt-', perl=TRUE, rownames(so))]               # USER_INPUT
-ribogenes <- rownames(so)[grepl('^RP[LS]|^rp[ls]|^Rp[ls]', perl=TRUE, rownames(so))]        # USER_INPUT
-nonribogenes <- rownames(so)[!grepl('^RP[LS]|^rp[ls]|^Rp[ls]', perl=TRUE, rownames(so))]    # USER_INPUT
-	
-so <- NormalizeData(so, normalization.method = "LogNormalize", scale.factor = 1e6)
-so <- ScaleData(so, features = rownames(so))
-so <- FindVariableFeatures(so, nfeatures=nrow(so))
-p1 <- plot_variancemeans(so, mtgenes, 'Mitochondrial variances')
-p2 <- plot_variancemeans(so, ribogenes, 'Ribosomal variances')
-print(p1 / p2 + plot_layout(guides='collect'))
-
-if (!filtered) {
+if (!filtered){
 	# Remove unwanted cells
-	minfeat <- 1000      # USER-INPUT
-	maxfeat <- 5000      # USER-INPUT
-	maxmt <- 8           # USER-INPUT
-	maxribo <- 50        # USER-INPUT
-	maxmols <- 30000     # USER-INPUT
-	minmols <- minfeat   # USER-INPUT    (it can be bigger than minfeat, but it doesn't make sense to be smaller)
+	minfeat <- c(1000, 1000, 1000, 1000)           # USER-INPUT
+	names(minfeat) <- levels(sources)
+	maxfeat <- c(Inf, Inf, Inf, Inf)               # USER-INPUT
+	names(maxfeat) <- levels(sources)
+	maxmols <- c(30000, 40000, 20000, 30000)       # USER-INPUT
+	names(maxmols) <- levels(sources)
+	minmols <- minfeat                             # USER-INPUT    (it can be bigger than minfeat, but it doesn't make sense to be smaller)
+	maxmt <- c(10, 10, 10, 10)                     # USER-INPUT
+	names(maxmt) <- levels(sources)
+	maxribo <- c(45, 45, 45, 45)                   # USER-INPUT
+	names(maxribo) <- levels(sources)
 	
-	message('Removing cells with high abundance of ribosomal and mitochondrial genes.')
-	message(paste('Selected lower threshold:', minfeat, 'features'))
-	message(paste('Selected upper cutoff:', maxfeat, 'features'))
-	message(paste('Selected lower threshold:', minmols, 'molecules'))
-	message(paste('Selected upper cutoff:', maxmols, 'molecules'))
-	message(paste('Max mitochondrial contamination allowed:', maxmt, '%'))
-	message(paste('Max ribosomal presence allowed:', maxribo, '%'))
 	
-	# Remove cells with high/low number of features
-	so <- subset(so, subset = nFeature_RNA > minfeat & nFeature_RNA < maxfeat &
-  # and cells with too many sequenced molecules
-  	            nCount_RNA < maxmols & nCount_RNA >= minmols &
-	# and cells with high mitochondrial/ribosomal presence
-							 	percent.mt < maxmt & percent.ribo < maxribo)
+	message("Filter number of features.")
+	for (n in names(minfeat)) {
+		# all the remaining cells from  the other sources and the cells that meet the criteria for this source
+		so <- subset(so, subset = (Source !=n) | (Source == n & nFeature_RNA >= minfeat[n] & nFeature_RNA <= maxfeat[n]))
+	}
+	print( summary(so@meta.data[, c('Source')]) )
+							 	
+	message("Filter number of molecules.")
+	for (n in names(maxmols)) {
+		# all the remaining cells from  the other sources and the cells that meet the criteria for this source
+		so <- subset(so, subset = (Source !=n) | (Source == n & nCount_RNA >= minmols[n] & nCount_RNA <= maxmols[n]))
+	}
+	print( summary(so@meta.data[, c('Source')]) )
+	
+	message("Filter mitochondrial and ribosomal presence.")
+	for (n in names(maxmt)) {
+		# all the remaining cells from  the other sources and the cells that meet the criteria for this source
+		so <- subset(so, subset = (Source !=n) | (Source == n & percent.mt <= maxmt[n] & percent.ribo <= maxribo[n]))
+	}
+	print( summary(so@meta.data[, c('Source')]) )
 	
 	# Remove non-expressed genes.
+	expressedgenes <- rownames(so)[rowSums(so@assays$RNA@counts > 0) > 0]
 	message( paste('Expressed genes:', length(expressedgenes)) )
 	so <- subset(so, features = expressedgenes)
 	
-	# Don't save here. Save after scaling the data.
-	# saveRDS(so, file = file.path(outdir, paste0(projectname, '_filtered.RDS')))
-	# filtered <- TRUE
+}	else {
 	
-} else {
-	
-	message("Using pre-processed data that's already filtered.")
+	message("Using preprocessed data that has been filtered already.")
 	so <- readRDS(file = file.path(outdir, paste0(projectname, '_filtered.RDS')))
 }
+
 ```
 
 ```{r qc_filtered, fig.width=15, fig.height=15}
 # Count summaries.
-for (s in unique(so@meta.data$Source)){
-	message(s)
-	print( summary(so@meta.data[so@meta.data$Source==s, c('nFeature_RNA', 'nCount_RNA', 'percent.mt', 'Source')]) )
-}
+rawstats <- lapply (sources, function(s){
+	summary(so@meta.data[so@meta.data$Source==s, c('Source', 'nFeature_RNA', 'nCount_RNA')])
+})
+names(rawstats) <- sources
+print( rawstats )
 	
 l <- plot_number_of_features(so@meta.data)
 print( l[[1]] + l[[2]] + l[[3]] + l[[4]] + plot_layout(guides='collect'))
@@ -891,15 +986,17 @@ print( l[[1]] + l[[2]] + l[[3]] + l[[4]] + plot_layout(guides='collect'))
 
 ## Custom filters
 
-
-### Shared marker filtering
-
-Applies to all inputs.
+### Marker filtering
 
 ```{r custom_filter1, fig.width=15, fig.height=15}
+so <- NormalizeData(so, normalization.method = "LogNormalize", scale.factor = 1e6)
+so <- ScaleData(so, features = rownames(so))
+
 if (!custom_filter) {
 	message("No additional filtering specified.")
+	
 } else {
+	
 	if (!filtered) {
 		print( VlnPlot(so, features=priors$selection, group.by='Source', pt.size=0.01) &
 					 	coord_cartesian(ylim=c(0,NA)) & labs(x=NULL) )
@@ -912,111 +1009,103 @@ if (!custom_filter) {
 ```{r custom_filter2, fig.width=15, fig.height=15}
 if (custom_filter) {
 	if(!filtered) {
-		expthresh <- 2.5      # USER-INPUT min log expression level
 		
-		if (!is.null(positivefilter)){
-			sel <- so@assays$RNA@data[positivefilter, ] >= expthresh
-	
-			if(is.null(dim(sel))){
-				so <- subset(so, cells = colnames(so)[sel] )
-			} else {
-				## USER_INPUT choose filtering method
-				
-				# message(paste('Keep cells expressing ALL of', paste(positivefilter,  collapse=','), 'above', expthresh))
-				# so <- subset(so, cells = colnames(so)[colSums(sel) == length(positivefilter)] )
-				
-				message(paste('Keep cells expressing ANY of', paste(positivefilter,  collapse=','), 'above', expthresh))
-				so <- subset(so, cells = colnames(so)[colSums(sel) >= 1] )
+		if (any(!is.na(positivefilter))) {
+			expthresh <- 0                       # USER-INPUT
+			positivefilter <- positivefilter[!is.na(positivefilter)]
+			
+			for (n in names(positivefilter)) {
+				message(paste("Select", n, "cells expressing", positivefilter[n]))
+				sel <- so@assays$RNA@data[positivefilter[[n]], ] > expthresh
+				if (!is.null(dim(sel))) {
+					# USER-INPUT
+					sel <- colSums(sel) == length(positivefilter[[n]])      # all the required markers
+					# sel <- colSums(sel) >= 1                            # at least one of the requireed markers
+				}
+			  # all the remaining cells from  the other sources and the cells that meet the criteria for this source
+				sel <- (so@meta.data$Source !=n) | (so@meta.data$Source == n & sel)
+				so <- subset(so, cells = rownames(so@meta.data)[sel])
 			}
+			print( summary(so@meta.data[, c('Source')]) )
 		}
-		
+			
 		if (!is.null(negativefilter)) {
-			# USER-INPUT choose filtering method
+			expthresh <- 0      # USER-INPUT max log expression level
+			negativefilter <- negativefilter[!is.na(negativefilter)]
 			
-			# message(paste('Reject cells expressing', paste(negativefilter,  collapse=','), 'above', expthresh))
-			# sel <- so@assays$RNA@data[negativefilter, ] < expthresh
-			
-			message(paste('Reject cells expressing', paste(negativefilter,  collapse=',')))
-			sel <- so@assays$RNA@data[negativefilter, ] == 0
-			
-			if(is.null(dim(sel))){
-				so <- subset(so, cells = colnames(so)[sel] )
-			} else {
-				so <- subset(so, cells = colnames(so)[colSums(sel) >= 1] )
+			for (n in names(negativefilter)) {
+				message(paste("Reject", n, "cells expressing", negativefilter[n]))
+				sel <- so@assays$RNA@data[negativefilter[[n]], ] <= expthresh
+				if (!is.null(dim(sel))) {
+					# USER-INPUT
+					sel <- colSums(sel) == length(negativefilter[[n]])      # all the required markers
+					# sel <- colSums(sel) >= 1                            # at least one of the requireed markers
+				}
+			  # all the remaining cells from  the other sources and the cells that meet the criteria for this source
+				sel <- (so@meta.data$Source !=n) | (so@meta.data$Source == n & sel)
+				so <- subset(so, cells = rownames(so@meta.data)[sel])
 			}
+			print( summary(so@meta.data[, c('Source')]) )
 		}
+	
 	} else {
 		message("Using already filtered data.")
 	}
-		
-	print( VlnPlot(so, features=priors$selection, group.by='Source', pt.size=0.01) &
-					 	coord_cartesian(ylim=c(0,NA)) & labs(x=NULL) )
-	
-	# Don't save here yet either
-	# saveRDS(so, file = file.path(outdir, paste0(projectname, '_filtered.RDS')))
-	# filtered <- TRUE
-	
-	# Count summaries.
-	for (s in unique(so@meta.data$Source)){
-		message(s)
-		print( summary(so@meta.data[so@meta.data$Source==s, c('nFeature_RNA', 'nCount_RNA', 'percent.mt', 'Source')]) )
-	}
-		
-	l <- plot_number_of_features(so@meta.data)
-	print( l[[1]] + l[[2]] + l[[3]] + l[[4]] + plot_layout(guides='collect'))
-	
-	# l <- plot_qc_correlations(so@meta.data)
-	# print( l[[1]] + l[[2]] + l[[3]] + plot_layout(guides='collect'))
 }
 ```
 
-### Knock-out filtering
+## Post-filtering summary
 
-Individual for each input.
+```{r postqc1, fig.width=15, fig.height=15}
+print( VlnPlot(so, features=priors$selection, group.by='Source', pt.size=0.01) &
+				 	coord_cartesian(ylim=c(0,NA)) & labs(x=NULL) )
 
-```{r ko}
-if (custom_filter){
-	if (!filtered && any(!is.na(KOfilter))) {
-		print( VlnPlot(so, features=KOfilter, split.by='Source') & labs(x='Samples') )
-		
-		expthresh <- 2.5      # USER-INPUT min log expression level
-		message(paste("Retaining detection <=", expthresh))
-		
-		cellsbysource <- lapply(names(KOfilter), function(x){
-			colnames(so)[so@meta.data$Source == x]
-		})
-		names(cellsbysource) <- names(KOfilter)
-		
-		sel <- lapply(names(KOfilter), function(x){
-			if (!is.na(KOfilter[x])) {
-				cellsbysource[[x]] [ which(so@assays$RNA@data[KOfilter[x], cellsbysource[[x]]] <= expthresh) ]
-			} else {
-				cellsbysource[[x]]
-			}
-		})
-		names(sel) <- names(KOfilter)
-		
-		v <- paste0(round(vapply(sel, length, integer(1)) / vapply(cellsbysource, length, integer(1)), 3) * 100, "%")
-		names(v) <- names(KOfilter)
-		print( v )
-		
-		so <- subset(so, cells=unlist(sel))
-		print( VlnPlot(so, features=KOfilter, split.by='Source') & labs(x='Samples') )
-		
-		# Count summaries.
-		for (s in unique(so@meta.data$Source)){
-			message(s)
-			print( summary(so@meta.data[so@meta.data$Source==s, c('nFeature_RNA', 'nCount_RNA', 'percent.mt', 'Source')]) )
-		}
-	} else {
-		message('Already filtered?')
-	}
-} else {
-	message('No custom filtering')
-}
+# Count summaries.
+rawstats <- lapply (sources, function(s){
+	summary(so@meta.data[so@meta.data$Source==s, c('Source', 'nFeature_RNA', 'nCount_RNA')])
+})
+names(rawstats) <- sources
+print( rawstats )
+
+l <- plot_number_of_features(so@meta.data)
+print( l[[1]] + l[[2]] + l[[3]] + l[[4]] + plot_layout(guides='collect'))
+```
+
+```{r postqc2, fig.width=12, fig.height=8}
+print( plot_qc_detection(so, detectionthresh) )
+```
+
+## Variance of mitochondrial and ribosomal genes
+
+```{r qc_mtribo, fig.height=8, fig.width=8}
+mtgenes <- rownames(so)[grepl('^MT-|^mt-|^Mt-', perl=TRUE, rownames(so))]                   # USER_INPUT
+nonmtgenes <- rownames(so)[!grepl('^MT-|^mt-|^Mt-', perl=TRUE, rownames(so))]               # USER_INPUT
+ribogenes <- rownames(so)[grepl('^RP[LS]|^rp[ls]|^Rp[ls]', perl=TRUE, rownames(so))]        # USER_INPUT
+nonribogenes <- rownames(so)[!grepl('^RP[LS]|^rp[ls]|^Rp[ls]', perl=TRUE, rownames(so))]    # USER_INPUT
+	
+if (! filtered) {
+	so <- NormalizeData(so, normalization.method = "LogNormalize", scale.factor = 1e6)
+	so <- ScaleData(so, features = rownames(so))
+	so <- FindVariableFeatures(so, nfeatures=nrow(so))
+
+	# Checkpoint.
+	saveRDS(so, file = file.path(outdir, paste0(projectname, '_filtered.RDS')))
+	filtered <- TRUE
+} 
+
+p1 <- plot_variancemeans(so, mtgenes, 15)
+p2 <- plot_variancemeans(so, ribogenes, 15)
+print(p1 / p2 + plot_layout(guides='collect'))
 ```
 
 
+
+
+
+
+```{r}
+# knitr::knit_exit()
+```
 
 
 
@@ -1027,22 +1116,6 @@ if (custom_filter){
 
 ## Cell cycle phases
 
-```{r scale}
-if (!filtered){
-	normscalefactor=1e6    # USER-INPUT
-
-	# Normalize counts across cells
-	message(paste('Log-normalization to:', normscalefactor))
-	so <- NormalizeData(so, normalization.method = "LogNormalize", scale.factor = normscalefactor)
-	
-	# Standardize expressions
-	so <- ScaleData(so, features = rownames(so))
-	
-	# Checkpoint.
-	saveRDS(so, file = file.path(outdir, paste0(projectname, '_filtered.RDS')))
-}
-```
-
 ```{r qc_cc}
 # Identify cell cycle phase of each cell
 if (!is.null(s.genes) && !is.null(g2m.genes)) {
@@ -1050,10 +1123,12 @@ if (!is.null(s.genes) && !is.null(g2m.genes)) {
 	so$CC.Difference <- so$S.Score - so$G2M.Score
 	
 	# CC phase summary
-	for (s in unique(so@meta.data$Source)){
-		message(s)
-		print( summary(so@meta.data[so@meta.data$Source==s, c('Source', 'Phase')]) )
-	}
+	# Count summaries.
+	rawstats <- lapply (sources, function(s){
+		summary(so@meta.data[so@meta.data$Source==s, c('Source', 'Phase')])
+	})
+	names(rawstats) <- sources
+	print( rawstats )
 } else {
 	message("No cell cycle phase gene lists were provided.")
 }
@@ -1064,40 +1139,58 @@ if (!is.null(s.genes) && !is.null(g2m.genes)) {
 GO-term annotated cell cycle genes, and genes whose expression correlates highly with them.
 
 ```{r ccvar, fig.width=8, fig.height=8}
-if (!filtered){
+if (!preprocessed && !is.null(cccore)){
 	# Find genes that correlate highly with the cell cycle genes.
 	corthresh <- 0.5     # USER-INPUT
 	
-	cm <- sparse.cor(t(so@assays$RNA@data))  # This takes several minutes (regular matrix takes forever)...
-	cm <- as.matrix(cm)
-	
-	# Checkpoint
-	saveRDS(cm, file = file.path(outdir, paste0(projectname, '_genecorrel.RDS')))
-	# cm <- readRDS(file.path(outdir, paste0(projectname, '_genecorrel.RDS')))
-	
-	cm <- cm[cccore,]
-	cml <- cm >= corthresh
-	sel <- apply(cml, 2, function(x){ any(x, na.rm=TRUE) })
-	ccextra <- colnames(cml)[sel]
-	ccextra <- ccextra[! ccextra %in% cccore]
-	message(paste(sum(sel), "genes correlate with coeficient >", corthresh, "with the", length(cccore), "provided cell cycle genes:"))
-	print(ccextra)
-	
-	# Checkpoint
-	saveRDS(ccextra, file = file.path(outdir, paste0(projectname, '_ccextra.RDS')))
-	
+	cm <- tryCatch({ sparse.cor(t(so@assays$RNA@data)) },  # This takes several minutes (regular matrix takes forever)...
+								 error=function(cond){ return(NULL) },
+								 warning=function(cond){ return(NULL) })
+	if (is.null(cm)){
+		message("Cannot compute gene correlations. Matrix too large. There will not be CC-correlated genes for this analysis.")
+		ccextra <- NA_character_
+	} else {   #if (all(cccore %in% rownames(cm))) {
+		cm <- as.matrix(cm)
+		
+		# Checkpoint
+		saveRDS(cm, file = file.path(outdir, paste0(projectname, '_genecorrel.RDS')))
+		# cm <- readRDS(file.path(outdir, paste0(projectname, '_genecorrel.RDS')))
+		
+		cm <- cm[cccore[cccore %in% rownames(cm)],]
+		cml <- cm >= corthresh
+		sel <- apply(cml, 2, function(x){ any(x, na.rm=TRUE) })
+		ccextra <- colnames(cml)[sel]
+		ccextra <- ccextra[! ccextra %in% cccore]
+		message(paste(length(ccextra), "genes correlate with coefficient >", corthresh, "with the", length(cccore), "provided cell cycle genes:"))
+		print(ccextra)
+		
+		# Checkpoint
+		saveRDS(ccextra, file = file.path(outdir, paste0(projectname, '_ccextra.RDS')))
+	} 
+	# else {
+	# 	warning("A problem has evaded the checks. There will not be CC-correlated genes for this analysis.")
+	# 	ccextra <- NA_character_
+	# }
+
 } else  {
 	
 	message('Using precomputed list of cell cycle correlated genes.')
-	ccextra <- readRDS( file = file.path(outdir, paste0(projectname, '_ccextra.RDS')))
+	ccextra <- tryCatch({ readRDS( file = file.path(outdir, paste0(projectname, '_ccextra.RDS'))) },
+											error=function(cond){ message("File not found. Maybe it couldn't be computed?")
+																						return(NA_character_) },
+											warning=function(cond){ message("File not found. Maybe it couldn't be computed?")
+												                      return(NA_character_) })
+											
 }
 
 p1 <- plot_variancemeans(so, features=cccore, topn=10)
-p2 <- plot_variancemeans(so, features=ccextra, topn=10)
+if (!is.na(ccextra)){
+	p2 <- plot_variancemeans(so, features=ccextra, topn=10)
 
-print(p1 / p2 + plot_layout(guides='collect'))
-
-filtered <- TRUE
+	print(p1 / p2 + plot_layout(guides='collect'))
+} else {
+	print( p1 )
+}
 ```
 
 The density distributions show which principal components can separate the cell cycle phases, i.e. which components explain variance attributable to the cell cycle.
@@ -1130,9 +1223,9 @@ print( p1 )
 
 ## PCA after regressing out
 
-```{r ccadj}
-if (regress_cycle) {
-	if (!ccadjusted) {
+```{r ccadj, fig.height=12, fig.width=12}
+if (regress_cycle && !is.null(s.genes) && !is.null(g2m.genes)) {
+	if (!preprocessed) {
 		
 		# This takes a long time, maybe even an hour.
 		if (!partial_regress){
@@ -1153,13 +1246,7 @@ if (regress_cycle) {
 		message("Using pre-processed data that is already adjusted.")
 		so <- readRDS(file = file.path(outdir, paste0(projectname, '_ccadjusted.RDS')))
 	}
-} else {
-	message("No adjustment requested.")
-}
-```
-
-```{r ccpost1, fig.height=12, fig.width=12}	
-if (regress_cycle){
+	
 	so <- FindVariableFeatures(so, nfeatures=1000)
 	sel <- VariableFeatures(so)
 	so <- RunPCA(so, features = sel)
@@ -1179,10 +1266,19 @@ if (regress_cycle){
 	
 	# ## PCA plots
 	# plot_grid_pcs(so, comps= custom_pcs[c(1:5)])
+	
+} else {
+	message("No adjustment requested.")
 }
 ```
 
 
+
+
+
+```{r}
+# knitr::knit_exit()
+```
 
 
 
@@ -1287,11 +1383,11 @@ if (!scanparam){ # varscan prints this already
 ### Commit
 
 ```{r variable, fig.height=8, fig.width=8}
-# Choose PCA/UMAP/clustering parameters to use.
-nvariables <- candidates['mindiff2']  # USER-INPUT, data-dependent
-dims <- 1:50                          # Obsolete as user-defined sub-selection, but baked into code that I don;t want to fix right now.
-                                      #   Look at custom_pcs in the pca_plot chunk a bit further down instead.
+nvariables <- candidates['minsum80']    # USER-INPUT
 message(paste("Starting with", nvariables, "most variable features."))
+
+dims <- 1:50          # Obsolete as user-defined PC selection, but baked into code that I don't want to refactor right now.
+                      #   Look at custom_pcs in the pca_plot chunk a bit further down instead, to define custom PC selection.
 
 # Find the number of highly variable features.
 so <- FindVariableFeatures(so, selection.method = "vst", nfeatures = nvariables, 
@@ -1299,10 +1395,8 @@ so <- FindVariableFeatures(so, selection.method = "vst", nfeatures = nvariables,
 topvariable <- VariableFeatures(so)
 
 # Remove undesireable genes.
-# USER-INPUT   (choose what to exclude)
-# topvariable <- clean_candidates(topvariable, mito=mtgenes, ribo=ribogenes, cccore=cccore, verbose=TRUE)
-topvariable <- clean_candidates(topvariable, mito=mtgenes, ribo=ribogenes, cccore=cccore, ccextra=ccextra, verbose=TRUE)
-
+                                            # USER-INPUT   # USER-INPUT    # USER-INPUT   # USER-INPUT                   # USER-INPUT
+topvariable <- clean_candidates(topvariable, mito=mtgenes, ribo=ribogenes, cccore=cccore, ccextra=ccextra, verbose=TRUE, expthresh=0.003)
 
 print( plot_variancemeans(so, features=topvariable, topn=25) )
 ```
@@ -1346,29 +1440,38 @@ p1 <- ggplot(pcs, aes(x=Embedings, colour=Source)) +
 print( p1 )
 ```
 
+The diagonal, shows the distribution of observations along the PC colour by treatment. Below the diagonal are PCA plots coloured by treatment. Above the diagonal are PCA plots coloured by cell phase.
+
 ```{r pca_plot, fig.height=12, fig.width=12}
 ## First 5 components
 plot_grid_pcs(so)
 
 ## Selected components
-custom_pcs <- c(3:6, 8:13, 17, 19, 23:25)                         # USER-INPUT
+custom_pcs <- c(1:3, 5:7, 10, 12, 15:17, 19)                         # USER-INPUT
 
-message(paste("Manually chosen PCs for UMAP projection:", paste(custom_pcs, collapse=", "), ", accounting for", round(sum(pc_vars[custom_pcs]), 2), "% of the variation."))
-
-# plot_grid_pcs(so, comps= custom_pcs[c(1:5)])
-plot_grid_pcs(so, comps= c(6, 8:11))                        # USER-INPUT
+plot_grid_pcs(so, comps= head(custom_pcs[custom_pcs>5], 5))
 ```
+
+```{r}
+# knitr::knit_exit()
+```
+
 
 ## UMAP
 
 ### Using all 50 components
 
 ```{r umap0, fig.height=12, fig.width=12}
-resolution <- 2.0                                     # USER INPUT
+d <- dims[dims %in% 1:length(pc_vars)]
+
 nneighbours <- 30                                     # USER INPUT
 mindist <- 0.1                                       # USER INPUT
 
-d <- dims[dims %in% 1:length(pc_vars)]
+# for (resolution in seq(0.3, 1.9, 0.1)) {
+# 	do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours, clusterplotonly=TRUE)
+# }
+
+resolution <- 0.7                                     # USER INPUT
 so <- do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours)
 
 # Checkpoint
@@ -1378,40 +1481,48 @@ saveRDS(so, file = file.path(outdir, paste0(projectname, '_alldim.RDS')))
 ### Using top informative components
 
 ```{r umap2, fig.height=12, fig.width=12}
-resolution <- 1.2                                     # USER INPUT
-nneighbours <- 30                                     # USER INPUT
-mindist <- 0.1                                       # USER INPUT
-
 d <- dims[dims %in% 1:npc]
-so2 <- do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours)
+
+nneighbours <- 30                                     # USER INPUT
+mindist <- 0.1                                        # USER INPUT
+
+# for (resolution in seq(0.3, 1.9, 0.1)) {
+# 	do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours, clusterplotonly=TRUE)
+# }
+		 
+resolution <- 0.7                                     # USER INPUT
+so <- do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours)
 
 # Checkpoint
-saveRDS(so2, file = file.path(outdir, paste0(projectname, '_topdim.RDS')))
+saveRDS(so, file = file.path(outdir, paste0(projectname, '_topdim.RDS')))
 ```
 
 ### Using the selected components
 
 ```{r umap1, fig.height=12, fig.width=12}
-resolution <- 1.4                                    # USER INPUT
+d <- custom_pcs[custom_pcs %in% 1:length(pc_vars)]
+
 nneighbours <- 30                                     # USER INPUT
 mindist <- 0.1                                       # USER INPUT
 
-d <- custom_pcs[custom_pcs %in% 1:length(pc_vars)]
-so3 <- do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours)
+# for (resolution in seq(0.3, 1.9, 0.1)) {
+# 	do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours, clusterplotonly=TRUE)
+# }
+
+resolution <- 0.8                                    # USER INPUT
+so <- do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours)
 
 # Checkpoint
-saveRDS(so3, file = file.path(outdir, paste0(projectname, '_customdim.RDS')))
-
-fwrite(dcast(as.data.table(table(so@meta.data[, c("Source", "seurat_clusters")])),
-						 Source ~ seurat_clusters, value.var="N"),
-			 file=file.path(outdir, paste0(projectname, '_clustertallies_customdim.tsv')),
-			 sep="\t", quote=FALSE, row.names=FALSE, col.names=TRUE)
-
-finalized <- TRUE
+saveRDS(so, file = file.path(outdir, paste0(projectname, '_customdim.RDS')))
 ```
 
 
 
+
+
+```{r}
+# knitr::knit_exit()
+```
 
 
 
@@ -1419,6 +1530,24 @@ finalized <- TRUE
 
 
 # Markers
+
+```{r projectionchoice}
+# USER-INPUT : choose UMAP projection.
+
+message("Using all the PCs")
+so <- readRDS(file.path(outdir, paste0(projectname, '_alldim.RDS')))
+
+# message(paste("Using the first", npc, "PCs"))
+# so <- readRDS(file.path(outdir, paste0(projectname, '_topdim.RDS')))
+
+# message("Using the manually selected PCs")
+# so <- readRDS(file.path(outdir, paste0(projectname, '_customdim.RDS')))
+
+fwrite(dcast(as.data.table(table(so@meta.data[, c("Source", "seurat_clusters")])),
+						 Source ~ seurat_clusters, value.var="N"),
+			 file=file.path(outdir, paste0(projectname, '_clustertallies.tsv')),
+			 sep="\t", quote=FALSE, row.names=FALSE, col.names=TRUE)
+```
 
 ## Cluster markers
 
@@ -1431,28 +1560,10 @@ diffpct <- -Inf         # USER_INPUT     (for low-res clusters with diverse cont
 message(paste('Minimum LFC:', lfcthresh))
 message(paste0('Minimum fraction of cells in which gene is expressed, in at least one of the pairwise compared groups: ', pctexpthresh))
 message(paste('Minimum difference in cell fraction: ', diffpct))
-
-# so <- readRDS(file.path(outdir, paste0(projectname, '_alldim.RDS')))
-# so <- readRDS(file.path(outdir, paste0(projectname, '_topdim.RDS')))
-so <- readRDS(file.path(outdir, paste0(projectname, '_customdim.RDS')))
 ```
 
-<!-- ### All 50 components -->
-
-<!-- ```{r clustmark, fig.height=10, fig.width=10} -->
-<!-- do_de(so, DEtabled=DEtabled, lfcthresh=lfcthresh, pctexpthresh=pctexpthresh, diffpct=diffpct, suffix='alldim') -->
-<!-- ``` -->
-
-<!-- ### Top informative components -->
-
-<!-- ```{r clustmark2, fig.height=10, fig.width=10} -->
-<!-- do_de(so2, DEtabled=DEtabled, lfcthresh=lfcthresh, pctexpthresh=pctexpthresh, diffpct=diffpct, suffix='topdim') -->
-<!-- ``` -->
-
-### Selected components
-
 ```{r clustmark, fig.height=10, fig.width=10}
-do_de(so, DEtabled=DEtabled, lfcthresh=lfcthresh, pctexpthresh=pctexpthresh, diffpct=diffpct, suffix='customdim')
+do_de(so, DEtabled=DEtabled, lfcthresh=lfcthresh, pctexpthresh=pctexpthresh, diffpct=diffpct, suffix=NULL)
 ```
 
 
@@ -1500,8 +1611,62 @@ for (y in names(priors)) {
 
 
 
+
+```{r}
+# knitr::knit_exit()
+```
+
+
+
+
+
+# Cell counts
+
+```{r cells}
+expthresh <- 0                                                 # USER-INPUT
+countselection <- function(selmtx, rows) {
+	message(paste("Cells with detectable expression of", paste(rownames(selmtx[rows,]), collapse=", ") ))
+	print( sum( colSums(selmtx[rows, ])==length(rows) ) )
+	
+}
+
+
+# USER-INPUT
+
+
+# Conventional Dentritic Cells
+sel1 <- so@assays$RNA@data[cellstocount[[1]], ] > expthresh
+
+message("Cells with detectable expression of these genes:")
+print( rowSums(sel1) )
+countselection(sel1, c(1,2))
+countselection(sel1, c(1,3))
+countselection(sel1, 1:3)
+
+
+sel2 <- so@assays$RNA@data[cellstocount[[2]][cellstocount[[2]] %in% rownames(so)], ] > expthresh
+
+for (i in 1:nrow(sel2)) {
+	message("Cells with detectable expression of these genes:")
+	sel <- rbind(sel1[1,], sel2[i,])
+	rownames(sel) <- c(rownames(sel1)[1], rownames(sel2)[i]) 
+	print( rowSums(sel) )
+	countselection(sel, c(1,2))
+}
+
+message(paste("No detectable expression for", paste(cellstocount[[2]][!cellstocount[[2]] %in% rownames(so)], collapse=", ")), "in any of the cells.")
+```
+
+
+
+
+
+
+
 # Session
 
 ```{r session}
 sessionInfo()
 ```
+
+
