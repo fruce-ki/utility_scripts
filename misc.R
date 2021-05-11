@@ -1,9 +1,4 @@
-library(data.table)
-library(matrixStats)
-library(ggplot2)
-library(ggExtra)
-library(plotly)
-library(htmltools)
+
 
 
 # RMarkdown header template
@@ -33,6 +28,7 @@ colour2hex <- function(namevector) { rgb( t(as.data.frame( lapply(namevector, fu
 
 # preview colour vector
 showpalette <- function(p) {
+  p <- factor(p, ordered=TRUE, levels=p)
   ggplot(data.frame(x=p, y=1), aes(p, y, fill=p)) +
     geom_bar(stat='identity') +
     scale_fill_identity() +
@@ -44,6 +40,40 @@ showpalette <- function(p) {
 # colourblind palette
 showpalette( c("#000000", "#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7") )
 
+
+### Rounding to nearest non-10
+##############################
+mround <- function(x,base){
+  base*round(x/base)
+}
+
+
+### Rolling slice
+#################
+# Returns a list of index vectors for x.
+rollslice <- function(x, n) {
+  # x <- c(1,2,3,4,5,6,7,8,9,0)
+  # n <- 4
+  l <- length(x)
+  s <- as.integer(l/n)  # number of slices
+  if (s * n < l) {
+    s <- s + 1
+  }
+  
+  lapply(1:s, function(y){
+    # y <- 2    # 1 -> 1:4,  2 -> 5:8,  3 -> 9:10
+    ((y-1)*n + 1):min(l, y*n)
+  })
+}
+
+
+
+### Geometric Mean
+###################
+# https://stackoverflow.com/questions/2602583/geometric-mean-is-there-a-built-in
+gm_mean = function(x, na.rm=TRUE){
+  exp(sum(log(x[x > 0]), na.rm=na.rm) / length(x))
+}
 
 
 
@@ -254,60 +284,81 @@ my_pairwise_internal_corels <- function(mat = rpm, samples = samples_tidy$name, 
 }
 
 
-
+### Correlations in a sparse matrix.
+####################################
+sparse.cor <- function(x){
+  # https://stackoverflow.com/questions/5888287/running-cor-or-any-variant-over-a-sparse-matrix-in-r
+  
+  n <- nrow(x)
+  m <- ncol(x)
+  ii <- unique(x@i)+1 # rows with a non-zero element
+  
+  Ex <- colMeans(x)
+  nozero <- as.vector(x[ii,]) - rep(Ex,each=length(ii))        # colmeans
+  
+  covmat <- ( crossprod(matrix(nozero,ncol=m)) +
+                crossprod(t(Ex))*(n-length(ii))
+  )/(n-1)
+  sdvec <- sqrt(diag(covmat))
+  covmat/crossprod(t(sdvec))
+}
 
 
 ### PCA and plots
 #################
 # covars is DE style colData
-do_pca <- function(countsmat, covars, center = TRUE, scale = TRUE, loadthresh = params$minL, prefix = paste0(params$prefix, '_pc')) {
+do_pca <- function(countsmat, covars, center = TRUE, scale = TRUE, topvars=params$topvars, loadthresh = params$minL, prefix = paste0(params$prefix, '_pc')) {
   # countsmat = counts
-
+  
   # Gene variances
   genevar <- data.table(name = rownames(countsmat),
                         Mean = rowMeans(countsmat),
-                        StDev = rowVars(countsmat) )
-
+                        Var = rowVars(countsmat) )
+  
+  # Use only the most variable genes, and ensure they are variable.
+  setorder(genevar, -Var)
+  topgenes = genevar[1:min(topvars, nrow(genevar)), ] [Var>0, name]
+  countsmat <- countsmat[topgenes,]
+  
   # Rotate counts so genes are variables and samples are observations
-  countsmat <- t(countsmat) # rotate 270 so the final rotate for correlations results in the same sample order as the initial correlations
-
-  # Add covariates info
-  counts <- cbind(covars, as.data.table(countsmat))
-
-  # Calculate principal components (after getting rid of zero-variance genes that can't be standardized).
-
-  nonconstant <- which(apply(countsmat, 2, var)!=0)
-  countsmat <- countsmat[, nonconstant]
+  countsmat <- t(countsmat)
   nvars <- dim(countsmat)[2]
-
+  message(paste("Number of most variable features considered:", nvars))
+  
+  # Add covariates info
+  # counts <- cbind(covars, as.data.table(countsmat))
+  
   pca <- prcomp(countsmat, center = center, scale. = scale)
   srn <- sqrt(nrow(countsmat) - 1)
-  pc <- sweep(pca$x, 2, 1 / (pca$sdev * srn), FUN = '*')
+  
+  # pc <- sweep(pca$x, 2, 1 / (pca$sdev * srn), FUN = '*')   # wrong?
+  pc <- pca$x
+  
   pc <- cbind(pc, data.frame(sample = rownames(pc)))
   #covars <- cbind(covars, data.frame(sample = rownames(covars)))
   pc <- as.data.frame(merge(pc, covars, by="sample", all = TRUE))
   npc <- sum(pca$sdev > 1)
-
+  
   # Screeplot.
-
+  
   pcaimp <- as.data.table(cbind(as.data.frame(t(summary(pca)$importance)),
                                 data.frame(PC = 1:length(colnames(pca$x)))))
   pcaimp <- melt(pcaimp, variable.name = "type", value.name = "Proportion", id.vars = c("PC", "Standard deviation"))
-
-  pcmax=15
-  pimp <- ggplot(pcaimp[(PC<pcmax),], aes(x=PC, y=Proportion)) +
+  
+  pimp <- ggplot(pcaimp, aes(x=PC, y=Proportion)) +
     facet_grid(type ~ ., scales="free_y") +
-    geom_bar(aes(fill=type), stat="identity", width=0.6) +
+    geom_bar(aes(fill=type), stat="identity", width=0.5) +
+    geom_text(aes(x=PC-0.3, y=0, label=paste0(round(Proportion*100, 1),"%"), colour=rev(type)), angle=90, hjust=0, vjust=0, size=rel(3)) +
+    geom_text_repel(aes(label=paste0(round(Proportion*100, 1),"%"), colour=type), ylim=c(0, max(pcaimp[type=='Cumulative Proportion', Proportion])), angle=90, vjust=0, direction= 'y', size=rel(3)) +
     geom_line(aes(colour=type)) +
     scale_fill_manual(values = c("grey50", "transparent")) +
     scale_colour_manual(values = c("transparent", "grey25")) +
-    scale_x_continuous(breaks = seq(1, pcmax, 2)) +
-    labs(title = "PCA Screeplot", subtitle=paste0(nvars, " features, ", npc, " PCs"), x = "Principal Component") +
+    labs(title = "Scree plot", subtitle=paste0(nvars, " features, ", npc, " PCs"), x = "Principal Component") +
     theme(axis.title.y = element_blank(),
           legend.position = "none")
-
+  
   # Top loadings for the first 3 PCs.
-
+  
   loads <- as.data.table(t(t(pca$rotation) * pca$sdev))
   loads[, rowID := rownames(pca$rotation)]
   loads <- melt(loads, value.name = "Loading", id.vars="rowID", variable.name="PC")
@@ -318,62 +369,65 @@ do_pca <- function(countsmat, covars, center = TRUE, scale = TRUE, loadthresh = 
   sel2 <- loads[lhigh > loadthresh & PC=="PC2", rowID]
   sel3 <- loads[lhigh > loadthresh & PC=="PC3", rowID]
   sel <- unique(loads[lhigh, rowID])
-
+  
   # Coefficient names.
-
+  
   ig <- names(covars)
   ig <- ig[! ig %in% c('sample', 'Sample', 'name', 'Name', 'sizeFactor')]
-
+  
   # Means and Variances of the top loads in the first 3 PCs.
-
+  
   genevar = data.table(rowID = colnames(countsmat),
                        Mean = colMeans(countsmat),
                        StDev = colSds(countsmat) )
   genevar[, istop:= rowID %in% sel]
-
-  pvar1 <- ggMarginal(ggplot(genevar) +
-                        geom_point(aes(x=Mean, y=StDev, label=rowID, colour=istop), shape=16, size=0.8, alpha=0.5) +
+  
+  pvar1 <- ggMarginal(ggplot(genevar, aes(x=Mean, y=StDev, label=rowID, colour=istop)) +
+                        geom_point(shape=16, size=0.8, alpha=0.5) +
                         scale_x_log10() +
                         scale_colour_manual(values=c("black", "violetred")) +
                         scale_y_log10() +
-                        labs(x="Mean", y="Standard Deviation", title="All features") +
+                        labs(x="Mean", y="Standard Deviation", title=paste0("All features (", nvars, ")")) +
                         theme(legend.position = "none"),
                       type = "histogram")
-
-  pvar2 <- ggplot(genevar[(istop),]) +
-    geom_point(aes(x=Mean, y=StDev, label=rowid), shape=16, size=0.8, alpha=0.5, colour="purple") +
+  
+  pvar2 <- ggplot(genevar[(istop),], aes(x=Mean, y=StDev, label=rowID)) +
+    geom_point(shape=16, size=0.8, alpha=0.5, colour="purple") +
     labs(x="Mean", y="Standard Deviation",
-         title="Top-loading features", subtitle = "in the first 3 PCs") +
+         title=paste0("High-loading features (", length(sel), ")"), subtitle = paste0("( >", loadthresh, ") in any of the first 3 PCs")) +
     scale_x_log10() +
     scale_y_log10()
-
+  
   # Correlation of the samples for the selected features only.
-
+  
   pcor <- my_pairwise_internal_corels(t(countsmat[, sel]), samples=covars$sample, prefix=prefix)
-
+  
   # Plot first 3 PCs in 2D pairs.
   # Highlight one variable at a time.
   pc12 <- lapply(ig, function(varname) {
     return(
       ggplot(pc, aes_string(x="PC1", y="PC2", label="sample", colour=varname)) +
         geom_point(alpha=0.8, size=rel(1.5)) +
-        coord_fixed()
+        coord_fixed() +
+        labs(x=paste0("PC1 (", round(pcaimp[1,4]*100, 1), "%)"), y=paste0("PC2 (", round(pcaimp[2,4]*100, 1), "%)"))
     )})
-
+  
   pc13 <- lapply(ig, function(varname) {
     return(
       ggplot(pc, aes_string(x="PC1", y="PC3", label="sample", colour=varname)) +
         geom_point(alpha=0.8, size=rel(1.5)) +
-        coord_fixed()
+        coord_fixed() +
+        labs(x=paste0("PC1 (", round(pcaimp[1,4]*100, 1), "%)"), y=paste0("PC3 (", round(pcaimp[3,4]*100, 1), "%)"))
     )})
-
+  
   pc32 <- lapply(ig, function(varname) {
     return(
       ggplot(pc, aes_string(x="PC3", y="PC2", label="sample", colour=varname)) +
         geom_point(alpha=0.8, size=rel(1.5)) +
-        coord_fixed()
+        coord_fixed() +
+        labs(x=paste0("PC3 (", round(pcaimp[3,4]*100, 1), "%)"), y=paste0("PC2 (", round(pcaimp[2,4]*100, 1), "%)"))
     )})
-
+  
   return(list(pca=pca,
               nvars=nvars,
               nPC=npc,
@@ -381,10 +435,9 @@ do_pca <- function(countsmat, covars, center = TRUE, scale = TRUE, loadthresh = 
               load1=sel1, load2=sel2, load3=sel3,
               pc_1_2=pc12, pc_1_3=pc13, pc_3_2=pc32,
               pvar1=pvar1, pvar2=pvar2,
-              pcor1=pcor[['sfrnc']], pcor2=pcor[['sdrc']]
+              pcor1=pcor[['frnc']], pcor2=pcor[['drc']]
   ))
 }
-
 
 
 
