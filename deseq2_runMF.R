@@ -5,31 +5,32 @@ library(DESeq2)
 
 
 spec = matrix(c(
-  'baseDir'      , 'b', 1, "character", "Base directory for everything (.)",
-  'countsFile'   , 'f', 1, "character", "Tab-separated table of counts with `row_ID` and all the samples",
-  'help'         , 'h', 0, "logical",   "Help",
-  'resultsDir'   , 'o', 1, "character", "Directory in which to save the contrast results. If omitted, only the RDS will be output.",
-  'RDSoutdir'    , 'r', 1, "character", "Directory in which to save the raw DESeq2 object (./process)",
-  'samplesFile'  , 's', 1, "character", "Tab-separated table with `sample` column followed by the variable columns",
-  'control'      , 'x', 1, "character", "Comma separated value for each variable to use as reference for all comparisons, in the order variables are listed in samplesfile",
-  'designFormula', 'd', 1, "character", "Design formula",
-  'reducedFormula','R', 1, "character", "Reduced formula for LR test",
-  'forvar',        'F', 1, "character", "Looping variable (ie. carry out the design formula for each level of this var, separately).",
-  'selvar',        'S', 1, "character", "Selection variable (always together with sellev). It is applied BEFORE forvar.",
-  'sellev',        'L', 1, "character", "Selection variable level. Together with selvar, it is used to reduce the samplesFile to just the rows having that value in that variable.",
-  'minCount'     , 'M', 1, "numeric",   "Minimum number of reads across all samples combined for a gene to be considered (10).",
-  'reportTemplate','T', 1, "character", "Template Rmd file for DE report.",
-  'pcutoff',       'p', 1, "numeric",   "P-value cutoff (0.05)",
-  'ntop',          'n', 1, "numeric",   "Number of hits to highlight (50)",
-  'lfcthreshold',  'c', 1, "numeric",   "Log2 fold-change threshold (1)",
-  'nidcols',       'I', 1, "numeric",   "Number of ID columns at the start of the table (1). see also -i",
-  'idcol',         'i', 1, "numeric",   "ID column to use (1). The others will be removed. See also -I.",
+  'all',           'A', 0, "logical",   "Enable round-robin-style pairwise comparisons. Otherwise only comparisons only against reference. (False)", 
   'bmF',           'B', 0, "logical",   "Disable baseMean filtering. (False)",
-  'all',           'A', 0, "logical",   "Enable round-robin-style pairwise comparisons. Otherwise only comparisons only against reference. (False)" 
+  'baseDir'      , 'b', 1, "character", "Base directory for everything (.)",
+  'lfcthreshold',  'c', 1, "numeric",   "Log2 fold-change threshold (1)",
+  'designFormula', 'd', 1, "character", "Design formula",
+  'countsFile'   , 'f', 1, "character", "Tab-separated table of counts with `row_ID` and all the samples.",
+  'forvar',        'F', 1, "character", "Looping variable (ie. carry out the design formula for each level of this var, separately).",
+  'help'         , 'h', 0, "logical",   "Help",
+  'idcol',         'i', 1, "numeric",   "ID column to use (1). The others will be removed. See also -I.",
+  'nidcols',       'I', 1, "numeric",   "Number of ID columns at the start of the table (1). See also -i.",
+  'prescaled',     'k', 0, "logical",   "Don't let Deseq2 rescale the libraries. (False)",
+  'sellev',        'L', 1, "character", "Selection variable level. Used together with -S, to reduce the samplesFile to just the rows having that value in that variable.",
+  'ntop',          'n', 1, "numeric",   "Number of hits to highlight (50)",
+  'minCount'     , 'M', 1, "numeric",   "Minimum number of reads across all samples combined for a gene to be considered (10).",
+  'resultsDir'   , 'o', 1, "character", "Directory in which to save the contrast results. If omitted, only the RDS will be output.",
+  'pcutoff',       'p', 1, "numeric",   "P-value cutoff (0.05)",
+  'RDSoutdir'    , 'r', 1, "character", "Directory in which to save the raw DESeq2 object (./process)",
+  'reducedFormula','R', 1, "character", "Reduced formula for LR test",
+  'samplesFile'  , 's', 1, "character", "Tab-separated table with `sample` column followed by the variable columns. Values must NOT contain punctuation other than '_' !!!",
+  'selvar',        'S', 1, "character", "Selection variable (always together with sellev). It is used together with -L. It is applied before -F.",
+  'reportTemplate','T', 1, "character", "Template Rmd file for DE report.",
+  'control'      , 'x', 1, "character", "Comma separated value for each variable to use as reference for all comparisons, in the order variables are listed in samplesfile"
 ), byrow=TRUE, ncol=5)
 
 opt = getopt(spec)
-# opt <- list(baseDir='/Volumes/groups/zuber/zubarchive/USERS/Kimon/anja/M9186_quantseq', countsFile='process_quant/all_counts_xref.txt', resultsDir='results_quant/DE', RDSoutdir='process_quant/DE', samplesFile='description/covars.txt', control='Ren,empty,24h,K562-wt-Bulk', designFormula='~ protein', forvar='time', selvar='cells', sellev='K562_wt_Bulk', minCount=10, lfcthreshold=1, nidcols=3, idcol=2, ntop=50, bmF=FALSE, pcutoff=0.05, all=FALSE)
+# opt <- list(baseDir='/Volumes/groups/zuber/zubarchive/USERS/Kimon/markus/OTI_vivo_pdac', countsFile='process/all_counts_xref.txt', resultsDir='results/DE', RDSoutdir='process/DE', samplesFile='description/covars.txt', control='sgCtrl,no', designFormula='~ treatment', forvar='condition', selvar='lost', sellev='no', minCount=10, lfcthreshold=1, nidcols=3, idcol=2, ntop=50, bmF=FALSE, pcutoff=0.05, all=FALSE, prescaled=FALSE)
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -38,6 +39,10 @@ if ( !is.null(opt$help) ) {
 
 if ( is.null(opt$reportFile) ) {
   opt$reportFile <- '~/utility_scripts/deseq2_report_template.Rmd'
+}
+
+if ( is.null(opt$prescaled) ) {
+  opt$prescaled <- FALSE
 }
 
 if ( is.null(opt$baseDir    ) ) { 
@@ -87,13 +92,23 @@ if ( !is.null(opt$resultsDir ) ) {
 
 
 # Input
-covars <- as.data.frame(read.csv(file.path(opt$baseDir, opt$samplesFile), sep="\t", header=TRUE, row.names='sample'))
-cts <- read.csv(file.path(opt$baseDir, opt$countsFile), sep="\t", header=TRUE)
+covars <- as.data.frame(read.csv(file.path(opt$baseDir, opt$samplesFile), sep="\t", header=TRUE, row.names='sample', check.names = FALSE))
+cts <- read.csv(file.path(opt$baseDir, opt$countsFile), sep="\t", header=TRUE, check.names = FALSE, colClasses="character") 
+# Setting all columns to character prevents numeric IDs at the top of the ID columns from auto-defining these columns as numeric when there could be character IDs further down that would otherwise become NaN.
+
+# cts <- cts[, c(names(counts)[1:opt$nidcols], covars$sample)]    # Only samples specified in covars. 
+## It is handled somewhere in the RMD. If done here it causes a CRASH!
 
 # Cut out extra annotation/id columns
 xref <- cts[, 1:opt$nidcols]
+
+# Now that the IDs are handled, convert the rest to numbers in a matrix
+cts[, (opt$nidcols+1):ncol(cts)] <- lapply(cts[, (opt$nidcols+1):ncol(cts)], as.numeric)
 cts <- round(as.matrix(cts[, (opt$nidcols+1):ncol(cts)]), digits=0)
 rownames(cts) <- xref[, opt$idcol]
+
+# R adds 'X' to the begininng fo matric colnames that start with a digit, regardless of whether they can be misinterpreted as a number or not.
+# That breaks the association with the names in covars and DESeq2 crashes. So the X needs to be added in covars too.
 
 # Calculate RPMs. 
 # (for 3'seq like quantseq and slamseq, length normalisation is not approriate)
@@ -154,7 +169,7 @@ for (V in names(subcovars)){
   # and ensure the rest are in the same order as the covariates table.
   cdn <- rownames(coldata)
   ctsn <- colnames(cts)
-  subcts <- cts[, match(cdn, ctsn)]
+  subcts <- cts[, ctsn[match(cdn, ctsn)]]
   subcts[is.na(subcts)] <- 0
   subrpm <- RPMs[, match(cdn, colnames(RPMs))]
   subrpm[is.na(subrpm)] <- 0
@@ -166,6 +181,11 @@ for (V in names(subcovars)){
   # Set reference condition(s)
   for (n in vars){
     DDS[[n]] <- relevel(DDS[[n]], ref=refs[n])
+  }
+  if (opt$prescaled) {
+    factors <- rep(1, times=length(cdn))
+    names(factors) <- cdn
+    sizeFactors(DDS) <- factors
   }
   
   # Prefilter out genes with very poor coverage.
@@ -181,7 +201,11 @@ for (V in names(subcovars)){
     autoname <- paste(opt$selvar, opt$sellev, sep="-")
   }
   if (!is.null(opt$forvar)) {
-    autoname <- paste(autoname, paste(opt$forvar, V, sep="-"), sep="_")
+    if (! is.null(autoname)){
+      autoname <- paste(autoname, paste(opt$forvar, V, sep="-"), sep="_")
+    } else {
+      autoname <- paste(opt$forvar, V, sep="-")
+    }
   }
   
   ddsrds <- file.path(opt$baseDir, opt$RDSoutdir, paste0(paste(autoname, gsub(' |~', '', opt$designFormula), sep='_'), '_deseq2data.RDS'))
@@ -194,7 +218,8 @@ for (V in names(subcovars)){
                     # output_file = paste0(paste(autoname, name, sep='_'), '_deseq2.html'), 
                     output_file = paste0(paste(autoname, gsub(' |~', '', opt$designFormula), sep='_'), '_deseq2.html'),
                     output_dir = file.path(opt$baseDir, opt$resultsDir),
-                    params=list(ntop = opt$ntop,
+                    params=list(selfname = paste0(paste(autoname, gsub(' |~', '', opt$designFormula), sep='_'), '_deseq2.html'),
+                                ntop = opt$ntop,
                                 pcutoff = opt$pcutoff,
                                 lfcthreshold = opt$lfcthreshold,
                                 baseDir = opt$baseDir,

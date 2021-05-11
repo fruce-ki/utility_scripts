@@ -9,11 +9,12 @@
 #SBATCH --output=mageck-wf.out
 #SBATCH --error=mageck-wf.err
 
+set -x
 
 ## Parameters ##
 function usage() {
     echo "Usage:"
-    echo "      $0 -i INDIR -l GUIDES_LIB -b DEMUX_TABLE -n COUNTS_OUTDIR -c CONTRASTS_TABLE -m MAGECK_OUTDIR [-1] [-2]"
+    echo "      $0 -i INDIR -l GUIDES_LIB -b DEMUX_TABLE -n COUNTS_OUTDIR -c CONTRASTS_TABLE -m MAGECK_OUTDIR -z REFERENCE_SAMPLES [-1] [-2]"
     echo "      There are many more options and I've lost track. Consult getops in the source code."
     exit 1
 }
@@ -34,7 +35,7 @@ guideLen=20
 legacy=""
 mageck_branch=""
 # Parse options.
-while getopts 'i:l:b:B:n:c:m:r:C:G:z:Z:p:s:u:d:O:g:M:A:E:e:R:Vr12L' flag; do
+while getopts 'i:l:b:B:n:c:m:C:G:z:Z:p:s:u:d:O:g:M:A:e:Vr12L' flag; do
   case "${flag}" in
     i) indir="${OPTARG}" ;;           # Input directory with unaligned BAMs
     l) library="${OPTARG}" ;;         # sgRNA library
@@ -74,11 +75,6 @@ if [ -z "$indir" ] || [ -z "$library" ] || [ -z "$barcodes" ] || [ -z "$contrast
   exit 1
 fi
 
-if [ $revcomp -eq 1 ]; then
-  revcomp="--reverse_complement"
-else
-  revcomp=""
-fi
 
 ## Workflow ##
 
@@ -103,8 +99,6 @@ wait_for_jobs(){
   done
 }
 
-set -e
-
 libname=$(basename $library)
 libname=${libname/.txt/}
 
@@ -120,18 +114,20 @@ if [ $do_pre -eq 1 ]; then
 
     echo ''
     echo "Demultiplexing BAM using anchor sequence."
-    fileutilities.py T ${indir}/*.bam --loop sbatch ,-J demux ,--mem=50000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q
+    if [ $revcomp -eq 1 ]; then
+      fileutilities.py T ${indir} --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J demux ,--mem=50000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,--reverse_complement ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q
+    else
+      fileutilities.py T ${indir} --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J demux ,--mem=50000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q
+    fi
     wait_for_jobs demux
 
     echo ''
     echo "FastQC (in the background)." # and don't wait for it. I don't need its output for a while.
-#   # module load fastqc/0.11.5-java-1.8.0_121
-    fileutilities.py T ${countsdir}/fastq/*/ --dir fqc | fileutilities.py P --loop sbatch ,--mem-per-cpu=5000 ,--cpus-per-task 4 ,--wrap "'fastqc -q -t 4 -f fastq -o ${countsdir}/fastqc {abs}'"
-#   # module unload fastqc/0.11.5-java-1.8.0_121
+    fileutilities.py T ${countsdir}/fastq/*/ --dir 'fqc$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,--mem-per-cpu=5000 ,--cpus-per-task 4 ,--wrap "'fastqc -q -t 4 -f fastq -o ${countsdir}/fastqc {abs}'"
 
     echo ''
     echo "Compressing FASTQ (in the background)."
-    fileutilities.py T ${countsdir}/fastq/*/ --dir fastq fq | fileutilities.py P --loop sbatch ,-J gzip ,--mem=50000 ,--wrap "'gzip {abs}'"
+    fileutilities.py T ${countsdir}/fastq/*/ --dir 'fastq$' 'fq$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J gzip ,--mem=50000 ,--wrap "'gzip {abs}'"
 
     echo ''
     echo "Guides library to FASTA."
@@ -150,20 +146,20 @@ if [ $do_pre -eq 1 ]; then
 
     echo ''
     echo "Bowtie2 aligning."
-    fileutilities.py T ${countsdir}/fastq/*/ --dir fastq.gz fq.gz | fileutilities.py P --loop sbatch ,-J bowtie2 ,--mem=10000 ,--cpus-per-task=4 ,--wrap "'bowtie2 -x ${library/.txt/}  -U {abs} --threads 4 -L 20 --score-min C,0,\-1 -N 0 --seed 42 2> ${countsdir}/aligned/${libname}/{bas}.log > ${countsdir}/aligned/${libname}/{bas}.sam'"
+    fileutilities.py T ${countsdir}/fastq/*/ --dir 'fastq.gz$' 'fq.gz$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J bowtie2 ,--mem=10000 ,--cpus-per-task=4 ,--wrap "'bowtie2 -x ${library/.txt/}  -U {abs} --threads 4 -L 20 --score-min C,0,\-1 -N 0 --seed 42 2> ${countsdir}/aligned/${libname}/{bas}.log > ${countsdir}/aligned/${libname}/{bas}.sam'"
     wait_for_jobs bowtie2
 
     echo ''
     echo "Quantifying with featureCounts."
-    fileutilities.py T ${countsdir}/aligned/${libname}/ --dir sam | fileutilities.py P --loop sbatch ,-J fcount ,--mem-per-cpu=5000 ,--cpus-per-task=4 ,--wrap "'featureCounts -T 4 -a ${library/.txt/.saf} -F SAF -o ${countsdir}/counts/${libname}/{bas}.txt {abs}'"
+    fileutilities.py T ${countsdir}/aligned/${libname}/ --dir sam | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J fcount ,--mem-per-cpu=5000 ,--cpus-per-task=4 ,--wrap "'featureCounts -T 4 -a ${library/.txt/.saf} -F SAF -o ${countsdir}/counts/${libname}/{bas}.txt {abs}'"
     wait_for_jobs fcount
 
     echo ''
     echo "Combining samples into one table."
-    srun --mem=5000 ~/crispr-process-nf/bin/combine_counts.R $library ${countsdir}/counts/${libname}/*.fq.txt > ${countsdir}/counts/${libname}/counts_mageck.txt
+    srun --mem=5000 ~/crispr-process-nf/bin/combine_counts.R $library ${countsdir}/counts/${libname}/*.fastq.txt > ${countsdir}/counts/${libname}/counts_mageck.txt
     # Fix header. Strip path, strip file extension, strip lane
     mv ${countsdir}/counts/${libname}/counts_mageck.txt ${countsdir}/counts/${libname}/_counts_mageck.txt
-    head -n 1 ${countsdir}/counts/${libname}/_counts_mageck.txt | perl -e 'while(<STDIN>){~s/\S+\/(\w{9}_\d_)+(\d{8}\w?_\d{8}_)?//g;~s/\.fq//g;print}' > ${countsdir}/counts/${libname}/counts_mageck.txt
+    head -n 1 ${countsdir}/counts/${libname}/_counts_mageck.txt | perl -e 'while(<STDIN>){~s/\S+\/(\w{9}_\d_)+(\d{8}\w?_\d{8}_)?//g;~s/\.(fq|fastq)//g;print}' > ${countsdir}/counts/${libname}/counts_mageck.txt
     tail -n +2 ${countsdir}/counts/${libname}/_counts_mageck.txt >> ${countsdir}/counts/${libname}/counts_mageck.txt
 
     echo ''
@@ -175,7 +171,7 @@ if [ $do_pre -eq 1 ]; then
     echo "Cleaning up intermediate files"
     rm ${countsdir}/fastq/*/*.fqc
     rm -r ${countsdir}/fastqc
-    rm ${countsdir}/counts/${libname}/*fq.txt ${countsdir}/counts/${libname}/*fq.txt.summary
+    rm ${countsdir}/counts/${libname}/*fastq.txt ${countsdir}/counts/${libname}/*fastq.txt.summary
   fi
 
   echo ''

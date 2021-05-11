@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 
+# Shoudl work with python3 and python2.7 
+
 """fileutilities.py
 
 Author: Kimon Froussios
-Last reviewed: 20/02/2020
+Last reviewed: 20/10/2020
 
 This module is a solution for Frequently Performed Generic Tasks that involve
 multiple files:
@@ -27,8 +29,8 @@ Execute with -h in a shell to obtain syntax and help.
 # Although dataframes support row and column labels, these make content manipulations
 # in the context of this module harder. Instead, any labels present in the text
 # input are treated as plain rows or columns. These may be optionally dropped or
-# preserved, but the dataframe in-built labels for columns and rows are reserved
-# solely for custom use. When appropriate these custom labels will be included in
+# preserved, but the dataframe built-in labels for columns and rows are reserved
+# solely for internal use. When appropriate these custom labels will be included in
 # the output.
 
 from __future__ import print_function, division
@@ -906,7 +908,7 @@ class FilesList(list):
     Attributes defined here:
         aliases = [] : Practical aliases for the full file-paths.
     """
-    def __init__(self, files=None, aliases=None, fromtuples=None):
+    def __init__(self, files=None, aliases=None, fromtuples=None, verbatim=False, alias_verbatim=False):
         """Construct an instance of the FilesList.
 
         A FilesList can be created:
@@ -921,6 +923,8 @@ class FilesList(list):
             fromtuples[(str,str)]: A list of tuples (file, alias). (Default
                         None) If this is specified together with flist and/or
                         aliases, the data in fromtuples is used only.
+            verbatim(bool): Do not try to expand path (False).
+            alias_verbatim(bool): Do not enumerate identical aliases (False).
         """
         # If data is a list of (file, alias) tuples, unpair tuples into lists.
         if fromtuples is not None:
@@ -937,7 +941,8 @@ class FilesList(list):
             aliases = []
         # Assign default aliases to be same as files. Expand file paths.
         if files is not None:
-            files = expand_fpaths(files)
+            if not verbatim:
+                files = expand_fpaths(files)
             if not aliases:
                 for f in files:
                     aliases.append(self.autoalias(f))
@@ -948,7 +953,10 @@ class FilesList(list):
         super(FilesList, self).__init__()
         self.extend(files)
         # Add a plain list attribute for the aliases with default values.
-        self.aliases = autonumerate(aliases)
+        if not alias_verbatim:
+            self.aliases = autonumerate(aliases)
+        else:
+            self.alias = aliases
 
     def __str__(self):
         """Represent as string.
@@ -1001,7 +1009,7 @@ class FilesList(list):
         """
         return (self[loc], self.aliases[loc])
 
-    def append(self, myfile, myalias=None, alias_verbatim=False):
+    def append(self, myfile, myalias=None, verbatim=False, alias_verbatim=False):
         """Appends value to both the paths list and the aliases list.
 
         This method overrides the built-in append() of list. It is backwards
@@ -1012,11 +1020,14 @@ class FilesList(list):
         aliases.
 
         Args:
-            myfile(str): File (path will be expanded).
+            myfile(str): File.
             myalias(str): Alias for the file (Default None).
+            verbatim(bool): Do not try to expand path (False).
+            alias_verbatim(bool): Do not enumerate identical aliases (False).
         """
         if myfile is not None:
-            myfile = expand_fpaths([myfile])[0]
+            if not verbatim:
+                myfile = expand_fpaths([myfile])[0]
         super(FilesList, self).append(myfile)
         if not myalias:
             myalias = self.autoalias(myfile)
@@ -1025,7 +1036,7 @@ class FilesList(list):
             self.aliases = autonumerate(self.aliases)
         # return self
 
-    def populate_from_files(self, myfiles, colSep="\t", alias_verbatim=False):
+    def populate_from_files(self, myfiles, colSep="\t", verbatim=False, alias_verbatim=False):
         """Parse the list of files from one or multiple text files.
 
         Read in multiple lists of files from text and append them to the
@@ -1048,7 +1059,8 @@ class FilesList(list):
         Args:
             file[str]: A list of text files each containing a list of files.
             colSep(str): Column separator. (Default "\\t")
-            alias_verbatim(bool): Don't auto-enumerate duplicate aliases. (Default False)
+            verbatim(bool): Do not try to expand path (False).
+            alias_verbatim(bool): Do not enumerate identical aliases (False).
         Returns:
             FilesList: Returns self, to facilitate instantiation shortcuts.
         """
@@ -1073,7 +1085,8 @@ class FilesList(list):
                         else:
                             self.aliases.append(self.autoalias(fields[0]))
         # Expand to absolute paths and add to main self list.
-        paths = expand_fpaths(paths)
+        if not verbatim:
+            paths = expand_fpaths(paths)
         self.extend(paths)
         if not alias_verbatim:
             self.aliases = autonumerate(self.aliases)
@@ -1097,7 +1110,8 @@ class FilesList(list):
             patterns[str]: A list of regex strings. Only files matching at least
                         one of these will be returned. The patterns will be
                         matched anywhere in the filenames.
-            alias_verbatim(bool): Do not auto-enumerate duplicate aliases. (Default False)
+            verbatim(bool): Do not try to expand path (False).
+            alias_verbatim(bool): Do not enumerate identical aliases (False).
         Returns:
             FilesList: Returns self, to facilitate instantiation shortcuts.
         """
@@ -1201,6 +1215,8 @@ def main(args):
     parser.add_argument('-R','--expand_ranges', action='store_true',
                                 help=" If numeric ranges exist among the targets expand them as individual vlaues. Ranges must be in from:to format, inclusive of both end values. (Default False)")
     parser.add_argument('-V','--verbatim', action='store_true',
+                                help="Do not attempt to convert to full path.")
+    parser.add_argument('-W','--verbatimAlias', action='store_true',
                                 help="Do not enumerate duplicate values in the alias column of list input.")
     # General tasks.
     parser.add_argument('--dir', type=str, nargs='*',
@@ -1246,15 +1262,15 @@ def main(args):
             fields = line.rstrip("\n").split("\t")
             if fields[0] != "":
                 try:
-                    flist.append(fields[0], fields[1])
+                    flist.append(fields[0], fields[1], verbatim=params.verbatim, alias_verbatim=params.verbatimAlias)
                 except IndexError:
-                    flist.append(fields[0])
+                    flist.append(fields[0], verbatim=params.verbatim, alias_verbatim=params.verbatimAlias)
     elif params.INPUTTYPE == 'L':
         # Create the FilesList, by appending the contents of all provided lists.
-        flist = FilesList().populate_from_files(targets, alias_verbatim=params.verbatim)
+        flist = FilesList().populate_from_files(targets, verbatim=params.verbatim, alias_verbatim=params.verbatimAlias)
     elif params.INPUTTYPE == 'T':
         # Create the FilesList by supplying a direct list of files.
-        flist = FilesList(targets)
+        flist = FilesList(targets, verbatim=params.verbatim, alias_verbatim=params.verbatimAlias)
     elif params.INPUTTYPE == 'D':
         # Data will be read from STDIN. No files needed. Make an empty list.
         # Not all functions will switch to STDIN given this. Several will simply do nothing.
