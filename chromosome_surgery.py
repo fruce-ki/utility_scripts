@@ -11,9 +11,9 @@ parser.add_argument("-f", "--fasta", type=str, required=True, help="Input FASTA.
 parser.add_argument("-o", "--output", type=str, required=True, help="Output FASTA.")
 parser.add_argument("-c", "--cid", type=str, required=True, help="Chromosome ID to edit.")
 parser.add_argument("-i", "--insert", type=str, required=False, help="FASTA of sequence to insert.")
-parser.add_argument("-I", "--incision", type=str, required=False, help="1-based nucleotide after which to insert the insert.")
-parser.add_argument("-e", "--excision_start", type=str, default=0, required=False, help="1-based nucleotide that is the first to delete (0).")
-parser.add_argument("-E", "--excision_end", type=str, default=0, required=False, help="1-based nucleotide that is the last to delete (0).")
+parser.add_argument("-I", "--incision", type=int, required=False, help="1-based nucleotide after which to insert the insert.")
+parser.add_argument("-e", "--excision_start", type=int, required=False, help="1-based nucleotide that is the first to delete (0).")
+parser.add_argument("-E", "--excision_end", type=int, required=False, help="1-based nucleotide that is the last to delete (0).")
 args = parser.parse_args()
 
 
@@ -24,7 +24,7 @@ splice_in = ''
 # Get insert
 if args.insert:
     with open(args.insert, 'r') as splicein:
-        record = SeqIO.parse(splicein, 'fasta')
+        record = list(SeqIO.parse(splicein, 'fasta'))[0]
         splice_in = record.seq
     
     # No need to shift the incision coordinate. 
@@ -51,13 +51,13 @@ if args.insert and args.excision_start:
     
 
 # Parse and apply edit
-with open(args.fasta, 'r') as genome,   open(args.output, 'fasta', 'w') as out:
+with open(args.fasta, 'r') as genome,   open(args.output, 'w') as out:
     for record in SeqIO.parse(genome, 'fasta'):
 
         # Only edit the relevant entry
         if (record.id == args.cid):
             # Splice-in
-            record.seq = record.seq[:args.incision] + args.insert + record.seq[args.incision:]
+            record.seq = record.seq[:args.incision] + splice_in + record.seq[args.incision:]
             # Splice-out
             record.seq = record.seq[:excision_start] + record.seq[excision_end:]
 
