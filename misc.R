@@ -41,7 +41,7 @@ showpalette <- function(p) {
 showpalette( c("#000000", "#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7") )
 
 mycolours <- c(
-  "#bb6600", "#880000", "#bb3300", "#ff0000", "#ff9900", "#ffcc00", "#eedd00",
+  "#bb6600", "#880000", "#bb3300", "#ff0000", "#ff9900", "#ffbb00", "#eedd00",
   "#0000ff", "#0066ff", "#0099ff", "#00ccff",  "#00ffff",
   "#5500aa", "#8800ff", "#8866ff", "#ee00bb", "#ff66ff",  "#ff99ff", "#ffccff",  
   
@@ -50,7 +50,7 @@ mycolours <- c(
   "#0033aa", "#0066aa", "#0099aa", "#00ccaa", 
   "#886600", "#bb9900", "#889900", 
   "#8800aa", "#8866aa", "#8899ff", "#88ccff", 
-  "#ff7700", "#ee99aa", "#eeccaa"
+  "#ff7700", "#eeaabb", "#eeeeaa"
 )
 
 ### Rounding to nearest non-10
