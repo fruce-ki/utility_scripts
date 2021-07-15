@@ -30,7 +30,7 @@ colour2hex <- function(namevector) { rgb( t(as.data.frame( lapply(namevector, fu
 showpalette <- function(p) {
   p <- factor(p, ordered=TRUE, levels=p)
   ggplot(data.frame(x=p, y=1), aes(p, y, fill=p)) +
-    geom_bar(stat='identity') +
+    geom_bar(stat='identity', colour='transparent') +
     scale_fill_identity() +
     theme_minimal() +
     theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
@@ -41,16 +41,16 @@ showpalette <- function(p) {
 showpalette( c("#000000", "#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7") )
 
 mycolours <- c(
-  "#bb6600", "#880000", "#bb3300", "#ff0000", "#ff9900", "#ffbb00", "#eedd00",
+  "#880000", "#bb2200", "#ff0000", "#bb6600", "#ff8833", "#eeaa00", "#ffcc00",
   "#0000ff", "#0066ff", "#0099ff", "#00ccff",  "#00ffff",
-  "#5500aa", "#8800ff", "#8866ff", "#ee00bb", "#ff66ff",  "#ff99ff", "#ffccff",  
+  "#5500aa", "#8800ff", "#8866ff", "#ff00dd", "#ff77ff",  "#eeaaff", "#ffccff",  
   
   "#224400", "#226600", "#229900", "#22cc00", "#22ff00", "#88cc00", 
   "#8899aa",
   "#0033aa", "#0066aa", "#0099aa", "#00ccaa", 
   "#886600", "#bb9900", "#889900", 
   "#8800aa", "#8866aa", "#8899ff", "#88ccff", 
-  "#ff7700", "#eeaabb", "#eeeeaa"
+  "#ff99bb", "#eeaabb", "#eeeeaa"
 )
 
 ### Rounding to nearest non-10
