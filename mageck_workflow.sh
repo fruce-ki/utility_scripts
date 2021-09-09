@@ -34,8 +34,10 @@ do_comparison=0
 guideLen=20
 legacy=""
 mageck_branch=""
+dxmem="50G"
+
 # Parse options.
-while getopts 'i:l:b:B:n:c:m:C:G:z:Z:p:s:u:d:O:g:M:A:e:Vr12L' flag; do
+while getopts 'i:l:b:B:n:c:m:C:G:z:Z:p:s:u:d:O:g:M:A:e:R:Vr12L' flag; do
   case "${flag}" in
     i) indir="${OPTARG}" ;;           # Input directory with unaligned BAMs
     l) library="${OPTARG}" ;;         # sgRNA library
@@ -63,7 +65,7 @@ while getopts 'i:l:b:B:n:c:m:C:G:z:Z:p:s:u:d:O:g:M:A:e:Vr12L' flag; do
     E) genexref="${OPTARG}" ;;        # Append Entrez and other IDs from this genes-level file
     L) legacy='--legacy' ;;		      	# Use mageck 0.5.5 instead of latest
     B) mageck_branch="-r ${OPTARG}";;			# non-master branch
-    R) nontgt="-r ${OPTARG}";;		   	# NOT FUNCTIONAL !!! # File listing the non-targetting control guides
+    R) dxmem="${OPTARG}";;		   	    # demux RAM
     *) usage ;;
   esac
 done
@@ -115,9 +117,9 @@ if [ $do_pre -eq 1 ]; then
     echo ''
     echo "Demultiplexing BAM using anchor sequence."
     if [ $revcomp -eq 1 ]; then
-      fileutilities.py T ${indir} --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J demux ,--mem=50000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,--reverse_complement ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q
+      fileutilities.py T ${indir} --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J demux ,--mem=${dxmem} ,--qos=medium ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,--reverse_complement ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q
     else
-      fileutilities.py T ${indir} --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J demux ,--mem=50000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q
+      fileutilities.py T ${indir} --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J demux ,--mem=${dxmem} ,--qos=medium ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q
     fi
     wait_for_jobs demux
 
