@@ -1,9 +1,10 @@
 ---
-title: "Single Cell initial analysis"
+title: "Single-cell: ..."
 author: "Kimon Froussios"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
   html_document:
+    self_contained: false
     code_folding: hide
     toc: true
     toc_depth: 4
@@ -11,12 +12,13 @@ output:
       collapsed: false
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+```{r knit, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.path='SC_analysis_figs/', dev=c('png', 'pdf'))
+```
 
+```{r setup}
 set.seed(12357)
 
-library(Seurat)
 library(ggplot2)
 library(ggExtra)
 library(GGally)
@@ -29,8 +31,10 @@ library(parallel)
 library(inflection)
 library(data.table)
 # library(future)
+library(ggrepel)
+library(Seurat)
+
 require(cowplot)
-require(ggrepel)
 
 # plan("multiprocess", workers = 4)
 # options(future.rng.onMisuse = "ignore")  #, future.globals.maxSize = 2000 * 1024^2)
@@ -38,8 +42,11 @@ require(ggrepel)
 imported <- FALSE
 filtered <- FALSE
 preprocessed <- FALSE
+scanvar <- TRUE
+scanumap <- TRUE
 DEtabled <- FALSE
-scanparam <- TRUE
+tilpreded <- FALSE
+
 custom_filter <- FALSE
 regress_cycle <- FALSE
 partial_regress <- FALSE
@@ -55,8 +62,10 @@ partial_regress <- FALSE
 # imported <- TRUE
 # filtered <- TRUE
 # preprocessed <- TRUE
-# scanparam <- FALSE
+# scanvar <- FALSE
+# scanumap <- FALSE
 # DEtabled <- TRUE
+# tilpreded <- TRUE
 
 ## Extra steps
 
@@ -66,56 +75,43 @@ regress_cycle <- TRUE
 ```
 
 ```{r info}
-datadirs <- c(cd45NTT = '/Users/kimon.froussios/Desktop/anais/108155',
-							bulkNTT = '/Users/kimon.froussios/Desktop/anais/108156',
-							cd45RTT = '/Users/kimon.froussios/Desktop/anais/108157',
-							bulkRTT = '/Users/kimon.froussios/Desktop/anais/108158')
+datadirs <- c(control = NULL,
+							treatment = NULL)
 
-projectname = 'yumm3.3'
-outdir <- '~/Desktop/anais'
+projectname = 'SC_analysis'
+outdir <- '~/'
 
 # Markers of interest        # USER-INPUT
 
 # Must express.
-positivefilter <- list(cd45NTT=NA_character_,
-											 bulkNTT=c('Ptprc'),
-											 cd45RTT=NA_character_,
-											 bulkRTT=c('Ptprc'))
+positivefilter <- list(control=c(NULL),
+											 treatment=c(NULL))
 
 # Must NOT express.
-negativefilter <- list(cd45NTT=NA_character_,
-											 bulkNTT=NA_character_,
-											 cd45RTT=NA_character_,
-											 bulkRTT=NA_character_)
+negativefilter <- list(control=NA_character_,
+											 treatment=NA_character_)
 # Given that SC seq generally doesn't detect all the expressed genes in every cell, it is not a very good idea to remove (contaminant) cells that express an undesireable marker.
 # Likely, the marker will not be detected in all the contaminant cells, so some will still sneak through and create mystery clusters.
 # Therefore, it may be better to leave all the contaminants in, so the eones wheere the marker is deteected can be used as proxies to flag the relevant clusters.
 # Unless multiple markers can be used, for redundancy in identifying contaminant cells.
 
 # Markers relevant to identifying contaminants, but not used to filter.
-filtercheck <- list(c('Sox9', 'Pecam1', 'Pdgfra'))
+filtercheck <- c(NA_character_)
 
 # Markers to highlight.
 priors <- list(selection=c(positivefilter, negativefilter, filtercheck),
 							 # transgenes=c('Blasti_variant','GFP_variant','hSpCas9','Hygro_variant','Luc2','mCherry','Neo',
 							 # 						  'Puro_variant','rtTA3','LTR3_LENC','mirE_polyA_LENC','NLS_Cre','ERT2','IRES'),
-							 DC=c("Itgax", "Itgam", "Cd24a", "Itgae", "Clec9a", "Xcr1", "Sirpa", "Ptprc", "Cd209a"),
-							 CD8=c("Cd3e", "Cd8a", "Tcf7", "Sell", "Cd28", "Ctla4", "Entpd1", "Cd69", "Havcr2", "Pdcd1", "Tox", "Cd3e", "Cd4"),
-							 other=c("Klrd1", "Ly6g", "Adgre1", "Itgam", "Csf1r"),
-							 DC_extras=c("H2-K1", "H2-Ke6", "H2-Oa", "H2-DMa", "H2-DMb2", "H2-DMb1", "H2-Ob", "H2-Ab1",
-							 						"H2-Aa", "H2-Eb1", "H2-Eb2", "H2-D1", "H2-Q1", "H2-Q2", "H2-Q4" , "H2-Q6",
-							 						"H2-Q7", "H2-Q10", "H2-T24", "H2-T23", "H2-T22", "H2-T3", "H2-M9", "H2-M3",
-							 						"H2-M2", "Irf8", "Cd40", "Cd80", "Cd86", "Il12a", "Il12b", "Batf3", "Ccr7")
+							 control=c(NA_character_),
+							 treatment=c(NA_character_)
 							 )
-priors$selection <- unlist(unique(priors$selection[!is.na(priors$selection)]))
 
-cellstocount <- list(c("Itgae", "Clec9a", "Xcr1"),
-										 priors$DC_extras)
+priors$selection <- unlist(unique(priors$selection[!is.na(priors$selection)]))
 
 
 # Cell-cycle genes. https://doi.org/10.1080/2162402X.2020.1737369 supplemented with a couple more genes from the Seurat vignette.
 # USER_INPUT
-cccore <- read.table('~/Desktop/anais/cellcycle.txt', stringsAsFactors=FALSE)[[1]]
+cccore <- read.table('~/cellcycle.txt', stringsAsFactors=FALSE)[[1]]
 
 # Core (mouse) cell cycle genes by phase.  According to Seurat vignette.          
 # USER_INPUT
@@ -128,6 +124,11 @@ g2m.genes <- c('Nuf2','Psrc1','Ncapd2','Ccnb2','Smc4','Lbr','Tacc3','Cenpa','Kif
 							 'Rangap1','Hmmr','Ect2','Tpx2','Ckap5','Cbx5','Nek2','Ttk','Cdca8','Nusap1','Ctcf','Cdc20','Cks2',
 							 'Mki67','Tmpo','Ckap2l','Aurkb','Kif2c','Cdk1','Kif20b','Top2a','Aurka','Ckap2','Hmgb2','Cdc25c',
 							 'Ndc80','Kif11')
+
+
+# Gene signatures https://doi.org/10.1080/2162402x.2020.1737369 (excluding cell cycle)
+# USER_INPUT
+signatures <- NULL
 
 
 varcutoff <- 80   # % variance explained cutoff in deciding number of top components
@@ -259,9 +260,10 @@ plot_qc_detection <- function(so, detectionthresh=0){
 	
 	p1 <- ggplot(detectionstats, aes(x=mean.readCount, fill=Source)) +
 		facet_grid(. ~ Source) +
-		geom_histogram(bins=20, colour="black") +
+		geom_histogram(bins=50, colour="black") +
 		scale_x_log10() +
 		annotation_logticks(sides="b") +
+		labs(titlee = "Distribution of genes by their mean detection level") +
 		theme_bw() + 
 		labs(x=NULL, y="Genes") +
 		theme(legend.position="none")
@@ -271,6 +273,7 @@ plot_qc_detection <- function(so, detectionthresh=0){
 		geom_point(shape=16, size=0.8, alpha=0.3) +
 		scale_x_log10() +
 		annotation_logticks(sides="b") +
+		labs(title="% of cells in which a gene is detected", subtitle="as function of the gene's mean detection level") +
 		theme_bw() + 
 		theme(legend.position="none",
 					strip.background.x=element_blank(),
@@ -381,14 +384,9 @@ sparse.cor <- function(x){
 	
 varscanplot <- function(v, candidates){
 	p1 <- ggplot(v) +
-		geom_vline(xintercept=candidates['ksum2'], linetype='dotted', colour='blue') +
-		geom_vline(xintercept=candidates['kelbow'], linetype='dotted', colour='forestgreen') +
-		geom_vline(xintercept=candidates['mindiff2'], linetype='dashed', colour='black', alpha=0.2) +
-		geom_vline(xintercept=candidates['kdiff2'], linetype='dotted', colour='black') +
-		geom_vline(xintercept=candidates['minover1'], linetype='dashed', colour='purple', alpha=0.2) +
-		geom_vline(xintercept=candidates['kover1'], linetype='dotted', colour='purple') +
-		geom_vline(xintercept=candidates['minsum80'], linetype='dashed', colour='magenta', alpha=0.2) +
-		geom_vline(xintercept=candidates['ksum80'], linetype='dotted', colour='magenta') +
+		geom_vline(xintercept=candidates['ksum2'], linetype='dotted', colour='forestgreen', alpha=0.6) +
+		geom_vline(xintercept=candidates['kelbow'], linetype='dotted', colour='blue', alpha=0.6) +
+		geom_vline(xintercept=candidates['mindiff2'], linetype='dashed', colour='black', alpha=0.6) +
 		geom_line(aes(x=n, y=sum_1_2, colour='by first 2 componenets')) +
 		geom_line(aes(x=n, y=elbow_var, colour='by scree elbow point')) +
 		geom_line(aes(x=n, y=diff_1_2, colour='difference between first 2 components')) +
@@ -403,14 +401,11 @@ varscanplot <- function(v, candidates){
 					panel.grid=element_blank())
 	
 	p2 <- ggplot(v) +
-		geom_vline(xintercept=candidates['ksum2'], linetype='dotted', colour='blue') +
-		geom_vline(xintercept=candidates['kelbow'], linetype='dotted', colour='forestgreen') +
-		geom_vline(xintercept=candidates['mindiff2'], linetype='dashed', colour='black', alpha=0.2) +
-		geom_vline(xintercept=candidates['kdiff2'], linetype='dotted', colour='black') +
-		geom_vline(xintercept=candidates['minover1'], linetype='dashed', colour='purple', alpha=0.2) +
-		geom_vline(xintercept=candidates['kover1'], linetype='dotted', colour='purple') +
-		geom_vline(xintercept=candidates['minsum80'], linetype='dashed', colour='magenta', alpha=0.2) +
-		geom_vline(xintercept=candidates['ksum80'], linetype='dotted', colour='magenta') +
+		geom_vline(xintercept=candidates['maxelbow'], linetype='dashed', colour='orange', alpha=0.6) +
+		geom_vline(xintercept=candidates['kover1'], linetype='dotted', colour='purple', alpha=0.6) +
+		geom_vline(xintercept=candidates['ksum80'], linetype='dotted', colour='magenta', alpha=0.6) +
+		geom_vline(xintercept=candidates['minover1'], linetype='dashed', colour='purple', alpha=0.6) +
+		geom_vline(xintercept=candidates['minsum80'], linetype='dashed', colour='magenta', alpha=0.6) +
 		geom_line(aes(x=n, y=sum_to_80, colour='required for variance explained target')) +
 		geom_line(aes(x=n, y=over_1, colour='explaining at least 1% variance each')) +
 		geom_line(aes(x=n, y=elbow, colour='at scree elbow point')) +
@@ -456,6 +451,7 @@ varscan <- function(so, n, exclude=NULL, varcutoff=80) {
 								ksumto80 = uik(x=n, y=v$sum_to_80),
 								ksum2 = uik(x=n, y=v$sum_1_2),
 								kelbow = uik(x=n, y=v$elbow_var),
+								maxelbow = n[which(v$elbow == max(v$elbow))][1],
 								mindiff2 = n[which(v$diff_1_2 == min(v$diff_1_2))],
 								kdiff2 = uik(x=n, y=v$diff_1_2))
 								
@@ -633,57 +629,167 @@ plot_grid_pcs <- function(so, comps=1:5, flip=FALSE) {
 	}
 }
 
-do_clusters <- function(so, d=1:50, resolution=0.8, nneighbours=30, mindist=0.3, clusterplotonly=FALSE){
+plot_cell_density <- function (so, dims = c(1, 2), cells = row.names(so@meta.data),
+					reduction = 'umap', split.by = 'Source', relative=FALSE, binnum=50, withumap=FALSE) 
+{
+	if (length(x = dims) != 2) {
+		stop("'dims' must be a two-length vector")
+	}
+	embed <- as.data.frame(Embeddings(object = so[[reduction]]))  #can't be as.data.table : need the rownames
+	data <- embed[cells, dims]  
+	data <- cbind(as.data.table(data), data.table(Cells = rownames(data))) #gymnastics for cbind to behavee correctly even with nrow==1
+	data[, Cells := as.factor(Cells)]
+	data[ , split.by := so@meta.data[cells, split.by]]
+	setnames(data, c(names(data)[-length(data)], split.by))
+	dims <- paste0(Key(object = so[[reduction]]), dims)
+	
+	if(nrow(data) > 1){
+		# Keep contant ranges across independent plots of subsets of the data
+		xmin <- min(embed[, dims[1]])
+		xmax <- max(embed[, dims[1]])
+		ymin <- min(embed[, dims[2]])
+		ymax <- max(embed[, dims[2]])
+		
+		if (withumap){
+			umap1 <- ggplot(data, aes_string(x=dims[1], y=dims[2], colour=names(data)[4])) +
+				geom_point(shape=16, size=rel(0.4)) +
+				coord_fixed(xlim=c(xmin, xmax), ylim=c(ymin, ymax)) +
+				theme_bw() + 
+				theme(panel.grid=element_blank())
+			
+			umap2 <- ggplot(data, aes_string(x=dims[1], y=dims[2], colour=names(data)[4])) +
+				facet_wrap(names(data)[4], scales='fixed', drop=FALSE) +
+				geom_point(shape=16, size=rel(0.4)) +
+				coord_fixed(xlim=c(xmin, xmax), ylim=c(ymin, ymax)) +
+				theme_bw() + 
+				theme(panel.grid=element_blank(),
+							legend.position='none')
+		
+			print( (umap1 | plot_spacer()) / umap2 )
+		}
+
+		all <- ggplot(data, aes_string(x=dims[1], y=dims[2])) +
+			geom_density2d_filled(bins=binnum) +
+			geom_point(shape=16, size=rel(0.3), alpha=0.15, colour='yellow') +
+			coord_fixed(xlim=c(xmin, xmax), ylim=c(ymin, ymax)) +
+			scale_fill_manual(values=colorRampPalette(c('black', '#DDAAFF'))(binnum)) +
+			labs(fill="cell density") +
+			theme_minimal() +
+			theme(panel.grid=element_blank(), 
+						panel.background=element_rect(fill='black'),
+						legend.position='none')
+		
+		if (relative || any(data[, nrow(.SD), by=data[[4]]]$V1 <= 1)) {
+			split <- Reduce(`+`, lapply(levels(data[[4]]), function(s){
+								if (nrow(data[data[[4]]==s, ]) >1 ) {
+									ggplot(data[data[[4]]==s, ], aes_string(x=dims[1], y=dims[2])) +
+										geom_density2d_filled(bins=binnum) +
+										geom_point(shape=16, size=rel(0.3), alpha=0.15, colour='yellow') +
+										scale_fill_manual(values=colorRampPalette(c('black', '#DDAAFF'))(binnum)) +
+										coord_fixed(xlim=c(xmin, xmax), ylim=c(ymin, ymax)) +
+										labs(fill="cell density", subtitle=s) +
+										theme_minimal() +
+										theme(panel.grid=element_blank(), 
+													panel.background=element_rect(fill='black'),
+													legend.position='none')
+								} else {
+									ggplot(data[data[[4]]==s, ], aes_string(x=dims[1], y=dims[2])) +
+										# geom_density2d_filled(bins=binnum) +
+										geom_point(shape=16, size=rel(0.3), colour='yellow') +
+										# scale_fill_manual(values=colorRampPalette(c('black', '#DDAAFF'))(binnum)) +
+										coord_fixed(xlim=c(xmin, xmax), ylim=c(ymin, ymax)) +
+										labs(fill="cell density", subtitle=s) +
+										theme_minimal() +
+										theme(panel.grid=element_blank(), 
+													panel.background=element_rect(fill='black'),
+													legend.position='none')
+								}
+							}) )
+		} else{
+			split <- ggplot(data, aes_string(x=dims[1], y=dims[2])) +
+				facet_wrap(names(data)[4], scales='fixed', drop=FALSE) +
+				geom_density2d_filled(bins=binnum) +
+				geom_point(shape=16, size=rel(0.3), alpha=0.15, colour='yellow') +
+				scale_fill_manual(values=colorRampPalette(c('black', '#DDAAFF'))(binnum)) +
+				coord_fixed(xlim=c(xmin, xmax), ylim=c(ymin, ymax)) +
+				labs(fill="cell density") +
+				theme_minimal() +
+				theme(panel.grid=element_blank(), 
+							legend.position='none')
+		}
+		
+		print( (all | plot_spacer()) / split )
+		
+	} else {
+		
+		print("Warning: Insufficient number of cells for a 2D density plot calculation.")
+	}
+}
+
+
+do_clusters <- function(so, d=1:50, resolution=0.8, spread=1, nneighbours=30, mindist=0.3, clusterplotonly=FALSE){
 	message(paste('PCs:', paste(d, collapse=', ')))
 	message(paste('Clustering resolution:', resolution))
 	message(paste('Number of neighbours:', nneighbours))
 	message(paste('Minimum distance:', mindist))
 
-	so <- RunUMAP(so, dims=d, n.neighbors=nneighbours, min.dist=mindist)
+	so <- RunUMAP(so, dims=d, n.neighbors=nneighbours, min.dist=mindist, spread=spread)
 
 	so <- FindNeighbors(so, dims=d)
-	so <- FindClusters(so, resolution=resolution)
+	so <- FindClusters(so, resolution=resolution, group.singletons=FALSE)
 	message( paste('Clusters identified:', length(unique(so$seurat_clusters))) )
 	
 	if (!clusterplotonly) {
-		p1 <- DimPlot(so, reduction='umap', group.by='Phase') +
-				coord_fixed(ratio=1) +
-				labs(title=NULL) +
-				theme_light() +
-				theme(panel.grid=element_blank())
-	
-		p2 <- DimPlot(so, reduction='umap', group.by='Phase', split.by='Phase') +
-				coord_fixed(ratio=1) +
-				labs(title=NULL) +
-				theme_light() +
-				theme(panel.grid=element_blank())
-	
-		print( p1 / p2 + plot_layout(guides='collect') )
-	
-		p1 <- DimPlot(so, reduction='umap', group.by='Source') +
-			coord_fixed(ratio=1) +
-			labs(title=NULL) +
-			theme_light() +
-			theme(panel.grid=element_blank())
-			
-	  p2 <- DimPlot(so, reduction='umap', group.by='Source', split.by='Source') +
-			coord_fixed(ratio=1) +
-			labs(title=NULL) +
-			theme_light() +
-			theme(panel.grid=element_blank())
-			
-		print( p1 / p2 + plot_layout(guides='collect') )
+		# Sources
+		
+	# 	p1 <- DimPlot(so, reduction='umap', group.by='Source') +
+	# 		coord_fixed(ratio=1) +
+	# 		labs(title=NULL) +
+	# 		theme_light() +
+	# 		theme(panel.grid=element_blank())
+	# 		
+	#   p2 <- DimPlot(so, reduction='umap', group.by='Source', split.by='Source') +
+	# 		coord_fixed(ratio=1) +
+	# 		labs(title=NULL) +
+	# 		theme_light() +
+	# 		theme(panel.grid=element_blank())
+	# 		
+	# 	print( p1 / p2 + plot_layout(guides='collect') )
+		
+		plot_cell_density(so, cells = row.names(so@meta.data),
+											split.by = 'Source', relative=FALSE, withumap=TRUE)
+		plot_cell_density(so, cells = row.names(so@meta.data),
+											split.by = 'Source', relative=TRUE, withumap=FALSE)
+		
+		# Phases
+		
+		# p1 <- DimPlot(so, reduction='umap', group.by='Phase') +
+		# 		coord_fixed(ratio=1) +
+		# 		labs(title=NULL) +
+		# 		theme_light() +
+		# 		theme(panel.grid=element_blank())
+		# 
+		# p2 <- DimPlot(so, reduction='umap', group.by='Phase', split.by='Phase') +
+		# 		coord_fixed(ratio=1) +
+		# 		labs(title=NULL) +
+		# 		theme_light() +
+		# 		theme(panel.grid=element_blank())
+		# 
+		# print( p1 / p2 + plot_layout(guides='collect') )
+		
+		plot_cell_density(so, cells = row.names(so@meta.data),
+											split.by = 'Phase', relative=TRUE, withumap=TRUE)
 	}
 	
+	# Clusters
 	p1 <- DimPlot(so, reduction='umap', label=TRUE, group.by='seurat_clusters') +
 		coord_fixed(ratio=1) +
 		labs(title=NULL) +
 		theme_light() +
 		theme(panel.grid=element_blank(),
 					legend.position='none')
-	
 	if (clusterplotonly) {
-		p1 <- p1 + labs(subtitle=resolution)
+		p1 <- p1 + labs(subtitle=paste("n", nneighbours, "d", mindist, "s", spread, "r", resolution))
 	}
 	
 	p2 <- DimPlot(so, reduction='umap', label=FALSE, group.by='seurat_clusters', split.by='Source') +
@@ -695,6 +801,8 @@ do_clusters <- function(so, d=1:50, resolution=0.8, nneighbours=30, mindist=0.3,
 	
 	print( p1 / p2 )
 
+	
+	# Heatmap of cells by cluster
 	if (!clusterplotonly) {
 		DF <- table(so$seurat_clusters, so$Source)
 		DF <- as.data.frame(cbind(DF, rowSums(DF)))
@@ -745,7 +853,9 @@ do_clusters <- function(so, d=1:50, resolution=0.8, nneighbours=30, mindist=0.3,
 		print( p1 | p2 | p3 )
 		
 		return(so)
+		
 	} else {
+		
 		return(NULL)
 	}
 }
@@ -777,30 +887,24 @@ do_de <- function(so, DEtabled=FALSE, lfcthresh=0.25, pctexpthresh=0.25, diffpct
 		
 	} else {
 		
-		so.markers <- read.table(file=file.path(odr, paste0(pjn, '_clustermarkers_', suffix, '.tsv')), 
-														 sep="\t", header=TRUE, stringsAsFactors=FALSE)
+		suppressWarnings(so.markers <- fread(file=file.path(odr, paste0(pjn, '_clustermarkers_', suffix, '.tsv'))))
+		so.markers[, V1 := NULL]   # data.frame rownames, already duplicated as the gene column
 	}
 	
-	cm <- so.markers %>% 
-		mutate(abslfc = abs(avg_logFC)) %>%
-		filter(! gene %in% c(mtgenes, ribogenes, cccore, ccextra)) %>%
-		group_by(cluster) %>%
-		top_n(n = 18, wt = avg_logFC) %>% 
-		# top_n(n = 18, wt = abslfc) %>%    # negative LFCs tend to not be cluster-specific, because of averaging across all the other clusters
-		ungroup()
+	so.markers[, abslfc := abs(avg_logFC)]
+	so.markers <- so.markers[! gene %in% c(mtgenes, ribogenes, cccore, ccextra),]
+	setorder(so.markers, -avg_logFC)
+	cm <- so.markers[, head(.SD, 18), by=cluster] # negative LFCs tend to not be cluster-specific, because of averaging across all the other clusters
+	cm[, cluster := factor(as.character(cluster), levels=as.character(unique(so.markers$cluster[order(so.markers$cluster)])))]
 	
+	so@meta.data["cell"] <- rownames(so@meta.data) ## TODO remove after recompiling all checkpoints
 	
-	for (cl in unique(cm$cluster)){
-		# cl <- unique(cm$cluster)[1]
+	for (cl in levels(cm$cluster)){
+		# cl <- levels(cm$cluster)[1]
 		print(paste("Cluster:", cl))
 		subg <- unique(cm[cm$cluster==cl, ]$gene)
 		# Make colouring variable highlighting just this cluster
 		so@meta.data[['this_cluster']] <- as.character(so@meta.data[['seurat_clusters']]) == as.character(cl)
-		# print( (DimPlot(so, reduction='pca', group.by='this_cluster') + coord_fixed() +
-		# 					scale_colour_manual(values=c('black', 'magenta')) +
-		# 					labs(title=paste('Cluster', cl)) + theme(legend.position='none' )) |
-		# 			 (DimPlot(so, reduction='pca', group.by='Source') + coord_fixed() )
-		# )
 		print( (DimPlot(so, reduction='umap', group.by='this_cluster', label=FALSE) + 
 						coord_fixed() + scale_colour_manual(values=c('black', 'magenta')) +
 						labs(title=paste('Cluster', cl)) + theme(legend.position='none' ))   /
@@ -808,28 +912,34 @@ do_de <- function(so, DEtabled=FALSE, lfcthresh=0.25, pctexpthresh=0.25, diffpct
 				  	coord_fixed() + scale_colour_manual(values=c('black', 'magenta')) +
 				  	labs(title=NULL) + theme(legend.position='none' ))
 		)
+		plot_cell_density(so, cells=so@meta.data[so@meta.data$seurat_clusters == cl, "cell"],
+														 split.by='Source', relative=FALSE, withumap=TRUE)
 
 		for (x in rollslice(subg, 9)) {
 			# x <- rollslice(subg, 9)[[1]]
 			print( subg[x] )   # Make it easier to text-search the report for the relevant plots for a gene
-	
-			print( FeaturePlot(so, reduction='umap', features = subg[x], coord.fixed=TRUE) )
 			
+			# Each marker split by source
+			for (z in subg[x]){
+				# z <- subg[x][1]
+				print( (FeaturePlot(so, reduction='umap', features = z, coord.fixed=TRUE) | plot_spacer()) /
+				       FeaturePlot(so, reduction='umap', features = z, coord.fixed=TRUE, split.by='Source') )
+				
+				plot_cell_density(so, cells=colnames(so@assays$RNA@data)[so@assays$RNA@data[z, ] > 0], 
+													split.by='Source', withumap=TRUE, relative=TRUE)
+			}
+		
+			## In larger blocks, without splitting by source
+			#print( FeaturePlot(so, reduction='umap', features = subg[x], coord.fixed=TRUE) )
 			print( DotPlot(so, features = subg[x], group.by='seurat_clusters', scale.min=0, scale.max=100) + RotatedAxis()  )
-			#
 			# print( VlnPlot(so, slot='data', features = subg[x], pt.size=0.01, group.by='seurat_clusters') + RotatedAxis()  )
-			#
-			
-			print( RidgePlot(so, features=subg[x], group.by='Source', stack=FALSE) & labs(y=NULL, x=NULL) )
-			# 
+			print( RidgePlot(so, features=subg[x], group.by='Source', stack=FALSE, same.y.lims=TRUE) & labs(y=NULL, x=NULL) )
 			# print( DotPlot(so, features = subg[x], group.by='Source', scale.min=0, scale.max=100) + RotatedAxis()  )
-			#
 			# print( VlnPlot(so, features = subg[x], pt.size=0.01, group.by='Source') + RotatedAxis() )
 		}
 	}
 }
 ```
-
 
 
 
@@ -859,6 +969,7 @@ if (!imported) {
 		so <- CreateSeuratObject(counts = CR, min.cells=mincells, project=projectname, min.features=minfeat)
 	}
 	
+	so@meta.data["cell"] <- rownames(so@meta.data)
 	so@meta.data[["Source"]] = so@meta.data[["orig.ident"]]
 	
 	# Checkpoint.
@@ -872,8 +983,6 @@ if (!imported) {
 
 print( so )
 ```
-
-
 
 
 
@@ -925,16 +1034,16 @@ print(plot_qc_detection(so, detectionthresh))
 ```{r qc_filter, fig.height=8, fig.width=8}
 if (!filtered){
 	# Remove unwanted cells
-	minfeat <- c(1000, 1000, 1000, 1000)           # USER-INPUT
+	minfeat <- rep(1000, length(sources))           # USER-INPUT
 	names(minfeat) <- levels(sources)
-	maxfeat <- c(Inf, Inf, Inf, Inf)               # USER-INPUT
+	maxfeat <- rep(Inf, length(sources))            # USER-INPUT
 	names(maxfeat) <- levels(sources)
-	maxmols <- c(30000, 40000, 20000, 30000)       # USER-INPUT
+	maxmols <- rep(30000, length(sources))          # USER-INPUT
 	names(maxmols) <- levels(sources)
-	minmols <- minfeat                             # USER-INPUT    (it can be bigger than minfeat, but it doesn't make sense to be smaller)
-	maxmt <- c(10, 10, 10, 10)                     # USER-INPUT
+	minmols <- minfeat                              # USER-INPUT    (it can be bigger than minfeat, but it doesn't make sense to be smaller)
+	maxmt <- rep(10, length(sources))                     # USER-INPUT
 	names(maxmt) <- levels(sources)
-	maxribo <- c(45, 45, 45, 45)                   # USER-INPUT
+	maxribo <- rep(50, length(sources))                   # USER-INPUT
 	names(maxribo) <- levels(sources)
 	
 	
@@ -1019,8 +1128,8 @@ if (custom_filter) {
 				sel <- so@assays$RNA@data[positivefilter[[n]], ] > expthresh
 				if (!is.null(dim(sel))) {
 					# USER-INPUT
-					sel <- colSums(sel) == length(positivefilter[[n]])      # all the required markers
-					# sel <- colSums(sel) >= 1                            # at least one of the requireed markers
+					# sel <- colSums(sel) == length(positivefilter[[n]])      # all the required markers
+					sel <- colSums(sel) >= 1                            # at least one of the requireed markers
 				}
 			  # all the remaining cells from  the other sources and the cells that meet the criteria for this source
 				sel <- (so@meta.data$Source !=n) | (so@meta.data$Source == n & sel)
@@ -1099,15 +1208,9 @@ print(p1 / p2 + plot_layout(guides='collect'))
 ```
 
 
-
-
-
-
 ```{r}
 # knitr::knit_exit()
 ```
-
-
 
 
 
@@ -1273,13 +1376,9 @@ if (regress_cycle && !is.null(s.genes) && !is.null(g2m.genes)) {
 ```
 
 
-
-
-
 ```{r}
 # knitr::knit_exit()
 ```
-
 
 
 
@@ -1305,7 +1404,7 @@ n <- n[n < nrow(so)]
 of mitochondrial, ribosomal, cell cycle and cell-cycle-correlated genes:
 
 ```{r nvarscan1, fig.height=6, fig.width=8}
-if (scanparam){
+if (scanvar){
 	v <- varscan(so, n=n, varcutoff=varcutoff)
 	
 	# Checkpoint
@@ -1321,6 +1420,7 @@ if (scanparam){
 								ksumto80 = uik(x=n, y=v$sum_to_80),
 								ksum2 = uik(x=n, y=v$sum_1_2),
 								kelbow = uik(x=n, y=v$elbow_var),
+								maxelbow = n[which(v$elbow == max(v$elbow))][1],
 								mindiff2 = n[which(v$diff_1_2 == min(v$diff_1_2))],
 								kdiff2 = uik(x=n, y=v$diff_1_2))
 
@@ -1333,7 +1433,7 @@ if (scanparam){
 of mitochondrial, ribosomal, cell cycle and cell-cycle-correlated genes:
 
 ```{r nvarscan2, fig.height=6, fig.width=8}
-if (scanparam){
+if (scanvar){
 	v <- varscan(so, n=n, varcutoff=varcutoff, exclude=c(mtgenes, ribogenes, cccore, ccextra))
 
 	# Checkpoint
@@ -1350,40 +1450,22 @@ candidates <- c(minover1 = n[ min(which(v$over_1 == min(v$over_1))) ],
 								minsum80 = n[ min(which(v$sum_to_80 == min(v$sum_to_80))) ],
 								ksumto80 = uik(x=n, y=v$sum_to_80),
 								ksum2 = uik(x=n, y=v$sum_1_2),
+								maxelbow = n[which(v$elbow == max(v$elbow))][1],
 								kelbow = uik(x=n, y=v$elbow_var),
 								mindiff2 = n[which(v$diff_1_2 == min(v$diff_1_2))],
 								kdiff2 = uik(x=n, y=v$diff_1_2))
 
-if (!scanparam){ # varscan prints this already
+if (!scanvar){ # varscan prints this already
 	varscanplot(v, candidates)
 }
 ```
 
-<!-- ### Explore parameter values -->
-
-<!-- ```{r scan} -->
-<!-- if (scanparam){ -->
-<!-- 	message('Exploring UMAP parameters') -->
-<!-- 	steps <- c(250, 500, 1000, 1500, 2000, 5000) -->
-<!-- 	scan_param(so,  -->
-<!-- 						 #nvariables=unique(candidates[order(candidates)]), -->
-<!-- 						 nvariables=steps[steps <= nrow(so)], -->
-<!-- 						 mindist=c(0.2), nneighbours=c(10, 30, 50),  -->
-<!-- 						 resolutions=c(0.3, 0.8, 1.3),                                                # USER-INPUT -->
-<!-- 						 exclude=c(mtgenes, ribogenes, cccore), maybe_exclude=ccextra, split=TRUE)    # USER-INPUT -->
-
-<!-- 	# Stop here. -->
-<!-- 	knitr::knit_exit() -->
-
-<!-- } else { -->
-<!-- 	message('Exploration skipped. (Already done previously?)') -->
-<!-- } -->
-<!-- ``` -->
-
 ### Commit
 
 ```{r variable, fig.height=8, fig.width=8}
-nvariables <- candidates['minsum80']    # USER-INPUT
+# USER-INPUT        # c(minover1, kover1, minsum80, ksumto80, ksum2, kelbow, maxelbow, mindiff2, kdiff2)
+# nvariables <- candidates['maxelbow'] 
+nvariables <- 1000
 message(paste("Starting with", nvariables, "most variable features."))
 
 dims <- 1:50          # Obsolete as user-defined PC selection, but baked into code that I don't want to refactor right now.
@@ -1395,8 +1477,10 @@ so <- FindVariableFeatures(so, selection.method = "vst", nfeatures = nvariables,
 topvariable <- VariableFeatures(so)
 
 # Remove undesireable genes.
-                                            # USER-INPUT   # USER-INPUT    # USER-INPUT   # USER-INPUT                   # USER-INPUT
-topvariable <- clean_candidates(topvariable, mito=mtgenes, ribo=ribogenes, cccore=cccore, ccextra=ccextra, verbose=TRUE, expthresh=0.003)
+                                            
+topvariable <- clean_candidates(topvariable, verbose=TRUE,
+																# USER-INPUT  # USER-INPUT    # USER-INPUT   # USER-INPUT     # USER-INPUT
+																mito=mtgenes, ribo=ribogenes, cccore=cccore, ccextra=ccextra, expthresh=0.002)
 
 print( plot_variancemeans(so, features=topvariable, topn=25) )
 ```
@@ -1412,49 +1496,81 @@ print( scr$scree )
 npc <- scr$npc
 ```
 
-The density plots show which principal components can distinguish between the input sources, i.e. which components explain variance in the data that pertains to the treatments.
+The 1-D and 2-D density plots show how the principal components associate with treatments/sources, with the cell cycle, and with overall expression/detection metrics. Association with the treatments is desireable, association with the detection metrics is a confounding factor. Association with the cell cycle may be a confounding factor if not modelled out in the earlier section, unless the treatments affect the cycle.
 
 ```{r pca_plot_pre, fig.height=15, fig.width=15}
 pc_vars <- Stdev(object = so, reduction = 'pca') ^ 2  # From stdevs to % of total variance.
 pc_vars <- 100 * pc_vars / sum(pc_vars)
 
 
-## Use the density distributions to see which components encode for the treatment groups and cell cycle phases.
+## Use the density distributions to see which components encode for the treatment groups, cell cycle phases, and zero counts
 pcs <- as.data.table(so@reductions$pca@cell.embeddings)
 pcs[, Source := so@meta.data$Source]
 pcs[, Phase := so@meta.data$Phase]
-pcs <- melt(pcs, variable.name="PC", value.name="Embedings", id.vars=c('Source', 'Phase'))
+pcs[, NonZeros := so@meta.data$nFeature_RNA]
+pcs[, Counts := so@meta.data$nCount_RNA]
+pcs <- melt(pcs, variable.name="PC", value.name="Embedings", id.vars=c('Source', 'Phase', 'NonZeros', 'Counts'))
+
+p1 <- ggplot(pcs, aes(x=Embedings, colour=Source)) +
+	facet_wrap(~ PC, scales="free_x") +
+	geom_density() +
+	labs(title="PCs encoding the source") +
+	theme_minimal()
+
+print( p1 )
+
+binnum=5
+# p1 <- ggplot(pcs, aes(x=Embedings, y=NonZeros)) +
+# 	facet_wrap(~ PC, scales="free_x") +
+# 	# geom_point(shape=16, size=0.7, alpha=0.15) +
+# 	geom_density_2d(bins=binnum) +
+# 	# geom_density_2d_filled(bins=binnum) +
+# 	scale_fill_manual(values=colorRampPalette(c('black', 'yellow'))(binnum)) +
+# 	labs(title="PCs encoding the number of detected features") +
+# 	theme_minimal() +
+# 	theme(axis.text.x=element_text(angle=60, vjust=0.5, hjust=1))
+# 
+# print( p1 )
+							
+p1 <- ggplot(pcs, aes(x=Embedings, y=Counts)) +
+	facet_wrap(~ PC, scales="free_x") +
+	# geom_point(shape=16, size=0.7, alpha=0.15) +
+	geom_density_2d(bins=binnum) +
+	# geom_density_2d_filled(bins=binnum) +
+	scale_fill_manual(values=colorRampPalette(c('black', 'yellow'))(binnum)) +
+	labs(title="PCs encoding the volume of data") +
+	theme_minimal() +
+	theme(axis.text.x=element_text(angle=60, vjust=0.5, hjust=1))
+
+print( p1 )
 
 p1 <- ggplot(pcs, aes(x=Embedings, colour=Phase)) +
 	facet_wrap(~ PC, scales="free_x") +
 	geom_density() +
-	theme_minimal()
-
-print( p1 )
-							
-p1 <- ggplot(pcs, aes(x=Embedings, colour=Source)) +
-	facet_wrap(~ PC, scales="free_x") +
-	geom_density() +
+	labs(title="PCs (still) encoding the cell cycle") +
 	theme_minimal()
 
 print( p1 )
 ```
 
-The diagonal, shows the distribution of observations along the PC colour by treatment. Below the diagonal are PCA plots coloured by treatment. Above the diagonal are PCA plots coloured by cell phase.
+Below are the airwise plots of the first few PCs.
+The diagonal shows the distribution of observations along the PC, coloured by treatment. Below the diagonal are PCA plots coloured by treatment. Above the diagonal are PCA plots coloured by cell phase.
 
 ```{r pca_plot, fig.height=12, fig.width=12}
 ## First 5 components
 plot_grid_pcs(so)
 
 ## Selected components
-custom_pcs <- c(1:3, 5:7, 10, 12, 15:17, 19)                         # USER-INPUT
+custom_pcs <- c(1:6, 8:12, 15:17, 20:25, 28, 30)    # USER-INPUT
 
 plot_grid_pcs(so, comps= head(custom_pcs[custom_pcs>5], 5))
 ```
 
+
 ```{r}
 # knitr::knit_exit()
 ```
+
 
 
 ## UMAP
@@ -1464,37 +1580,71 @@ plot_grid_pcs(so, comps= head(custom_pcs[custom_pcs>5], 5))
 ```{r umap0, fig.height=12, fig.width=12}
 d <- dims[dims %in% 1:length(pc_vars)]
 
-nneighbours <- 30                                     # USER INPUT
-mindist <- 0.1                                       # USER INPUT
+if (scanumap){
+	pdf(file.path(outdir, paste0(projectname, '_alldim_scan.pdf')))
+	for (mindist in c(0.01, 0.3)) {
+		for (spr in c(0.25, 1, 4)) {
+			for (nneighbours in c(10, 30, 50)) {
+				for (resolution in seq(0.4, 1.2, 0.2)) {
+					do_clusters(so, d=d, resolution=resolution, spread=spr, mindist=mindist, nneighbours=nneighbours, clusterplotonly=TRUE)
+				}
+			}
+		}
+	}
+	dev.off()
+	# pdf(file.path(outdir, paste0(projectname, '_alldim_scanchoices.pdf')))
+	# do_clusters(so, d=d, resolution=0.8, spread=4, mindist=0.3, nneighbours=50, clusterplotonly=TRUE)
+	# do_clusters(so, d=d, resolution=0.8, spread=4, mindist=0.3, nneighbours=30, clusterplotonly=TRUE)
+	# do_clusters(so, d=d, resolution=0.8, spread=4, mindist=0.3, nneighbours=10, clusterplotonly=TRUE)
+	# do_clusters(so, d=d, resolution=0.8, spread=4, mindist=0.01, nneighbours=30, clusterplotonly=TRUE)
+	# dev.off()
+} else {
+	nneighbours <- 30                                     # USER INPUT
+	mindist <- 0.01                                        # USER INPUT
+	resolution <- 0.8                                     # USER INPUT
+	spr <- 4
+	so <- do_clusters(so, d=d, resolution=resolution, spread=spr, mindist=mindist, nneighbours=nneighbours)
 
-# for (resolution in seq(0.3, 1.9, 0.1)) {
-# 	do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours, clusterplotonly=TRUE)
-# }
-
-resolution <- 0.7                                     # USER INPUT
-so <- do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours)
-
-# Checkpoint
-saveRDS(so, file = file.path(outdir, paste0(projectname, '_alldim.RDS')))
+	# Checkpoint
+	saveRDS(so, file = file.path(outdir, paste0(projectname, '_alldim.RDS')))
+}
 ```
 
 ### Using top informative components
 
+Aiming for `r varcutoff`% variance explained.
+
 ```{r umap2, fig.height=12, fig.width=12}
 d <- dims[dims %in% 1:npc]
 
-nneighbours <- 30                                     # USER INPUT
-mindist <- 0.1                                        # USER INPUT
+if (scanumap){
+	pdf(file.path(outdir, paste0(projectname, '_topdim_scan.pdf')))
+	for (mindist in c(0.01, 0.3)) {
+		for (spr in c(0.25, 1, 4)) {
+			for (nneighbours in c(10, 30, 50)) {
+				for (resolution in seq(0.4, 1.2, 0.2)) {
+					do_clusters(so, d=d, resolution=resolution, spread=spr, mindist=mindist, nneighbours=nneighbours, clusterplotonly=TRUE)
+				}
+			}
+		}
+	}
+	dev.off()
+	# pdf(file.path(outdir, paste0(projectname, '_topdim_scanchoices.pdf')))
+	# do_clusters(so, d=d, resolution=0.6, spread=4, mindist=0.01, nneighbours=30, clusterplotonly=TRUE)
+	# do_clusters(so, d=d, resolution=0.8, spread=4, mindist=0.01, nneighbours=50, clusterplotonly=TRUE)
+	# do_clusters(so, d=d, resolution=0.6, spread=4, mindist=0.3, nneighbours=10, clusterplotonly=TRUE)
+	# do_clusters(so, d=d, resolution=0.8, spread=4, mindist=0.3, nneighbours=50, clusterplotonly=TRUE)
+	# dev.off()
+} else {
+	nneighbours <- 50                                     # USER INPUT
+	mindist <- 0.01                                        # USER INPUT
+	resolution <- 0.8                                     # USER INPUT
+	spr <- 4
+	so <- do_clusters(so, d=d, resolution=resolution, spread=spr, mindist=mindist, nneighbours=nneighbours)
 
-# for (resolution in seq(0.3, 1.9, 0.1)) {
-# 	do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours, clusterplotonly=TRUE)
-# }
-		 
-resolution <- 0.7                                     # USER INPUT
-so <- do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours)
-
-# Checkpoint
-saveRDS(so, file = file.path(outdir, paste0(projectname, '_topdim.RDS')))
+	# Checkpoint
+	saveRDS(so, file = file.path(outdir, paste0(projectname, '_topdim.RDS')))
+}
 ```
 
 ### Using the selected components
@@ -1502,29 +1652,46 @@ saveRDS(so, file = file.path(outdir, paste0(projectname, '_topdim.RDS')))
 ```{r umap1, fig.height=12, fig.width=12}
 d <- custom_pcs[custom_pcs %in% 1:length(pc_vars)]
 
-nneighbours <- 30                                     # USER INPUT
-mindist <- 0.1                                       # USER INPUT
+if (scanumap){
+	pdf(file.path(outdir, paste0(projectname, '_customdim_scan.pdf')))
+	for (mindist in c(0.01, 0.3)) {
+		for (spr in c(0.25, 1, 4)) {
+			for (nneighbours in c(10, 30, 50)) {
+				for (resolution in seq(0.4, 1.2, 0.2)) {
+					do_clusters(so, d=d, resolution=resolution, spread=spr, mindist=mindist, nneighbours=nneighbours, clusterplotonly=TRUE)
+				}
+			}
+		}
+	}
+	dev.off()
+	# pdf(file.path(outdir, paste0(projectname, '_customdim_scanchoices.pdf')))
+	# do_clusters(so, d=d, resolution=0.8, spread=4, mindist=0.01, nneighbours=30, clusterplotonly=TRUE)
+	# do_clusters(so, d=d[-1], resolution=0.8, spread=4, mindist=0.01, nneighbours=30, clusterplotonly=TRUE)
+	# do_clusters(so, d=d, resolution=0.8, spread=4, mindist=0.3, nneighbours=30, clusterplotonly=TRUE)
+	# do_clusters(so, d=d[-1], resolution=0.8, spread=4, mindist=0.01, nneighbours=50, clusterplotonly=TRUE)
+	# do_clusters(so, d=d, resolution=0.8, spread=4, mindist=0.3, nneighbours=50, clusterplotonly=TRUE)
+	# do_clusters(so, d=d[-1], resolution=0.8, spread=4, mindist=0.3, nneighbours=50, clusterplotonly=TRUE)
+	# do_clusters(so, d=d, resolution=0.8, spread=4, mindist=0.01, nneighbours=50, clusterplotonly=TRUE)
+	# do_clusters(so, d=d[-1], resolution=0.8, spread=4, mindist=0.3, nneighbours=30, clusterplotonly=TRUE)
+	# dev.off()
+} else {
+	nneighbours <- 50                                     # USER INPUT
+	mindist <- 0.01                                        # USER INPUT
+	resolution <- 0.8                                     # USER INPUT
+	spr <- 4
+	so <- do_clusters(so, d=d, resolution=resolution, spread=spr, mindist=mindist, nneighbours=nneighbours)
 
-# for (resolution in seq(0.3, 1.9, 0.1)) {
-# 	do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours, clusterplotonly=TRUE)
-# }
-
-resolution <- 0.8                                    # USER INPUT
-so <- do_clusters(so, d=d, resolution=resolution, mindist=mindist, nneighbours=nneighbours)
-
-# Checkpoint
-saveRDS(so, file = file.path(outdir, paste0(projectname, '_customdim.RDS')))
+	# Checkpoint
+	saveRDS(so, file = file.path(outdir, paste0(projectname, '_customdim.RDS')))
+}
 ```
-
-
-
 
 
 ```{r}
-# knitr::knit_exit()
+if (scanumap){
+	knitr::knit_exit()
+}
 ```
-
-
 
 
 
@@ -1534,14 +1701,14 @@ saveRDS(so, file = file.path(outdir, paste0(projectname, '_customdim.RDS')))
 ```{r projectionchoice}
 # USER-INPUT : choose UMAP projection.
 
-message("Using all the PCs")
-so <- readRDS(file.path(outdir, paste0(projectname, '_alldim.RDS')))
+# message("Using all the PCs")
+# so <- readRDS(file.path(outdir, paste0(projectname, '_alldim.RDS')))
 
 # message(paste("Using the first", npc, "PCs"))
 # so <- readRDS(file.path(outdir, paste0(projectname, '_topdim.RDS')))
 
-# message("Using the manually selected PCs")
-# so <- readRDS(file.path(outdir, paste0(projectname, '_customdim.RDS')))
+message("Using the manually selected PCs")
+so <- readRDS(file.path(outdir, paste0(projectname, '_customdim.RDS')))
 
 fwrite(dcast(as.data.table(table(so@meta.data[, c("Source", "seurat_clusters")])),
 						 Source ~ seurat_clusters, value.var="N"),
@@ -1551,7 +1718,7 @@ fwrite(dcast(as.data.table(table(so@meta.data[, c("Source", "seurat_clusters")])
 
 ## Cluster markers
 
-Genes uniquely up/down-regulated in each cluster. 
+Genes up-regulated in each cluster, relative to the other clusters collectively.
 
 ```{r dethresh}
 lfcthresh <- 0.25				# USER_INPUT
@@ -1569,47 +1736,51 @@ do_de(so, DEtabled=DEtabled, lfcthresh=lfcthresh, pctexpthresh=pctexpthresh, dif
 
 ## Pre-selected markers
 
+Manually specified markers of interest.
+
 ```{r markers, fig.height=10, fig.width=10}
 for (y in names(priors)) {
 	# y <- names(priors)[1]
 	print(y)
+	
+	### so@assays$RNA@data
+	
 	subg <- priors[[y]]
 	subg <- subg[!is.na(subg)]
 	
 	print( p1 <- plot_variancemeans(so, features=subg, topn=18) )
 	
-	# print( (DimPlot(so, reduction='pca', group.by='seurat_clusters') + coord_fixed() + theme(legend.position='none' )) |
-	# 			 (DimPlot(so, reduction='pca', group.by='Source') + coord_fixed() )
+	# Reminder of clusters
+	# print( (DimPlot(so, reduction='umap', group.by='seurat_clusters', label=TRUE) + 
+	# 					coord_fixed() + theme(legend.position='none') ) /
+	# 			 (DimPlot(so, reduction='umap', group.by='Source', split.by='Source') + 
+	# 			  	coord_fixed() + theme(legend.position='none' ) + labs(title=NULL) )
 	# )
-	print( (DimPlot(so, reduction='umap', group.by='seurat_clusters', label=TRUE) + 
-						coord_fixed() + theme(legend.position='none') ) /
-				 (DimPlot(so, reduction='umap', group.by='Source', split.by='Source') + 
-				  	coord_fixed() + theme(legend.position='none' ) + labs(title=NULL) )
-	)
-
 
 	for (x in rollslice(subg, 9)) {
 		# x <- rollslice(subg, 9)[[1]]
 		print( subg[x] )   # Make it easier to text-search the report for the relevant plots for a gene
 
-		print( FeaturePlot(so, reduction='umap', features = subg[x], coord.fixed=TRUE) )
-		
+		# Each marker split by source
+		for (z in subg[x]){
+			# z <- subg[x][1]
+			print( (FeaturePlot(so, reduction='umap', features = z, coord.fixed=TRUE) | plot_spacer()) /
+			       FeaturePlot(so, reduction='umap', features = z, coord.fixed=TRUE, split.by='Source') )
+			
+			plot_cell_density(so, cells=colnames(so@assays$RNA@data)[so@assays$RNA@data[z, ] > 0], 
+												split.by='Source', withumap=FALSE, relative=TRUE)
+		}
+	
+		## In larger blocks, without splitting by source
+		#print( FeaturePlot(so, reduction='umap', features = subg[x], coord.fixed=TRUE) )
 		print( DotPlot(so, features = subg[x], group.by='seurat_clusters', scale.min=0, scale.max=100) + RotatedAxis()  )
-		#
 		# print( VlnPlot(so, slot='data', features = subg[x], pt.size=0.01, group.by='seurat_clusters') + RotatedAxis()  )
-		#
-		
 		print( RidgePlot(so, features=subg[x], group.by='Source', stack=FALSE) & labs(y=NULL, x=NULL) )
-		# 
 		# print( DotPlot(so, features = subg[x], group.by='Source', scale.min=0, scale.max=100) + RotatedAxis()  )
-		#
 		# print( VlnPlot(so, features = subg[x], pt.size=0.01, group.by='Source') + RotatedAxis() )
 	}	
 }
 ```
-
-
-
 
 
 ```{r}
@@ -1619,46 +1790,27 @@ for (y in names(priors)) {
 
 
 
+# Signatures
 
-# Cell counts
+Aggregated scores of expression for specified gene groups.
 
-```{r cells}
-expthresh <- 0                                                 # USER-INPUT
-countselection <- function(selmtx, rows) {
-	message(paste("Cells with detectable expression of", paste(rownames(selmtx[rows,]), collapse=", ") ))
-	print( sum( colSums(selmtx[rows, ])==length(rows) ) )
-	
-}
+```{r sig, fig.height=12, fig.width=12}
+signatures <- lapply(as.list(signatures), function(x){ x[!is.na(x)] })
+so <- AddModuleScore(so, features=signatures, search=TRUE, assay='RNA', name='GeneSignature')
+names(so@meta.data)[(length(so@meta.data) - length(signatures) + 1):length(so@meta.data)] <- paste0('Signature_', names(signatures))
 
 
-# USER-INPUT
+l <- lapply (names(so@meta.data)[(length(so@meta.data) - length(signatures) + 1):length(so@meta.data)], function(x) {
+	p1 <- FeaturePlot(so, features=x, reduction="umap", cols=c('yellow', 'blue'), coord.fixed=TRUE)
+	p2 <- FeaturePlot(so, features=x, reduction="umap", cols=c('yellow', 'blue'), coord.fixed=TRUE, split.by="Source")
+	(p1 | plot_spacer()) / p2
+})
+print(l)
 
-
-# Conventional Dentritic Cells
-sel1 <- so@assays$RNA@data[cellstocount[[1]], ] > expthresh
-
-message("Cells with detectable expression of these genes:")
-print( rowSums(sel1) )
-countselection(sel1, c(1,2))
-countselection(sel1, c(1,3))
-countselection(sel1, 1:3)
-
-
-sel2 <- so@assays$RNA@data[cellstocount[[2]][cellstocount[[2]] %in% rownames(so)], ] > expthresh
-
-for (i in 1:nrow(sel2)) {
-	message("Cells with detectable expression of these genes:")
-	sel <- rbind(sel1[1,], sel2[i,])
-	rownames(sel) <- c(rownames(sel1)[1], rownames(sel2)[i]) 
-	print( rowSums(sel) )
-	countselection(sel, c(1,2))
-}
-
-message(paste("No detectable expression for", paste(cellstocount[[2]][!cellstocount[[2]] %in% rownames(so)], collapse=", ")), "in any of the cells.")
+# pdf(file.path(outdir, paste0(projectname, '_signatures.pdf')))
+# print(l)
+# dev.off()
 ```
-
-
-
 
 
 
