@@ -34,11 +34,13 @@ do_comparison=0
 guideLen=20
 legacy=""
 mageck_branch=""
+dxmem="50G"
+
 # Parse options.
-while getopts 'i:l:b:B:n:c:m:C:G:z:Z:p:s:u:d:O:g:M:A:e:Vr12L' flag; do
+while getopts 'i:l:b:B:n:c:m:C:G:z:Z:p:s:u:d:O:g:M:A:e:R:Vr12L' flag; do
   case "${flag}" in
     i) indir="${OPTARG}" ;;           # Input directory with unaligned BAMs
-    l) library="${OPTARG}" ;;         # sgRNA library
+    l) library="${OPTARG}" ;;         # sgRNA library (.txt)
     b) barcodes="${OPTARG}" ;;        # Demultiplexing table: lane \t sample_name \t barcode
     n) countsdir="${OPTARG}" ;;       # Output directory for FASTQs and counts table
     c) contrasts="${OPTARG}" ;;       # Comparison details for MAGECK nextflow: name \t control \t treatment \t norm_method \t fdr_method \t lfc_method \t cnv_correction \t filter
@@ -63,7 +65,7 @@ while getopts 'i:l:b:B:n:c:m:C:G:z:Z:p:s:u:d:O:g:M:A:e:Vr12L' flag; do
     E) genexref="${OPTARG}" ;;        # Append Entrez and other IDs from this genes-level file
     L) legacy='--legacy' ;;		      	# Use mageck 0.5.5 instead of latest
     B) mageck_branch="-r ${OPTARG}";;			# non-master branch
-    R) nontgt="-r ${OPTARG}";;		   	# NOT FUNCTIONAL !!! # File listing the non-targetting control guides
+    R) dxmem="${OPTARG}";;		   	    # demux RAM
     *) usage ;;
   esac
 done
@@ -100,7 +102,6 @@ wait_for_jobs(){
 }
 
 libname=$(basename $library)
-libname=${libname/.txt/}
 
 #################### DEMULTIPLEX & COUNT
 
@@ -114,10 +115,11 @@ if [ $do_pre -eq 1 ]; then
 
     echo ''
     echo "Demultiplexing BAM using anchor sequence."
+    # ,-o /dev/null ,-e /dev/null
     if [ $revcomp -eq 1 ]; then
-      fileutilities.py T ${indir} --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J demux ,--mem=50000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,--reverse_complement ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q
+      fileutilities.py T ${indir} --dir 'bam$' | fileutilities.py P --loop sbatch ,-J demux ,--mem=${dxmem} ,--qos=medium ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,--reverse_complement ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q
     else
-      fileutilities.py T ${indir} --dir 'bam$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J demux ,--mem=50000 ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q
+      fileutilities.py T ${indir} --dir 'bam$' | fileutilities.py P --loop sbatch ,-J demux ,--mem=${dxmem} ,--qos=medium ~/crispr-process-nf/bin/demultiplex_by_anchor-pos.py ,-i {abs} ,-D ${countsdir}/fastq ,-l ${countsdir}/fastq/{bas}.log ,-o $bcoffset ,-s $spacer ,-g $guideLen ,-b $barcodes ,-m $bcmm ,-M $smm ,-q 33 ,-Q
     fi
     wait_for_jobs demux
 
@@ -137,8 +139,8 @@ if [ $do_pre -eq 1 ]; then
     cd $cw
 
     echo ''
-    echo "Bowtie2 indexing."
-    srun bowtie2-build ${library/.txt/.fasta} ${library/.txt/}
+    echo "Bowtie2 indexing ${library}."
+    srun bowtie2-build ${library}.fasta ${library}
 
     echo ''
     echo "... waiting for gzip to catch up."
@@ -146,12 +148,12 @@ if [ $do_pre -eq 1 ]; then
 
     echo ''
     echo "Bowtie2 aligning."
-    fileutilities.py T ${countsdir}/fastq/*/ --dir 'fastq.gz$' 'fq.gz$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J bowtie2 ,--mem=10000 ,--cpus-per-task=4 ,--wrap "'bowtie2 -x ${library/.txt/}  -U {abs} --threads 4 -L 20 --score-min C,0,\-1 -N 0 --seed 42 2> ${countsdir}/aligned/${libname}/{bas}.log > ${countsdir}/aligned/${libname}/{bas}.sam'"
+    fileutilities.py T ${countsdir}/fastq/*/ --dir 'fastq.gz$' 'fq.gz$' | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J bowtie2 ,--mem=10000 ,--cpus-per-task=4 ,--wrap "'bowtie2 -x ${library}  -U {abs} --threads 4 -L 20 --score-min C,0,\-1 -N 0 --seed 42 2> ${countsdir}/aligned/${libname}/{bas}.log > ${countsdir}/aligned/${libname}/{bas}.sam'"
     wait_for_jobs bowtie2
 
     echo ''
     echo "Quantifying with featureCounts."
-    fileutilities.py T ${countsdir}/aligned/${libname}/ --dir sam | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J fcount ,--mem-per-cpu=5000 ,--cpus-per-task=4 ,--wrap "'featureCounts -T 4 -a ${library/.txt/.saf} -F SAF -o ${countsdir}/counts/${libname}/{bas}.txt {abs}'"
+    fileutilities.py T ${countsdir}/aligned/${libname}/ --dir sam | fileutilities.py P --loop sbatch ,-o /dev/null ,-e /dev/null ,-J fcount ,--mem-per-cpu=5000 ,--cpus-per-task=4 ,--wrap "'featureCounts -T 4 -a ${library}.saf -F SAF -o ${countsdir}/counts/${libname}/{bas}.txt {abs}'"
     wait_for_jobs fcount
 
     echo ''

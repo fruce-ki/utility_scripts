@@ -774,7 +774,7 @@ def main(args):
                                 Arguments: [1] (str) anchor sequence, [2] (int) mismatches allowed in the anchor (use 'None' if anchor is regex),\
                                 [3] (char) wildcard character(s) (like 'N' for unknown nucleotides),\
                                 [4] (int) barcode offset (+n downstream of match end, \\-n upstream of match start, \
-                                escaping the minus sign is important), [5] (int) barode length, [6] Number of reads to inspect or 'all'.")
+                                escaping the minus sign is important), [5] (int) barode length, [6] Number of reads to inspect.")
     parser.add_argument('--fqPatternStats', type=str, nargs=6,
                                 help="Number and location of matches of the pattern in the reads of FASTQ files. \
                                 Arguments: [1] (str) anchor sequence, [2] (int) mismatches allowed in the anchor (use 'None' if anchor is regex),\
