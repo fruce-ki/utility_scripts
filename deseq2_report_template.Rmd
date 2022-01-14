@@ -1,13 +1,13 @@
 ---
-title: "DE Report"
-author: "Kimon"
+title: "DE Quick View"
+author: "Kimon Froussios"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: 
   html_document:
     code_folding: hide
     toc: true
-    toc_float: true
-    collapsed: false
+    toc_float:
+      collapsed: false
 params:
   selfname: ""
   derds: "null.RDS"     # MUST be specified, DESeq2 Dataset object file (before model creation)
@@ -17,10 +17,9 @@ params:
   baseDir: "."
   pcutoff: 0.05
   lfcthreshold: 1
-  ntop: 50              # maximum number of hits to list
-  ppen: 5               # Weight factor for -log10p vs l2fc, when selecting hits by distance from the origin of the axes of the DE volcanoes.
-  minL: 0.75            # Minimum component loading, for selection of features to report in PCA
-  minCount: 10          # Minimum sum of counts across samples per gene (already applied, just here for parameter documentation in the report)
+  ntop: 50             # maximum number of hits to list
+  minMean: 10          # Minimum sum of counts across samples per gene (already applied, just here for parameter documentation in the report)
+  minSingle: 100
   filterBaseMean: True  # DESeq2 independent filtering
   reducedFormula: 'NULL'
   roundrobin: True      # do all-vs-all comparisons (for single-factor comparisons only). Otherwise only vs assigned reference condition.
@@ -41,6 +40,7 @@ library(plotly)
 library(htmltools)
 library(patchwork)
 library(ggrepel)
+library(ggdendro)
 
 # ggplot2 base theme
 theme_set(theme_bw())
@@ -49,9 +49,7 @@ data.table::setDTthreads(1L)
 
 options(scipen=2)
 
-# params <- list(selfname = paste0(paste(autoname, gsub(' |~', '', opt$designFormula), sep='_'), '_deseq2.html'), derds = ddsrds, rmrds = rpmrds, ntop = opt$ntop, pcutoff = opt$pcutoff, lfcthreshold = opt$lfcthreshold, baseDir = opt$baseDir, resultsDir = opt$resultsDir, prefix = autoname, ppen = 5, minL=0.75, minCount=opt$minCount, filterBaseMean=opt$bmF, reducedFormula = opt$reducedFormula, roundrobin = opt$all)
-
-nflag <- 20
+# params <- list(selfname = name, derds = ddsrds, rmrds = rpmrds, ntop = opt$ntop, pcutoff = opt$pcutoff, lfcthreshold = opt$lfcthreshold, baseDir = opt$baseDir, resultsDir = opt$resultsDir, prefix = autoname, ppen = 5, minMean=opt$minMean, minSingle=100, filterBaseMean=opt$bmF, reducedFormula = opt$reducedFormula, roundrobin = opt$all)
 
 if (!is.null(params$reducedFormula)){
   if (params$reducedFormula == 'NULL') {
@@ -63,148 +61,155 @@ if (!is.null(params$reducedFormula)){
 ```{r preprocess}
 deobj <- readRDS(params$derds)
 rpm <- readRDS(params$rmrds)
-# ctsmat <- counts(deobj)
-message(params$derds)
 
 vstmat = NULL
 tryCatch(vstmat <- assay(vst(deobj, blind=FALSE)),     # Variance stabisized counts,
          error = function(e) {
-           stop("WARNING: Only one replicate per condition is available! DESeq2 no longer allows or supports estimating variances by pooling samples across conditions.")
+           print(e)
+           stop("At least two samples per condition are expected, and at least 1000 expressed genes in the relevant samples.")
          }
 )
 
 cD <- colData(deobj)[, 1:length(colData(deobj)), drop=FALSE]  # before model building, there in no size factor as last column
 
-cat(paste("Report: ", sub('.html', '', params$selfname, fixed=TRUE)))
+cat(paste("Prepared input: ", params$derds))
+cat(paste("Report name: ", params$selfname))
 
-cat(paste("Min allowed sum of raw counts across relevant samples:", params$minCount))
+cat(paste("Min required mean raw counts across relevant samples:", params$minMean))
+cat(paste("Min required raw count in a single sample when the min mean is not met:", params$minSingle))
 cat(paste("DESeq2 independent filtering:", params$filterBaseMean))
 cat(paste("Significance level:", params$pcutoff))
 cat(paste0("log2FC threshold: ", params$lfcthreshold, " , (i.e. ", 2 ^ params$lfcthreshold, "-fold change)"))
 cat(paste("Max number of top hits to highlight:", params$ntop))
-cat(paste("Max number of top hits to label in plots:", nflag))
 cat(paste("Round-robin comparisons between treatments:", params$roundrobin))
 ```
 
 ```{r functionDE}
 # DE
-do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, ppen = params$ppen, 
-                        pcutoff = params$pcutoff, lfcthreshold = params$lfcthreshold, filterBM=params$filterBaseMean){
+do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, 
+                        pcutoff = params$pcutoff, lfcthreshold = params$lfcthreshold, filterBM=params$filterBaseMean, prefix=params$prefix){
   # contrast <- coeffs[1]
-  
+  highlight <- c("non-significant", "significant, FC low", "significant", paste("significant, top", params$ntop))
+  hlcol <- c("grey50", "black", "blue", "red")
+  names(hlcol) <- highlight
+
   # Get DE for given contrast
   lfc <- results(dds, name=contrast, independentFiltering = filterBM, alpha=pcutoff)
   shrink <- lfcShrink(dds, coef=contrast, type='apeglm')
   
   lfc <- cbind(data.table(name=rownames(lfc)), as.data.table(lfc))
-  lfc[, mlog10p := -log10(padj)] [, type := "raw_L2FC"]
+  lfc[, mlog10p := -log10(padj)]
   shrink <- cbind(data.table(name=rownames(shrink)), as.data.table(shrink))
-  shrink[, mlog10p := -log10(padj)] [, type := "shrunken_L2FC"] [, absl2fc := abs(log2FoldChange)]
-  shrink[, meetthresh := absl2fc >= lfcthreshold & padj < pcutoff]
+  shrink[, mlog10p := -log10(padj)] 
+  shrink[, absl2fc := abs(log2FoldChange)]
   
-  # Heuristic selection, by eukledian distance, of top hits to highlight when there are more hits than the given limit
-  shrink[complete.cases(shrink), dist := sqrt((mlog10p/ppen)^2 + log2FoldChange^2)]  # logp is usually much bigger than logfc, so down-weight it a little
-  setorder(shrink, -dist, -mlog10p, -absl2fc, na.last = TRUE)
-  shrink[, istop := FALSE]
-  lfc[, istop := FALSE]
-  shrink[1:ntop, istop := meetthresh]  # The top N hits, must first be hits.
-  lfc[name %in% shrink[(istop), name], istop := TRUE]
+  # Combine shrunken and non-shrunken LFC tables for output, minus identical columns
+  outtab <- merge(lfc, shrink[, ! names(shrink) %in% c('baseMean', 'pvalue'), with=FALSE], by="name", all=TRUE, suffixes=c('', '.shrink'))
   
-  # if (!any(shrink$meetthresh)) {
-  #   warning(paste("WARNING -", contrast, "- No points meet the L2FC and Padj criteria!"))
-  # }
+  ## Heuristic selection of top hits to highlight, by eucledian distance from origin.
+  
+  # Thresholds.
+  outtab[, meetthresh := !is.na(padj) & absl2fc >= lfcthreshold & padj < pcutoff]
+  
+  # Down-weight mlog10p for a more balanced selection not dominated by p value.
+  ppen <- max(outtab$mlog10p, na.rm=TRUE) / max(outtab$absl2fc, na.rm=TRUE)  # "penalty" factor determined by axes ranges
+  outtab[, dist := sqrt((mlog10p / ppen) ^ 2 + log2FoldChange.shrink ^ 2)]
+  setorder(outtab, -dist, -absl2fc, -mlog10p, na.last = TRUE)
+  
+  outtab[, istop := FALSE]
+  outtab[(meetthresh), row := 1:.N]
+  outtab[meetthresh & row <= ntop, istop := TRUE]  # The top N hits, but they must first actually be hits.
+  outtab[, dist := NULL] [, absl2fc := NULL] [, row := NULL]  # they did their job
   
   # Filter out the uninteresting points, to make it lightweight and ggplotly-friendly
-  subfc <- shrink[(meetthresh), ]
+  subfc <- outtab[(meetthresh), ]
   # Handle freak cases.
   if (nrow(subfc) <= ntop) {
-    subfc <- shrink[abs(log2FoldChange) >= 0.5 & padj < 0.1, ] 
+    subfc <- outtab[abs(log2FoldChange) >= 0.5 & padj < 0.1, ] 
     # Relax thresholds, so there's more context to display in the interactive volcano.
   }
   if (nrow(subfc) < ntop) {
-    subfc <- shrink[mlog10p > 0.1, ]
+    subfc <- outtab[mlog10p > 0.1, ]
     # Scrape the bottom of the barel.
   }
   if (nrow(subfc) < ntop) {
-    subfc <- head(shrink, n=ntop)
+    subfc <- head(outtab, n=ntop)
     # Remove thresholds, If subfc is empty, the code breaks. 
     # It's too much hassle to code alternatives for all the places subfc is used.
   }
   
-  
-  # Choose subset of top genes to flag, by order of shrunken LFC
-  if (any(shrink$istop)){
-    flags <- head(shrink[(istop), ][order(dist, decreasing=TRUE)][, name], n=nflag)
-  } else {
-    flags <- head(shrink[, ][order(abs(log2FoldChange), decreasing=TRUE)][, name], n=5)
-  }
-  
-  # Combine shrunken and non-shrunk LFC tables for output.
-  outtab <- rbind(lfc, shrink, fill=TRUE)
-  outtab[, addflag := FALSE]
-  outtab[, addflag := name %in% flags]
-  outtab[(addflag), flag := name]
-  
-  # Volcanos
+  ## Volcanos
   
   # Static image.
-  pv1 <- ggplot(NULL, 
-                aes(x=log2FoldChange, y=mlog10p, 
-                    shape= name %in% subfc[(istop), name], 
-                    colour=name %in% subfc[(istop), name], 
-                    label=flag)) + 
-            facet_grid( . ~ type) +
-            geom_point(data=outtab, size=rel(0.8), alpha=0.5) +
-            geom_vline(xintercept = lfcthreshold, linetype="dotted",  colour="steelblue1") + 
-            geom_vline(xintercept = -lfcthreshold, linetype="dotted",  colour="steelblue1") + 
-            geom_hline(yintercept = -log10(pcutoff), linetype="dotted",  colour="steelblue1") + 
-            geom_text_repel(data=outtab[(addflag),], size=rel(2.5), segment.size = 0.3, min.segment.length=0, arrow = arrow(length = unit(0.008, "npc")), max.overlaps=1e4, force=1, force_pull=1) +
+  pv1 <- ggplot(outtab, 
+                aes(x=log2FoldChange, y=mlog10p, colour=istop, label=name)) + 
+            geom_vline(xintercept = lfcthreshold, linetype="dashed",  colour="steelblue1") + 
+            geom_vline(xintercept = -lfcthreshold, linetype="dashed",  colour="steelblue1") + 
+            geom_hline(yintercept = -log10(pcutoff), linetype="dashed",  colour="steelblue1") + 
+            geom_point(alpha=0.5) +
+            geom_text_repel(data=outtab[(istop), ], size=rel(2.5),  colour="red",
+                            segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=1, force_pull=1) +
             scale_colour_manual(values=c("black", "red")) +
-            scale_shape_manual(values=c(16, 17)) +
             labs(x='log2( FC )', y='-log10( Padj )', title=contrast) +
             theme(legend.position = "none", panel.grid = element_blank())
   
+  pv2 <- ggplot(outtab, 
+                aes(x=log2FoldChange.shrink, y=mlog10p.shrink, colour=istop, label=name)) + 
+            geom_vline(xintercept = lfcthreshold, linetype="dashed",  colour="steelblue1") + 
+            geom_vline(xintercept = -lfcthreshold, linetype="dashed",  colour="steelblue1") + 
+            geom_hline(yintercept = -log10(pcutoff), linetype="dashed",  colour="steelblue1") + 
+            geom_point(alpha=0.5) +
+            geom_text_repel(data=outtab[(istop), ], size=rel(2.5), colour="red",
+                            segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=1, force_pull=1) +
+            scale_colour_manual(values=c("black", "red")) +
+            labs(x='log2( shrunken FC )', y='-log10( Padj )', title=contrast) +
+            theme(legend.position = "none", panel.grid = element_blank())
+  
   # Lighter image for interactive plotly. Only points that pass thresholds.
-  pv2 <- ggplot(subfc, 
-                aes(x=log2FoldChange, y=mlog10p, label=name,
-                    shape= name %in% subfc[(istop), name],
-                    colour=name %in% subfc[(istop), name])) + 
+  pvly <- ggplot(subfc, 
+                aes(x=log2FoldChange, y=mlog10p, label=name, colour=istop)) + 
             geom_vline(xintercept = lfcthreshold, linetype="dotted",  colour="steelblue1") + 
             geom_vline(xintercept = -lfcthreshold, linetype="dotted",  colour="steelblue1") + 
             geom_hline(yintercept = -log10(pcutoff), linetype="dotted",  colour="steelblue1") + 
             geom_point(alpha=0.5) +
             scale_colour_manual(values=c("black", "red")) +
-            scale_shape_manual(values=c(16, 17)) +
-            labs(x='log2( FC )', y='-log10( Padj )', title=contrast) +
+            labs(x='log2( shrunken FC )', y='-log10( Padj )', title=contrast) +
             theme(legend.position = "none", panel.grid = element_blank())
   
-  # MA
+  ## MA
   
   # Static image.
-  pma1 <- ggplot(outtab, 
-                aes(x=baseMean, y=log2FoldChange, alpha=padj < pcutoff, 
-                    shape= name %in% subfc[(istop), name],
-                    colour=name %in% subfc[(istop), name],
-                    label=name)) + 
-            facet_grid( . ~ type) +
-            geom_hline(yintercept = 0,  colour="grey50") + 
-            geom_point(size=rel(0.8)) +
-            geom_hline(yintercept = lfcthreshold, linetype="dotted",  colour="steelblue1") + 
-            geom_hline(yintercept = -lfcthreshold, linetype="dotted",  colour="steelblue1") + 
-            geom_text_repel(data=outtab[(addflag),], size=rel(2.5), segment.size = 0.3, min.segment.length=0, arrow = arrow(length = unit(0.008, "npc")), max.overlaps=1e4, force=1, force_pull=1) +
+  pma1 <- ggplot(NULL, 
+                aes(x=baseMean, y=log2FoldChange, label=name)) + 
+            geom_hline(yintercept = 0,  colour="black") + 
+            geom_point(data=outtab[padj >= pcutoff, ], colour='grey50', alpha=0.4, size=rel(0.8)) +
+            geom_point(data=outtab[padj < pcutoff, ], colour='black', alpha=0.7) +
+            geom_point(data=outtab[name %in% subfc[(istop), name], ], colour='red') +
+            geom_hline(yintercept = lfcthreshold, linetype="dashed",  colour="steelblue1") + 
+            geom_hline(yintercept = -lfcthreshold, linetype="dashed",  colour="steelblue1") + 
+            geom_text_repel(data=outtab[(istop), ], colour="red", size=rel(2.5), segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=1, force_pull=1) +
             scale_x_log10() +
             annotation_logticks(base=10, sides='b') +
-            scale_colour_manual(values=c("black", "red")) +
-            # scale_alpha_continuous(na.value=0.05) +
-            scale_alpha_manual(values=c(0.25, 0.8), na.value=0.05) +
             labs(y='log2( FC )', y='baseMean', title=contrast) +
             theme(legend.position = "none", panel.grid = element_blank())
   
+  pma2 <- ggplot(NULL, 
+                aes(x=baseMean, y=log2FoldChange.shrink, label=name, shape= istop)) + 
+            geom_hline(yintercept = 0,  colour="black") + 
+            geom_point(data=outtab[padj >= pcutoff, ], colour='grey50', alpha=0.4, size=rel(0.8)) +
+            geom_point(data=outtab[padj < pcutoff, ], colour='black', alpha=0.7) +
+            geom_point(data=outtab[(istop), ], colour='red') +
+            geom_hline(yintercept = lfcthreshold, linetype="dashed",  colour="steelblue1") + 
+            geom_hline(yintercept = -lfcthreshold, linetype="dashed",  colour="steelblue1") + 
+            geom_text_repel(data=outtab[name %in% subfc[(istop), name],], colour="red", size=rel(2.5), segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=1, force_pull=1) +
+            scale_x_log10() +
+            annotation_logticks(base=10, sides='b') +
+            labs(y='log2( shrunken FC )', y='baseMean', title=contrast) +
+            theme(legend.position = "none", panel.grid = element_blank())
+  
   # Lighter image for interactive plotly. Only points that pass thresholds.
-  pma2 <- ggplot(subfc, 
-                aes(x=log10(baseMean), y=log2FoldChange, label=name,
-                    shape= name %in% subfc[(istop), name],
-                    colour=name %in% subfc[(istop), name])) + 
+  pmaly <- ggplot(subfc, 
+                aes(x=log10(baseMean), y=log2FoldChange, label=name, colour=istop)) + 
             geom_hline(yintercept = 0,  colour="grey50") + 
             geom_point(alpha=0.5) +
             geom_hline(yintercept = lfcthreshold, linetype="dotted",  colour="steelblue1") + 
@@ -213,7 +218,7 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, p
             labs(y='log2( FC )', y='log10( Mean )', title=contrast) +
             theme(legend.position = "none", panel.grid = element_blank())
   
-  # Expression heatmap of ntop genes that meet thresholds
+  ## Expression heatmap of ntop genes that meet thresholds
   
   # Get the counts for the relevant samples only
   mM <- attr(dds, "modelMatrix")
@@ -243,9 +248,6 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, p
     cn <- colnames(selvst)
     rn <- rownames(selvst)
     
-    # Scale VST to log(RPM), so they can share the fill gradient.
-    # selvst <- selvst * (median(selcnt) / median(selvst))
-    
     # Tidy
     selcnt <- as.data.table(cbind(data.table(name=rownames(selcnt)), as.data.frame(selcnt)))
     selcnt[, name := factor(name, ordered=TRUE, levels=rn)]
@@ -274,7 +276,7 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, p
   selvst[, name := factor(name, ordered=TRUE, levels=rn[hcfit$order])]
   selvst[, sample := factor(sample, ordered=TRUE, levels=rownames(coldata))]
   
-  pe1 <- ggplot(selcnt, aes(x=sample, y=name, fill=log10(RPM))) +
+  ph1 <- ggplot(selcnt, aes(x=sample, y=name, fill=log10(RPM))) +
             geom_tile() +
             facet_grid(. ~ type) +
             scale_fill_gradient(high="white", low="darkgreen", na.value = "black") +
@@ -282,7 +284,7 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, p
             theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
                   panel.grid = element_blank())
   
-  pe2 <- ggplot(selvst, aes(x=sample, y=name, fill=VST_count)) +
+  ph2 <- ggplot(selvst, aes(x=sample, y=name, fill=VST_count)) +
             geom_tile() +
             facet_grid(. ~ type) +
             scale_fill_gradient(high="white", low="darkgreen", na.value = "black") +
@@ -290,55 +292,170 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, p
             theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
                   panel.grid = element_blank())
   
-  # Table
+  ## Expression scatters
   
-  # Add shrunken LFC column to normal LFC table. 
-  # Previously the tables were joined in long format, which is great for facetting in plots. For human use, wide format is preferable.
-  # dcast is used here as a glorified rename, but without changing the original (it made more sense when this block was located earlier in the function)
-  outtab <- merge(dcast(lfc, ... ~ type, value.var = 'log2FoldChange'),
-                  dcast(shrink, ... ~ type, value.var = 'log2FoldChange')[, .(name, shrunken_L2FC)], 
-                  by='name')
+  # Add expression
   outtab[, refStDev := sqrt(rowVars(counts(dds)[outtab$name, refs, drop=FALSE])) ]
   outtab[, treatStDev := sqrt(rowVars(counts(dds)[outtab$name, treats, drop=FALSE])) ]
   outtab[, refMean := rowMeans(counts(dds)[outtab$name, refs, drop=FALSE]) ]
   outtab[, treatMean := rowMeans(counts(dds)[outtab$name, treats, drop=FALSE]) ]
-  outtab[, refMeanRPM := rowMeans(rpms[outtab$name, refs, drop=FALSE]) ]
-  outtab[, treatMeanRPM := rowMeans(rpms[outtab$name, treats, drop=FALSE]) ]
   
+  outtab <-merge(outtab,
+                 data.table(name=rownames(rpms),
+                            refMeanRPM=rowMeans(rpms[, refs]),
+                            treatMeanRPM=rowMeans(rpms[, treats]) ),
+                 all=TRUE, by="name")
+  
+  # Increment the 0s so they survive the log-transformation, but in a way they don't mix with non-zero data.
+  # If data has been pre-filtered with minMean, there should be no remaining zeros.
+  zeros <- min(outtab[refMeanRPM > 0, refMeanRPM], outtab[treatMeanRPM > 0, treatMeanRPM]) / 10
+  
+  outtab[, category := highlight[1]]
+  outtab[!is.na(padj.shrink) & padj.shrink < params$pcutoff & !meetthresh, category := highlight[2]]
+  outtab[meetthresh & !istop, category := highlight[3]]
+  outtab[(istop), category := highlight[4]]
+  outtab[, category := factor(category, ordered=TRUE, levels=highlight)]
+     
+  pe1 <- ggplot(NULL, aes(x=refMeanRPM + zeros, y=treatMeanRPM + zeros, label=name, colour=category)) +
+      geom_abline(intercept = 0, slope = 1, colour='black') +
+      geom_point(data=outtab[category == highlight[1], ], alpha=0.4, size=rel(0.8)) +
+      geom_point(data=outtab[category == highlight[2], ], alpha=0.7, size=rel(0.8)) +
+      geom_point(data=outtab[category == highlight[3], ], alpha=0.7) +
+      geom_point(data=outtab[category == highlight[4], ]) +
+      geom_label_repel(data=outtab[category == highlight[4], ], size=rel(2.5), colour="red",
+                       segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=10, force_pull=5) +
+      scale_x_log10() + 
+      scale_y_log10() +
+      scale_colour_manual(values=hlcol) +
+      annotation_logticks(base=10, sides='lrtb') +
+      labs(title=contrast, x='reference Mean RPM', y='treatment Mean RPM') +
+      theme(panel.grid.minor = element_blank())
+  
+  pe1ly <- ggplot(NULL, aes(x=refMeanRPM + zeros, y=treatMeanRPM, label=name, colour=category)) +
+      geom_abline(intercept = 0, slope = 1, colour='black') +
+      geom_point(data=outtab[category == highlight[3], ], alpha=0.7) +
+      geom_point(data=outtab[category == highlight[4], ]) +
+      scale_x_log10() + 
+      scale_y_log10() +
+      scale_colour_manual(values=hlcol) +
+      labs(title=contrast, x='reference Mean RPM', y='treatment Mean RPM') +
+      theme(legend.position = "none", panel.grid.minor = element_blank()) 
+  
+  pe2 <- ggplot(NULL, aes(x=refMeanRPM + zeros, y=refStDev, label=name, colour=category)) +
+      geom_point(data=outtab[category == highlight[1], ], alpha=0.4, size=0.8) +
+      geom_point(data=outtab[category == highlight[2], ], alpha=0.7, size=0.8) +
+      geom_point(data=outtab[category == highlight[3], ], alpha=0.7) +
+      geom_point(data=outtab[category == highlight[4], ]) +
+      geom_label_repel(data=outtab[category == highlight[4], ], size=rel(2.5), colour="red",
+                       segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=10, force_pull=5) +
+      scale_x_log10() + 
+      scale_y_log10() +
+      scale_colour_manual(values=hlcol) +
+      annotation_logticks(base=10, sides='lrtb') +
+      labs(title=contrast, x='reference Mean RPM', y='reference St Dev') +
+      theme(panel.grid.minor = element_blank()) 
+  
+  pe3 <- ggplot(NULL, aes(x=treatMeanRPM, y=treatStDev, label=name, colour=category)) +
+      geom_point(data=outtab[category == highlight[1], ], alpha=0.4, size=0.8) +
+      geom_point(data=outtab[category == highlight[2], ], alpha=0.7, size=0.8) +
+      geom_point(data=outtab[category == highlight[3], ], alpha=0.7) +
+      geom_point(data=outtab[category == highlight[4], ]) +
+      geom_label_repel(data=outtab[category == highlight[4], ], size=rel(2.5), colour="red",
+                       segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=10, force_pull=5) +
+      scale_x_log10() + 
+      scale_y_log10() +
+      scale_colour_manual(values=hlcol) +
+      annotation_logticks(base=10, sides='lrtb') +
+      labs(title=contrast, x='treatment Mean RPM', y='treatment St Dev') +
+      theme(panel.grid.minor = element_blank()) 
+  
+  ## Table pt2
+  
+  hashits <- any(outtab[, meetthresh], na.rm=TRUE)
+    
   # Prepare column names for merging the files later
-  setnames(outtab, 
+  prefix <- paste(prefix,
+                   # paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(dds), perl=TRUE), collapse=''),
+                   contrast, sep='.')
+  setnames(outtab,
            c(names(outtab)[1],              # keep uniform name across tables for the joining key
-             paste(params$prefix, 
-                   paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(dds), perl=TRUE), collapse=''), 
-                   contrast, 
-                   names(outtab)[2:length(outtab)], sep='.') ) )       # make the other columns unique
+             paste(prefix,                  # make the other columns unique
+                   names(outtab)[2:length(outtab)], sep='.') ) )
   
   
   return(list(contrast=contrast, 
-              pv1=pv1, pv2=ggplotly(pv2, dynamicTicks = TRUE), # pv1a=pv1a,
-              pma1=pma1, pma2=ggplotly(pma2, dynamicTicks = TRUE), # pma1a=pma1a,
-              pe1=pe1, pe2=pe2, 
-              tophits=rn, hashits=any(shrink$meetthresh, na.rm=TRUE),
+              pv1=pv1, pv2=pv2, pvly=ggplotly(pvly, dynamicTicks = TRUE),
+              pma1=pma1, pma2=pma2, pmaly=ggplotly(pmaly, dynamicTicks = TRUE),
+              pe1=pe1, pe2=pe2, pe3=pe3, pe1ly=ggplotly(pe1ly, dynamicTicks = TRUE),
+              ph1=ph1, ph2=ph2, 
+              tophits=rn, hashits=hashits,
               outtab=outtab))
-  # resall <- list(list(contrast=contrast, pv1=pv1, pv2=ggplotly(pv2, dynamicTicks = TRUE), pma1=pma1, pma2=ggplotly(pma2, dynamicTicks = TRUE), pe1=pe1, pe2=pe2,tophits=rn, hashits=any(shrink$meetthresh), outtab=outtab))
 }
 ```
 
 ```{r functionC}
 # Correlations
-my_pairwise_internal_corels <- function(mat = rpm, samples = row.names(colData(deobj)), method = "pearson", prefix=file.path(params$baseDir, params$resultsDir, params$prefix), txs=3) {
+my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NULL, txs=3, minMean=0, minSingle=0, sizefactor=1) {
+  # mat <- counts; samples <- covars$Samp
+  
+  if (method == "pearson") libsizes <- colSums(mat)
+  # Filter
+  if (minMean != 0 | minSingle != 0) {
+    mat <- mat[rowSums(mat >= minSingle) >= 1 | rowMeans(mat) >= minMean, ]
+  } else {
+    mat <- mat[rowSums(mat) > 0, ]
+  }
+  # Scale
+  if (method == "pearson") {
+    mat <- sweep(mat, 2, libsizes, `/`) * sizefactor
+  }
+
   # Correlations
   cormat <- cor(mat, method=method)
   
   # Cluster
   hcfit <- hclust(dist(scale(cormat, center=TRUE)))
   rn <- rownames(cormat)
-  cormat <- cormat[samples, samples]                    # Supplied order
-  cormat2 <- cormat                                     # Duplicate on which to delete the diagonal with original order.
-  cormat3 <- cormat[rn[hcfit$order], rn[hcfit$order]]   # Duplicate in clustered order.
-  cormat4 <- cormat3                                    # duplicate on which to delete the diagonal with in clustered order.
   
-  # Delete diagonal half for the numeric labels.
+  # Make dendrogram. https://stackoverflow.com/questions/42047896/joining-a-dendrogram-and-a-heatmap
+  dend <- as.dendrogram(hcfit)
+  dend_data <- dendro_data(dend)
+  # Setup the data, so that the axes are exchanged, instead of using coord_flip()
+  segment_data <- with(
+      segment(dend_data), 
+      data.frame(x = y, y = x, xend = yend, yend = xend))
+  # Use the dendrogram label data to position the sample labels
+  sample_pos_table <- with(
+      dend_data$labels, 
+      data.frame(y_center = x, Sample = as.character(label), height = 1))
+  # Limits for the vertical axes
+  sample_axis_limits <- with(
+      sample_pos_table, 
+      c(min(y_center - 0.5 * height), max(y_center + 0.5 * height))
+  ) + 0.1 * c(-1, 1) # extra spacing: 0.1
+  # Dendrogram plot
+  pd <- ggplot(segment_data) + 
+    geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) + 
+    scale_x_reverse(expand = c(0, 0.5),
+                    position = "top") + 
+    scale_y_continuous(position = "right",
+                       breaks = sample_pos_table$y_center, 
+                       labels = sample_pos_table$Sample, 
+                       limits = sample_axis_limits, 
+                       expand = c(0, 0)) + 
+    labs(x = NULL, y = NULL) +
+    theme_minimal() + 
+    theme(panel.grid = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks.y = element_blank())
+
+  
+  # Create duplicates for different plot styles
+  cormat <- cormat[samples, samples]                    # Supplied order
+  cormat2 <- cormat                                     # Duplicate in which to delete below the diagonal.
+  cormat3 <- cormat[rn[hcfit$order], rn[hcfit$order]]   # Duplicate in clustered order.
+  cormat4 <- cormat3                                    # Duplicate in clustered order in which to delete below the diagonal.
+  # Delete below diagonal half for the numeric labels.
   for (r in 1:nrow(cormat2)) {
     for (c in 1:ncol(cormat2)) {
       if (c <= r) {
@@ -360,6 +477,7 @@ my_pairwise_internal_corels <- function(mat = rpm, samples = row.names(colData(d
   cormat[, observation1 := factor(rn, ordered=TRUE, levels=rn)]
   cormat <- melt(cormat, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
   cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rn)]
+  # cormat <- merge(cormat, sample_pos_table, by.x="observation2", by.y="Sample", all.x=TRUE)
   
   rn2 <- rownames(cormat2)
   cormat2 <- as.data.table(cormat2)
@@ -367,12 +485,14 @@ my_pairwise_internal_corels <- function(mat = rpm, samples = row.names(colData(d
   cormat2 <- melt(cormat2, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
   cormat2[, observation2 := factor(observation2, ordered=TRUE, levels=rn2)]
   cormat2 <- cormat2[!is.na(Correlation)]
+  # cormat2 <- merge(cormat2, sample_pos_table, by.x="observation2", by.y="Sample", all.x=TRUE)
   
   rn3 <- rownames(cormat3)
   cormat3 <- as.data.table(cormat3)
   cormat3[, observation1 := factor(rn3, ordered=TRUE, levels=rn3)]
   cormat3 <- melt(cormat3, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
   cormat3[, observation2 := factor(observation2, ordered=TRUE, levels=rn3)]
+  # cormat3 <- merge(cormat3, sample_pos_table, by.x="observation2", by.y="Sample", all.x=TRUE)
   
   rn4 <- rownames(cormat4)
   cormat4 <- as.data.table(cormat4)
@@ -380,6 +500,7 @@ my_pairwise_internal_corels <- function(mat = rpm, samples = row.names(colData(d
   cormat4 <- melt(cormat4, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
   cormat4[, observation2 := factor(observation2, ordered=TRUE, levels=rn4)]
   cormat4 <- cormat4[!is.na(Correlation)]
+  # cormat4 <- merge(cormat4, sample_pos_table, by.x="observation2", by.y="Sample", all.x=TRUE)
   
   # Text colour switch for the dynamic range
   m <- min(cormat4$Correlation, na.rm=TRUE)
@@ -387,45 +508,45 @@ my_pairwise_internal_corels <- function(mat = rpm, samples = row.names(colData(d
   colourswitch <- c( m + 0.49 * (M-m),  m + 0.51 * (M-m) )
   
   
-  # Square. Custom order. No values. Full range.
-  p1 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
-    geom_tile(aes(fill=Correlation)) +
-    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
-    scale_x_discrete(position = "top") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-          panel.grid = element_blank() )
-  
-  # Square. Custom order. No values. Dynamic range.
-  p1a <- ggplot(cormat, aes(x=observation1, y=observation2)) +
-    geom_tile(aes(fill=Correlation)) +
-    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
-    scale_x_discrete(position = "top") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-          panel.grid = element_blank() )
-  
-  # Triangle. Custom order. With values. Full range.
-  p2 <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
-    geom_tile(aes(fill=Correlation)) +
-    geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
-    scale_x_discrete(position = "top") +
-    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
-    scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-          panel.grid = element_blank() )
-  
-  # Triangle. Custom order. With values. Dynamic range.
-  p2a <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
-    geom_tile(aes(fill=Correlation)) +
-    geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
-    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "transparent" ) +
-    scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
-    scale_x_discrete(position = "top") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-          panel.grid = element_blank() )
+  # # Square. Custom order. No values. Full range.
+  # p1 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+  #   geom_tile(aes(fill=Correlation)) +
+  #   scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
+  #   scale_x_discrete(position = "top") +
+  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #         panel.grid = element_blank() )
+  # 
+  # # Square. Custom order. No values. Dynamic range.
+  # p1a <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+  #   geom_tile(aes(fill=Correlation)) +
+  #   scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
+  #   scale_x_discrete(position = "top") +
+  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #         panel.grid = element_blank() )
+  # 
+  # # Triangle. Custom order. With values. Full range.
+  # p2 <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
+  #   geom_tile(aes(fill=Correlation)) +
+  #   geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
+  #   scale_x_discrete(position = "top") +
+  #   scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
+  #   scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
+  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #         panel.grid = element_blank() )
+  # 
+  # # Triangle. Custom order. With values. Dynamic range.
+  # p2a <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
+  #   geom_tile(aes(fill=Correlation)) +
+  #   geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
+  #   scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "transparent" ) +
+  #   scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
+  #   scale_x_discrete(position = "top") +
+  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #         panel.grid = element_blank() )
   
   # Square. Custom order. With values. Full range.
   p12 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
@@ -450,45 +571,45 @@ my_pairwise_internal_corels <- function(mat = rpm, samples = row.names(colData(d
           panel.grid = element_blank() )
   
   
-  # Square. Clustered order. No values. Full range.
-  p3 <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
-    geom_tile(aes(fill=Correlation)) +
-    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
-    scale_x_discrete(position = "top") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-          panel.grid = element_blank() )
-  
-  # Square. Clustered order. No values. Dyhamic range.
-  p3a <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
-    geom_tile(aes(fill=Correlation)) +
-    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
-    scale_x_discrete(position = "top") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-          panel.grid = element_blank() )
-  
-  # Triangle. Clustered order. with values. Full range.
-  p4 <- ggplot(cormat4, aes(x=observation1, y=observation2)) +
-    geom_tile(aes(fill=Correlation)) +
-    geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
-    scale_x_discrete(position = "top") +
-    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
-    scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-          panel.grid = element_blank() )
-  
-  # Triangle. Clustered order. with values. Dyhamic range.
-  p4a <- ggplot(cormat4, aes(x=observation1, y=observation2)) +
-    geom_tile(aes(fill=Correlation)) +
-    geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
-    scale_x_discrete(position = "top") +
-    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "transparent" ) +
-    scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-          panel.grid = element_blank() )
+  # # Square. Clustered order. No values. Full range.
+  # p3 <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
+  #   geom_tile(aes(fill=Correlation)) +
+  #   scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
+  #   scale_x_discrete(position = "top") +
+  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #         panel.grid = element_blank() )
+  # 
+  # # Square. Clustered order. No values. Dyhamic range.
+  # p3a <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
+  #   geom_tile(aes(fill=Correlation)) +
+  #   scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
+  #   scale_x_discrete(position = "top") +
+  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #         panel.grid = element_blank() )
+  # 
+  # # Triangle. Clustered order. with values. Full range.
+  # p4 <- ggplot(cormat4, aes(x=observation1, y=observation2)) +
+  #   geom_tile(aes(fill=Correlation)) +
+  #   geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
+  #   scale_x_discrete(position = "top") +
+  #   scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
+  #   scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
+  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #         panel.grid = element_blank() )
+  # 
+  # # Triangle. Clustered order. with values. Dyhamic range.
+  # p4a <- ggplot(cormat4, aes(x=observation1, y=observation2)) +
+  #   geom_tile(aes(fill=Correlation)) +
+  #   geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
+  #   scale_x_discrete(position = "top") +
+  #   scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "transparent" ) +
+  #   scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
+  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #         panel.grid = element_blank() )
   
   # Square. Clustered order. With values. Full range.
   p34 <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
@@ -512,58 +633,77 @@ my_pairwise_internal_corels <- function(mat = rpm, samples = row.names(colData(d
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
   
-  fwrite(dcast(cormat2, observation1 ~ observation2, value.var = "Correlation"),
-         file=paste0(prefix, '_cor.txt'),
-         sep='\t', quote = FALSE, row.names = FALSE, col.names = TRUE)
+  out <- list(corr=dcast(cormat2, observation1 ~ observation2, value.var = "Correlation"),
+              # sfrnc=p1, tfrnc=p2, sdrnc=p1a, tdrnc=p2a,
+              frnc=p12, drnc=p12a,
+              # sfrc=pd + p3, tfrc=p4, sdrc=pd + p3a, tdrc=p4a,
+              frc=pd + p34 + plot_layout(ncol=2, widths=c(1,4)), 
+              drc=pd + p34a + plot_layout(ncol=2, widths=c(1,4)))
   
+  if (!is.null(rds)) {
+    saveRDS(out, file = rds)
+  }
   
-  return( list(sfrnc=p1, tfrnc=p2, frnc=p12,
-               sdrnc=p1a, tdrnc=p2a, drnc=p12a,
-               sfrc=p3, tfrc=p4, frc=p34,
-               sdrc=p3a, tdrc=p4a, drc=p34a) )
+  return(out)
 }
 ```
 
 
 # Correlations
  
-Correlations of the samples, based on the raw and the Variance-Stabilisation-Transformed counts. In VST the counts are scaled such as to have the same amount of variance across all count magnitudes, effectively removing noise from the low counts.
+Correlations of the samples, based on the RPM-scaled counts and the Variance-Stabilisation-Transformed counts. The RPMs ensure that library size does not influence correlation. VST counts adjust for the inflated variance of low count genes. 
 
-## Raw counts
+Pearson correlation uses the actual values and measures the linear relationsip between samples (ie that gene expressions between two samples differ only by a constant factor applied to all genes). Spearman correlation instead uses the rank of the features's expression within the transcriptome, and is not sensitive to the exact expression values.
 
-```{r correlations, fig.height=7, fig.width=8}
-corels1 <- my_pairwise_internal_corels(method='spearman')
-print( corels1[['frnc']] )
-print( corels1[['drc']] )
-```
+The first plot in each subsection is scaled to the full range of correlation values, and gives an objective overview of how good correlations are (or aren't). The samples are ordered on the axes as per the order provided.
+The second plot is scaled to the range of values actually obtained for this dataset and the samples are ordered by hierarchical clustering. This amplifies contrast and structure. Samples belonging to the same condition are expected to cluster next to each other.
 
 ## RPM counts
 
-```{r correlations2, fig.height=7, fig.width=8}
-corels2 <- my_pairwise_internal_corels(mat=rpm)
-print( corels2[['frnc']] )
-print( corels2[['drc']] )
+```{r correlations1, fig.height=6, fig.width=9}
+corels1p <- my_pairwise_internal_corels(rpm, colnames(rpm), method="pearson", 
+                                       minMean=params$minMean, minSingle=params$minSingle)
+corels1s <- my_pairwise_internal_corels(rpm, colnames(rpm), method="spearman", 
+                                       minMean=params$minMean, minSingle=params$minSingle)
+
+print( (corels1p[['frnc']] + theme(legend.position="none")) | 
+         (corels1s[['frnc']] + theme(axis.text.y=element_blank())) )
+# The axes and fill range are deterministic and fixed, so I can drop the redundant details.
 ```
 
+```{r correlations2, fig.height=9, fig.width=9}
+print( (corels1p[['drc']]) / (corels1s[['drc']] + theme(axis.text.x=element_blank())) )
+```
 
 ## VST counts
 
-```{r correlations3, fig.height=7, fig.width=8}
-corels3 <- my_pairwise_internal_corels(mat = vstmat)
-print( corels3[['frnc']] )
-print( corels3[['drc']] )
+```{r correlations3, fig.height=6, fig.width=9}
+corels2p <- my_pairwise_internal_corels(vstmat, colnames(rpm), method="pearson", 
+                                       minMean=params$minMean, minSingle=params$minSingle)
+corels2s <- my_pairwise_internal_corels(vstmat, colnames(rpm), method="spearman", 
+                                       minMean=params$minMean, minSingle=params$minSingle)
+
+print( (corels2p[['frnc']] + theme(legend.position="none")) | 
+         (corels2s[['frnc']] + theme(axis.text.y=element_blank())) )
+# The axes and fill range are deterministic and fixed, so I can drop the redundant details.
 ```
+
+```{r correlations4, fig.height=9, fig.width=9}
+print( (corels2p[['drc']]) / (corels2s[['drc']] + theme(axis.text.x=element_blank())) )
+```
+
 
 
 # DE
 
-The first subsection below contains static volcano and MA plots of *all the features*.
+The first subsection below contains static volcano and MA plots of *all the genes*.
+The plots are generated at sufficient resolution but may be scaled to fit the page width. Simply right-click and open image in new tab to get a more legible view.
 
-The second subsection contains interactive versions of these plots, filtered to show only the features that meet the thresholds. There you can hover over points to see their ID, zoom, etc.
+The second subsection contains interactive versions of these plots, filtered to show only the genes that meet the thresholds. There you can hover over points to see their ID, zoom in, etc.
 
-The highlighted red triangles are the up to `r params$ntop` top hits out of all the points that meet the thresholds. This number limit is arbitrary. "Top-ness" of hits is heuristicaly ranked roughly based on their "distance" from the origin of the axes in the volcano plots.
+The highlighted red triangles are the up to `r params$ntop` top hits out of all the points that meet the thresholds. This number limit is arbitrary. "Top-ness" of hits is ranked roughly based on their "distance" from the origin of the axes in the volcano plots and is not a substitute for judgement based on experience.
 
-If a contrast does not have any hits that meet the thresholds defined at the beginning of this report, a warning message will indicate that there are no hits, and there will be no highlighted points. The `r params$ntop` "top-est" points will still be listed in the table and shown in the interactive plots to satisfy your curiosity.
+If a contrast does not have any hits that meet the thresholds defined at the beginning of this report, a warning message will indicate that there are no hits, and there will be no highlighted points. Instead, the `r params$ntop` "top-est" non-hit points will be listed in the table and shown in the interactive plots for exploration.
 
 ```{r DE}
 resall <- NULL
@@ -576,7 +716,11 @@ if (!is.null(params$reducedFormula)){
 }
 coeffs <- resultsNames(deobj)[resultsNames(deobj) != "Intercept"]
 # Contrast against the assigned reference
-resall <- lapply(coeffs, function(contrast) { message(contrast); do_de_plots(contrast) })
+resall <- lapply(coeffs, function(contrast) {
+  # contrast <-  coeffs[1]
+  message(contrast)
+  do_de_plots(contrast) 
+})
 names(resall) <- vapply(resall, function(x) { x$contrast }, character(1))
 
 
@@ -619,22 +763,26 @@ if (length(cD) == 1 && params$roundrobin) {
 
 ## Results by comparison
 
-Values are all increased by 1/10th of the smallest non-zero expression value, thus allowing zero values to be represented on log-scale.
+For each comparison the following are shown:
 
-When there are 2 or more replicates, the smaller plots on the right will show a 2D density of the mean-scaled StDev vs the mean expression. If there is only one replicate StDev cannot be calculated so, instead, the 1D density plot of the expression will be shown.
+* A list of highlighted "top" hit genes. This selection is for quick first view purposes. An effort is made to prioritize highest fold-change lowest p-value genes in this selection, but it is not a definitive selection of "best" candidates. The number of genes highlighted is arbitrary and reflects practical considerations of how many labels can reasonably be displayed in a scatter plot of a given size and resolution without overcrowding. 
+* Volcano plot with the "top" hits highlighted.
+* MA plot with the "top" hits highlighted. This is a way to check how much support there is across the samples for the fold-change of a gene. MA plots also show if there is a global skew in fold changes, though this is only the case when DESeq2 is explicitly prevented from scaling the data.
+* Covariation scatter plot of the mean RPMs for the two conditions, with all hits highlighted. Mean RPMs are increased by 1/10th the value of the smallest non-zero RPM value in the dataset, in order to allow genes with a zero mean value in one condition to be displayed on log-scale axes while remaining distinct from non-zero values and without significant impact on non-zero values.
 
-* Red triangles for the top `r params$ntop` (or fewer) hits.
-* Black tiles for everything else. Density of points indicated by fade/transparency of the tiles.
-* Blue for genes that were not assigned a  p-value (filtered out before testing).
-* Labels added only to a subset of the top genes by order of "shrunken" Log2FC, to avoid excessive clutter.
+Fold-change shrinking is a procedure that aims to counter the inflated fold-changes that are produced by low-counts, and can be considered an alternative/orthogonal method to the p-value. "Top" hits selected here have shrunken LFCs that still satisfy the LFC threshold. Therefore, if you see hits in the standard plots below that seem like they should have been marked as "top" but were skipped, it is likely because they have low raw count and their shrunken LFC fell below the threshold.
 
-```{r expov, warning=FALSE, fig.height=8, fig.width=12}
-pexp <- lapply (resall, function(res) {
+The plots below, as well as additional plots including versions with shrunken LFCs, are available in the accompanying PDF file.
+
+IMPORTANT: In the name of each comparison, the condition used as **"reference" is always shown to the right** of the `vs` in the name, whereas the condition used as **"treatment" is always shown on the left** of the `vs`.
+
+```{r expov, warning=FALSE, fig.height=9, fig.width=10}
+for (res in resall) {
   # res <- resall[[1]]
   
   # Are there any hits?
   # message(paste(res$contrast, res$hashits))
-  if (res$hashits) {
+  if (!res$hashits) {
     message(paste("No hits meeting criteria in ", res$contrast,"! Listing outermost points instead."))
   }
 
@@ -647,120 +795,35 @@ pexp <- lapply (resall, function(res) {
   cat(as.character(res[["tophits"]]))
   cat("\n")
   
-  # Hit expression
+  
+  # Plots
   ################
   
-  print(res[["pe1"]])
-
-  # Expression and variance densities
-  ###################################
-  
-  DT <- res$outtab
-  names(DT) <- vapply(strsplit(names(DT), '.', fixed=TRUE), function(x) x[4], character(1))
-  DT[, colour := 'general']
-  DT[is.na(padj), colour :='pNA']
-  DT[(istop), colour := 'top']
-  DT[, addflag := FALSE]
-  flags <- head(DT[(istop), ][order(shrunken_L2FC, decreasing=TRUE), name], n=nflag)
-  DT[name %in% flags, addflag := TRUE]
-  DT[(addflag), flag := name]
-  
-  # Increment the 0s so they survive the log=transformation, but in a way they don't mix with non-zero data.
-  zeros <- min(DT[refMeanRPM > 0, refMeanRPM], DT[treatMeanRPM > 0, treatMeanRPM]) / 10
-  cat(paste("zeros =", zeros))
-  
-  p1 <- ggplot(NULL, aes(x=refMeanRPM + zeros, y=treatMeanRPM + zeros, colour=colour, label=flag)) +
-      geom_hex(data=DT[colour=='general', ], size=0.5, colour='transparent', bins=100) +
-      geom_point(data=DT[colour=='pNA', ], shape=20, alpha=0.2, size=0.8) +
-      geom_abline(intercept = 0, slope = 1, colour='grey75', alpha=0.3) +
-      geom_point(data=DT[(istop), ], shape=17, size=1.8) +
-      geom_label_repel(data=DT[(istop), ], size=rel(2.5), segment.size = 0.3, min.segment.length=0, arrow = arrow(length = unit(0.008, "npc")), max.overlaps=1e4, force=10, force_pull=5) +
-      scale_colour_manual(values=c(general='black', top='red', pNA='steelblue')) +  
-      scale_fill_gradient2(high='black') +
-      scale_x_log10() + 
-      scale_y_log10() +
-      annotation_logticks(base=10, sides='lrtb') +
-      labs(title=res$contrast) +
-      theme(panel.grid.minor = element_blank(),
-            legend.position='left') 
-  
-  # StDev is NA when there is only one replicate. So there are no values for Y-axis.
-  if (!all( is.na(DT$refStDev) )) {
-    p2 <- ggplot(NULL, aes(x=refMeanRPM + zeros, y=refStDev / (refMeanRPM + zeros), colour=colour, label=flag)) +
-        # geom_point(data=DT[colour=='black', ], shape=16, alpha=0.2, size=0.8) +
-        geom_hex(data=DT[colour=='general', ], bins=50, size=0.5, colour='transparent') +
-        geom_point(data=DT[colour=='pNA', ], shape=20, alpha=0.2, size=0.8) +
-        geom_point(data=DT[(istop), ], shape=17, size=1.8) +
-        geom_label_repel(data=DT[(istop), ], size=rel(2.5), segment.size = 0.3, min.segment.length=0, arrow = arrow(length = unit(0.008, "npc")), max.overlaps=1e4, force=10) +
-      scale_colour_manual(values=c(general='black', top='red', pNA='steelblue')) +  
-        scale_fill_gradient2(high='black') +
-        scale_x_log10() + 
-        scale_y_log10() + 
-        annotation_logticks(base=10, sides='lrtb') +
-        # labs(title=res$contrast) +
-        theme(panel.grid.minor = element_blank()) 
-  } else {
-    # Token blank plot, to maintain format.
-    p2 <- ggplot(DT, aes(x=refMeanRPM + zeros, colour=colour)) +
-      geom_density() +
-      scale_colour_manual(values=c(general='black', top='red', pNA='steelblue')) +  
-      scale_x_log10() + 
-      annotation_logticks(base=10, sides='tb') +
-      # labs(title=res$contrast) +
-      theme(panel.grid.minor = element_blank()) 
-  }
-  
-  # Again, StDev is NA when there is only one replicate.
-  if (!all( is.na(DT$treatStDev) )) {
-    p3 <- ggplot(NULL, aes(x=treatMeanRPM + zeros, y=treatStDev / (treatMeanRPM + zeros), colour=colour, label=flag)) +
-      # geom_point(data=DT[colour=='black', ], shape=16, alpha=0.2, size=0.8) +
-      geom_hex(data=DT[colour=='general', ], bins=50, size=0.5, colour='transparent') +
-      geom_point(data=DT[colour=='pNA', ], shape=20, alpha=0.2, size=0.8) +
-      geom_point(data=DT[(istop), ], shape=17, size=1.8) +
-      geom_label_repel(data=DT[(istop), ], size=rel(2.5), segment.size = 0.3, min.segment.length=0, arrow = arrow(length = unit(0.008, "npc")), max.overlaps=1e4, force=10) +
-      scale_colour_manual(values=c(general='black', top='red', pNA='steelblue')) +  
-      scale_fill_gradient2(high='black') +
-      scale_x_log10() + 
-      scale_y_log10() + 
-      annotation_logticks(base=10, sides='lrtb') +
-      # labs(title=res$contrast) +
-      theme(panel.grid.minor = element_blank())
-  } else {
-    # Token blank plot, to maintain format.
-    p3 <- ggplot(DT, aes(x=treatMeanRPM + zeros, colour=colour)) +
-      geom_density() +
-      scale_colour_manual(values=c(general='black', top='red', pNA='steelblue')) +  
-      scale_x_log10() + 
-      annotation_logticks(base=10, sides='tb') +
-      # labs(title=res$contrast) +
-      theme(panel.grid.minor = element_blank()) 
-  }
-  
-  print( p1 )
-  print( (p2 + theme(legend.position="none")) | (p3 + theme(legend.position="none")) )
-
-  # Static Volcano and MA
   print(res[["pv1"]])
   print(res[["pma1"]])
-  
-  return(p1 | (p2 / p3)) # for the PDF
-})
+  print(res[["pe1"]])
+}
 ```
 
 
-## Interactive filtered Volcanos and MAs
+## Interactive filtered Volcanos and Expressions
+
+All genes that do not meet both the fold-change threshold and the significance cutoff are removed completely from these plots to reduce visual clutter and to keep the report file lighteight.
 
 ```{r mas, fig.height=6, fig.width=7, warning=FALSE}
 # These plots are not faceted, so need less width.
 
 ly <- lapply(resall, function(res) {
-  list(res[["pv2"]], res[["pma2"]])
+  # res <- resall[[1]]
+  list(res[["pvly"]], res[["pe1ly"]])
 })
 
 htmltools::tagList(ly)
 ```
 
-## Expression heatmap of all top hits from all comparisons
+## Expression heatmap 
+
+Heatmap of all the top hits from all the comparisons in this report.
 
 ```{r dexp, fig.height=15, fig.width=7}
 # Collect all the top50s
@@ -817,12 +880,11 @@ print(pallvst)
 
 ```{r csv}
 for (res in resall) {
-fwrite(res$outtab,
+  fwrite(res$outtab,
          file = file.path(params$baseDir,
                           params$resultsDir,
                           paste(params$prefix, 
-                                paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(deobj), perl=TRUE), 
-                                      collapse=''), 
+                                paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(deobj), perl=TRUE), collapse=''), # redundant but helps group table files with the report file.
                                 res$contrast, 
                                 'deseq2.tsv', 
                                 sep='.')),
@@ -834,31 +896,32 @@ fwrite(res$outtab,
 
 ```{r pdf}
 pdf(file.path(params$baseDir, 
-              params$resultsDir, 
-              paste(params$prefix, paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(deobj), perl=TRUE), collapse=''), 'deseq2.pdf', sep='.')),
+              params$resultsDir, paste(params$prefix, 
+                                       paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(deobj), perl=TRUE), collapse=''), 
+                                       'deseq2.pdf', sep='.')),
     title=paste(params$prefix, paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(deobj), perl=TRUE), collapse=''), 'deseq2', sep='.'),
     width=15, height=15)
 
 
 
 # Correlation plots
-print(corels1[['sfrnc']] + labs(substitle='raw counts'))
-print(corels1[['tdrc']] + labs(substitle='raw counts'))
-print(corels2[['sfrnc']] + labs(substitle='RPM'))
-print(corels2[['tdrc']] + labs(substitle='RPM'))
-print(corels3[['sfrnc']] + labs(substitle='VST counts'))
-print(corels3[['tdrc']] + labs(substitle='VST counts'))
+print(corels1p[['frnc']] + labs(substitle='RPM'))
+print(corels1s[['drc']] + labs(substitle='RPM'))
+print(corels2p[['frnc']] + labs(substitle='VST counts'))
+print(corels2s[['drc']] + labs(substitle='VST counts'))
 
 # DE plots
-for (x in pexp) {
-  print(x)
-}
 for (res in resall){
   # Static plots
   print(res[["pv1"]])
+  print(res[["pv2"]])
   print(res[["pma1"]])
+  print(res[["pma2"]])
   print(res[["pe1"]])
   print(res[["pe2"]])
+  print(res[["pe3"]])
+  print(res[["ph1"]])
+  print(res[["ph2"]])
 }
 print(pallexp)
 print(pallvst)
