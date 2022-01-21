@@ -113,15 +113,20 @@ rownames(cormat) <- samples
 # colnames and rownames yes, non-numeric columns no.
 # Requires a vector of sample names for the non-clustered plots.
 # Correlations
-my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NULL, txs=3, minMean=0, minSingle=0) {
+my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NULL, txs=3, minMean=0, minSingle=0, sizefactor=1) {
   # mat <- counts; samples <- covars$Samp
   
-  if (method == "pearson") libsizes <- colSums(mat)
+  # if (method == "pearson") 
+  libsizes <- colSums(mat)
   # Filter
-  mat <- mat[rowSums(mat >= minSingle) >= 1 | rowMeans(mat) >= minMean,]
+  if (minMean != 0 | minSingle != 0) {
+    mat <- mat[rowSums(mat >= minSingle) >= 1 | rowMeans(mat) >= minMean, ]
+  } else {
+    mat <- mat[rowSums(mat) > 0, ]
+  }
   # Scale
-  if (method == "pearson") mat <- sweep(mat, 2, libsizes, `/`) 
-  # scaling up by 1M for actual RPM offers no advantage.
+  # if (method == "pearson") 
+  mat <- sweep(mat, 2, libsizes, `/`) * sizefactor
   
   # Correlations
   cormat <- cor(mat, method=method)

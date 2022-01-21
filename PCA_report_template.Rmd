@@ -50,7 +50,8 @@ theme_set(theme_bw())
 my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NULL, txs=3, minMean=0, minSingle=0, sizefactor=1) {
   # mat <- counts; samples <- covars$Samp
   
-  if (method == "pearson") libsizes <- colSums(mat)
+  # if (method == "pearson") 
+    libsizes <- colSums(mat)
   # Filter
   if (minMean != 0 | minSingle != 0) {
     mat <- mat[rowSums(mat >= minSingle) >= 1 | rowMeans(mat) >= minMean, ]
@@ -58,9 +59,8 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     mat <- mat[rowSums(mat) > 0, ]
   }
   # Scale
-  if (method == "pearson") {
+  # if (method == "pearson") 
     mat <- sweep(mat, 2, libsizes, `/`) * sizefactor
-  }
 
   # Correlations
   cormat <- cor(mat, method=method)
@@ -484,7 +484,7 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
 # Input
 
 ```{r input}
-covars <- fread(params$covars, colClasses = 'c')
+covars <- fread(params$covars, colClasses = 'character')
 
 counts <- fread(params$cts)
 counts <- counts[, c(names(counts)[1:params$nidcols], covars$Sample), with=FALSE]    # Only samples specified in covars.
@@ -504,9 +504,10 @@ Between true replicate samples, linearity might be expected and PCC should be hi
 The *first plot* in each subsection below is scaled to the full range of correlation values `(-1, 1)`, and gives an objective overview of how good correlations are (or aren't). The samples are ordered on the axes as per the order provided.
 The *second plot* is scaled to the range of values actually obtained for this dataset and the samples are ordered by hierarchical clustering. This amplifies contrast and highlights structure. Samples belonging to the same condition are expected to cluster next to each other.
 
+To remove any influence of library size that may affect correlation, samples are first scaled to RPM.
+
 ## Pearson
 
-To remove any influence of library size that may affect Pearson correlation, samples are first scaled to RPM.
 
 ```{r pearson1, fig.height=12, fig.width=12}
 # scaling is built into the function
@@ -522,9 +523,6 @@ print(corels1[["frnc"]])
 print(corels1[["drc"]])
 ```
 
-### Comments
-
-TODO
 
 ## Spearman
 
@@ -540,9 +538,6 @@ print(corels2[["frnc"]])
 print(corels2[["drc"]])
 ```
 
-### Comments
-
-TODO
 
 # PCA
 
@@ -579,9 +574,6 @@ There are different ways to decide which components to consider important. One i
 print(all_pca$pimp)
 ```
 
-#### Comments
-
-TODO
 
 ### Known variables
 
@@ -591,9 +583,6 @@ Highlighting the defined experimental variables against the principal components
 print( all_pca$pc2d )
 ```
 
-#### Comments
-
-TODO
 
 ## Associated features
 
