@@ -78,7 +78,7 @@ def gtf2pandas(flist):
 	"""
 	# Use my own parser, because it already handles input from multiple files or STDIN.
 	#input = fu.get_columns(flist, cols=list(range(0,9)), colSep=["\t"], header=False, index=None, merge=False)
-	input = [pd.read_table(file, sep = "\t", index_col =  None, header = None, 
+	input = [pd.read_csv(file, sep = "\t", index_col =  None, header = None, 
 							names = ["chr", "source", "feature", "start", "stop", "score", "strand", "phase", "attributes"], 
 							dtype = {"chr" : "str", "source" : "str", "feature" : "str", "start" : "int", "stop" : "int", "score" : "str", "strand" : "str", "phase" : "str", "attributes" : "str"}) 
 			for file in flist]
