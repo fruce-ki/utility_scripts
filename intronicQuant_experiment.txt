@@ -1,0 +1,7 @@
+Sample.ID	Sample.NAME	Condition	Sample	
+10001	ref1	reference	ref1__10001
+10002	ref2	reference	ref2__10002
+10003	treatA1	treatmentA	treatA1__10003
+10004	treatA2	treatmentA	treatA2__10004
+10005	treatB1	treatmentB	treatB1__10005
+10006	treatB2	treatmentB	treatB2__10006

@@ -1,0 +1,18 @@
+sampleinfo: "description/ngs_request_12658_part1.txt"
+idcols:
+  id: 0
+  name: 1
+projectHome: "/full/path/to/long-term/dir"
+projectScratch: "/full/path/to/working/dir"
+vbcf_alignments_table_url: "https://link/to/text/table"
+vbcf_unsplit_url: "https://link/to/bam"
+annotation:
+  exons: "/full/path/to/annotation.gtf"
+  introns: "/full/path/to/annotation.gtf"
+reference: "/full/path/to/genome.fa"
+idjoin: "__"
+platform: "NovaSeq"
+pairedend: True
+minFrag: 100
+maxFrag: 700
+readLen: 50
