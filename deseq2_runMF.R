@@ -4,7 +4,7 @@ library(getopt)
 library(DESeq2)
 
 spec = matrix(c(
-  'all',           'A', 0, "logical",   "Enable round-robin-style pairwise comparisons. Otherwise only comparisons only against reference. (False)", 
+  'all',           'A', 0, "logical",   "Enable round-robin-style pairwise comparisons. Otherwise comparisons only against reference. (False)", 
   'bmF',           'B', 0, "logical",   "Disable baseMean filtering. (False)",
   'baseDir',       'b', 1, "character", "Base directory for everything (.)",
   'lfcthreshold',  'c', 1, "numeric",   "Log2 fold-change threshold (1)",

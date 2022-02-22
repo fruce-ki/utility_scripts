@@ -4,6 +4,7 @@ library(getopt)
 
 spec = matrix(c(
   'help',           'h', 0, "logical",   "Help",
+  'baseDir',        'b', 1, "character", "Full path to base directory of the project. All other paths relative from here.",
   'countsFile',     'f', 1, "character", "Tab-separated table of counts with `row_ID` and all the samples.",
   'samplesFile',    's', 1, "character", "Tab-separated table with `Sample` column followed by the variable columns.",
   'resultsDir',     'o', 1, "character", "Directory in which to save the report (.).",
@@ -13,11 +14,10 @@ spec = matrix(c(
   'minMean',        'M', 1, "integer",   "Minimum mean count across all samples (10).",
   'minSingle',      'm', 1, "integer",   "Minimum count in at least one single sample (100).",
   'nhit',           'n', 1, "integer",   "Number of hits to report (10).",
-  'reportTemplate', 'T', 1, "character", "Template Rmd file (~/utility_scripts/PCA_report_template.Rmd)."
+  'reportTemplate', 'T', 1, "character", "Full path to template Rmd file (~/utility_scripts/PCA_report_template.Rmd)."
 ), byrow=TRUE, ncol=5)
 
 opt = getopt(spec)
-# opt <- list(reportTemplate='/groups/busslinger/Kimon/tanja/R12593_RNAseq/code/PCA_report_template.Rmd', countsFile='/groups/busslinger/Kimon/tanja/R12593_RNAseq/process/featureCounts/intron_se_genecounts.txt', samplesFile='/groups/busslinger/Kimon/tanja/R12593_RNAseq/description/covars_pca.txt', resultsDir='/groups/busslinger/Kimon/tanja/R12593_RNAseq/results/PCA', RDSoutdir='/groups/busslinger/Kimon/tanja/R12593_RNAseq/process/PCA', nidcols=6, idcol=1, nhit=25)
 
 
 if ( !is.null(opt$help) ) {
@@ -29,6 +29,7 @@ if ( is.null(opt$reportTemplate) ) {
   opt$reportFile <- '~/utility_scripts/PCA_report_template.Rmd'
 }
 
+stopifnot(!is.null(opt$baseDir))
 stopifnot(!is.null(opt$countsFile))
 stopifnot(!is.null(opt$samplesFile))
 
@@ -57,17 +58,18 @@ if ( is.null(opt$nhit) ){
   opt$nhit <- 10L
 }
 
+# print(opt)
 
-dir.create(opt$resultsDir, recursive=TRUE)
-dir.create(opt$RDSoutdir, recursive=TRUE)
+dir.create(file.path(opt$baseDir, opt$resultsDir), recursive=TRUE)
+dir.create(file.path(opt$baseDir, opt$RDSoutdir), recursive=TRUE)
 
 # Fire up the Rmd report
 rmarkdown::render(opt$reportTemplate,
                   output_file = sub('.txt|.tsv', '_pca.html', basename(opt$countsFile)),
-                  output_dir = opt$resultsDir,
-                  params=list(cts = opt$countsFile,
-                              covars = opt$samplesFile,
-                              RDSdir = opt$RDSoutdir,
+                  output_dir = file.path(opt$baseDir, opt$resultsDir),
+                  params=list(cts = file.path(opt$baseDir, opt$countsFile),
+                              covars = file.path(opt$baseDir, opt$samplesFile),
+                              RDSdir = file.path(opt$baseDir, opt$RDSoutdir),
                               nidcols = opt$nidcols,
                               idcol = opt$idcol,
                               minMean = opt$minMean,
