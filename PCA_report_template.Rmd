@@ -13,7 +13,6 @@ params:
   cts: "./null_xref.tsv"               # a file MUST be specified
   covars: "./null_covars.txt"          # a file MUST be specified
   RDSdir: "."                          # a file MUST be specified
-  pdf: "./null_pca.pdf"                # a file MUST be specified
   nidcols: 1                           # how many columns contain alternative IDs, including the col with the row IDs
   idcol: 1                               # column that has the row IDs
   ntop: 10                               # maximum number of hits to list
