@@ -31,6 +31,7 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
 
 ```{r message=FALSE, warning=FALSE}
 library(data.table)
+library(DT)
 library(ggplot2)
 library(htmltools)
 library(patchwork)
@@ -314,6 +315,7 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){  ## helper 
   pcxs <- paste0("PC", pcx)
   pcys <- paste0("PC", pcy)
   subload <- loads[rowID %in% unique(c(head(highloads[[pcx]], 5), head(highloads[[pcy]], 5))), c("rowID", pcxs, pcys), with=FALSE]
+  lmt <- max( c(abs(pc[[pcxs]]), abs(pc[[pcys]])) )
   
   pc12 <- wrap_plots(lapply(ig, function(varname) {
     return(
@@ -323,7 +325,7 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){  ## helper 
         geom_mark_hull(alpha=0.1, colour='transparent') +
         geom_point() +
         # geom_text_repel(data=subload, inherit.aes=FALSE, aes_string(label="rowID", x=pcxs, y=pcys), size=2) +
-        coord_fixed() +
+        coord_fixed(ratio=1, xlim=c(-lmt, lmt), ylim=c(-lmt, lmt) ) +
         scale_colour_manual(values=mycolours) +
         scale_fill_manual(values=mycolours) +
         labs(x=paste0(pcxs, " (", round(pcaimp[PC==pcx, Explained], 1), "%)"), 
@@ -341,7 +343,7 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){  ## helper 
                      x=0, y=0, aes_string(xend=pcxs, yend=pcys)) +
         geom_point() +
         geom_text_repel(data=subload, inherit.aes=FALSE, aes_string(label="rowID", x=pcxs, y=pcys), size=2) +
-        coord_fixed() +
+        coord_fixed(ratio=1, xlim=c(-lmt, lmt), ylim=c(-lmt, lmt) ) +
         scale_colour_manual(values=mycolours) +
         scale_fill_manual(values=mycolours) +
         labs(x=paste0(pcxs, " (", round(pcaimp[PC==pcx, Explained], 1), "%)"), 
@@ -483,6 +485,10 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
 
 # Input
 
+```{r parameters}
+print( params )
+```
+
 ```{r input}
 covars <- fread(params$covars, colClasses = 'character')
 
@@ -492,6 +498,10 @@ n <- counts[, params$idcol, with=FALSE]
 counts <- as.matrix(counts[, (params$nidcols+1):length(counts)])
 rownames(counts) <- n[[1]]
 counts[is.na(counts)] <- 0
+```
+
+```{r sample_info}
+datatable(covars)
 ```
 
 # Correlations
