@@ -423,7 +423,7 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
   infl <- as.data.table(pca$rotation)
   highinfl <- lapply(infl, function(x){ order(abs(x), decreasing=TRUE) })
   infl[, rowID := rownames(pca$rotation)]
-  highinfl <- lapply(highinfl, function(x){ head(infl$rowID[x], ntop) })
+  highinfl <- lapply(highinfl, function(x){ head(unique(infl$rowID[x]), ntop) })
   highinfl <- highinfl[1:topnpc]
   setkey(infl, rowID)
   
@@ -451,8 +451,10 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
       scale_x_log10() +
       scale_y_log10() +
       scale_colour_manual(values=c("black", "red")) +
+      annotation_logticks(base=10, sides='lb') +
       labs(x="Mean", y="Standard Deviation", title=paste("Features:", nrow(genevar), "total"), 
-           subtitle=paste(nrow(genevar[StDev>0,]), "variable,", length(topgenes), "used")),
+           subtitle=paste(nrow(genevar[StDev>0,]), "variable,", length(topgenes), "used")) +
+      theme(panel.grid=element_blank()),
     type = "histogram")
 
   # Plot higher PCs in 2D pairs. Highlight one variable at a time.
