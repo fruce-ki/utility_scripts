@@ -386,9 +386,8 @@ sparse.cor <- function(x){
 }
 
 
-### PCA and plots
-#################
-# covars is DE style colData
+# PCA
+# (scaling and centering of genes to one another, NOT samples to one another)
 pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){  ## helper function
   # pcx <- 1; pcy <- 2
   mycolours <- c(
@@ -402,6 +401,7 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){  ## helper 
   pcxs <- paste0("PC", pcx)
   pcys <- paste0("PC", pcy)
   subload <- loads[rowID %in% unique(c(head(highloads[[pcx]], 5), head(highloads[[pcy]], 5))), c("rowID", pcxs, pcys), with=FALSE]
+  lmt <- max( c(abs(pc[[pcxs]]), abs(pc[[pcys]])) )
   
   pc12 <- wrap_plots(lapply(ig, function(varname) {
     return(
@@ -411,7 +411,7 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){  ## helper 
         geom_mark_hull(alpha=0.1, colour='transparent') +
         geom_point() +
         # geom_text_repel(data=subload, inherit.aes=FALSE, aes_string(label="rowID", x=pcxs, y=pcys), size=2) +
-        coord_fixed() +
+        coord_fixed(ratio=1, xlim=c(-lmt, lmt), ylim=c(-lmt, lmt) ) +
         scale_colour_manual(values=mycolours) +
         scale_fill_manual(values=mycolours) +
         labs(x=paste0(pcxs, " (", round(pcaimp[PC==pcx, Explained], 1), "%)"), 
@@ -429,7 +429,7 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){  ## helper 
                      x=0, y=0, aes_string(xend=pcxs, yend=pcys)) +
         geom_point() +
         geom_text_repel(data=subload, inherit.aes=FALSE, aes_string(label="rowID", x=pcxs, y=pcys), size=2) +
-        coord_fixed() +
+        coord_fixed(ratio=1, xlim=c(-lmt, lmt), ylim=c(-lmt, lmt) ) +
         scale_colour_manual(values=mycolours) +
         scale_fill_manual(values=mycolours) +
         labs(x=paste0(pcxs, " (", round(pcaimp[PC==pcx, Explained], 1), "%)"), 
@@ -442,6 +442,9 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){  ## helper 
 
 do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, topgenes=NULL, minMean=0, minSingle=0, ntop=10) {
   # countsmat <- counts; covars <- covars
+  
+  nvars <- nrow(countsmat)
+  countsmat <- countsmat[rowSums(countsmat) > 0, ]
   
   # Mean and Standard Deviation, standardized counts, mean and stdev of standardized counts.
   genevar <- data.table(name = rownames(countsmat),
@@ -464,7 +467,6 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
   
   # Rotate counts so genes are variables and samples are observations
   subcmat <- t(subcmat)
-  nvars <- dim(subcmat)[2]
   message(paste("Number of variable features available:", nrow(genevar[StDev>0,])))
   message(paste("Number of variable features used:", length(topgenes)))
   
@@ -508,7 +510,7 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
   infl <- as.data.table(pca$rotation)
   highinfl <- lapply(infl, function(x){ order(abs(x), decreasing=TRUE) })
   infl[, rowID := rownames(pca$rotation)]
-  highinfl <- lapply(highinfl, function(x){ head(infl$rowID[x], ntop) })
+  highinfl <- lapply(highinfl, function(x){ head(unique(infl$rowID[x]), ntop) })
   highinfl <- highinfl[1:topnpc]
   setkey(infl, rowID)
   
@@ -536,8 +538,10 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
       scale_x_log10() +
       scale_y_log10() +
       scale_colour_manual(values=c("black", "red")) +
+      annotation_logticks(base=10, sides='lb') +
       labs(x="Mean", y="Standard Deviation", title=paste("Features:", nrow(genevar), "total"), 
-           subtitle=paste(nrow(genevar[StDev>0,]), "variable,", length(topgenes), "used")),
+           subtitle=paste(nrow(genevar[StDev>0,]), "variable,", length(topgenes), "used")) +
+      theme(panel.grid=element_blank()),
     type = "histogram")
   
   # Plot higher PCs in 2D pairs. Highlight one variable at a time.
