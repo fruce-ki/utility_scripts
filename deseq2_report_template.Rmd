@@ -24,6 +24,7 @@ params:
   reducedFormula: 'NULL'
   roundrobin: True      # do all-vs-all comparisons (for single-factor comparisons only). Otherwise only vs assigned reference condition.
   longlabel: false     # Prepend comparison info to standard column names.
+  covars: NULL
 ---
 
 ```{r setup, include=FALSE}
@@ -42,6 +43,7 @@ library(htmltools)
 library(patchwork)
 library(ggrepel)
 library(ggdendro)
+library(DT)
 
 # ggplot2 base theme
 theme_set(theme_bw())
@@ -81,6 +83,8 @@ cat(paste("Significance level:", params$pcutoff))
 cat(paste0("log2FC threshold: ", params$lfcthreshold, " , (i.e. ", 2 ^ params$lfcthreshold, "-fold change)"))
 cat(paste("Max number of top hits to highlight:", params$ntop))
 cat(paste("Round-robin comparisons between treatments:", params$roundrobin))
+
+print( datatable(params$covars) )
 ```
 
 # Correlations
@@ -88,9 +92,10 @@ cat(paste("Round-robin comparisons between treatments:", params$roundrobin))
 ```{r functionC}
 # Correlations
 my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NULL, txs=3, minMean=0, minSingle=0, sizefactor=1) {
-  # mat <- counts; samples <- covars$Samp
+  # mat <- vstmat; samples <- colnames(rpm)
   
-  if (method == "pearson") libsizes <- colSums(mat)
+  # if (method == "pearson") 
+  #   libsizes <- colSums(mat)
   # Filter
   if (minMean != 0 | minSingle != 0) {
     mat <- mat[rowSums(mat >= minSingle) >= 1 | rowMeans(mat) >= minMean, ]
@@ -98,9 +103,8 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     mat <- mat[rowSums(mat) > 0, ]
   }
   # Scale
-  if (method == "pearson") {
-    mat <- sweep(mat, 2, libsizes, `/`) * sizefactor
-  }
+  # if (method == "pearson") 
+  #   mat <- sweep(mat, 2, libsizes, `/`) * sizefactor
 
   # Correlations
   cormat <- cor(mat, method=method)
@@ -138,7 +142,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     labs(x = NULL, y = NULL) +
     theme_minimal() + 
     theme(panel.grid = element_blank(),
-          axis.text = element_blank(),
+          axis.text.y = element_blank(),
           axis.ticks.y = element_blank())
 
   
@@ -368,9 +372,9 @@ print( (corels1p[['drc']]) / (corels1s[['drc']] + theme(axis.text.x=element_blan
 
 ```{r correlations3, fig.height=6, fig.width=9}
 corels2p <- my_pairwise_internal_corels(vstmat, colnames(rpm), method="pearson", 
-                                       minMean=params$minMean, minSingle=params$minSingle)
+                                       minMean=0, minSingle=0)
 corels2s <- my_pairwise_internal_corels(vstmat, colnames(rpm), method="spearman", 
-                                       minMean=params$minMean, minSingle=params$minSingle)
+                                       minMean=0, minSingle=0)
 
 print( (corels2p[['frnc']] + theme(legend.position="none")) | 
          (corels2s[['frnc']] + theme(axis.text.y=element_blank())) )
@@ -625,13 +629,13 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, a
   # Add expression
   
   cnt <- merge( data.table(name = rownames(counts(dds)),
-                           counts(dds),
+                           # counts(dds)[outtab$name, c(refs, treats), drop=FALSE],
                            refMean = rowMeans(counts(dds)[outtab$name, refs, drop=FALSE]),
                            treatMean = rowMeans(counts(dds)[outtab$name, treats, drop=FALSE]),
                            refStDev = sqrt(rowVars(counts(dds)[outtab$name, refs, drop=FALSE])),
                            treatStDev = sqrt(rowVars(counts(dds)[outtab$name, treats, drop=FALSE])) ),
                 data.table(name=rownames(rpms), 
-                           rpms,
+                           # rpms[, c(refs, treats), drop=FALSE],
                            refMeanRPM=rowMeans(rpms[, refs]),
                            treatMeanRPM=rowMeans(rpms[, treats])),
                 all=TRUE, by="name", suffixes = c('.Count', '.RPM') )
@@ -908,11 +912,7 @@ for (res in resall) {
   fwrite(res$outtab,
          file = file.path(params$baseDir,
                           params$resultsDir,
-                          paste(params$prefix, 
-                                paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(deobj), perl=TRUE), collapse=''), # redundant but helps group table files with the report file.
-                                res$contrast, 
-                                'deseq2.tsv', 
-                                sep='.')),
+                          paste(params$prefix, res$contrast, 'deseq2.tsv', sep='.')),
          sep = "\t", quote = FALSE, row.names = FALSE, col.names = TRUE)
 }
 ```
@@ -921,9 +921,8 @@ for (res in resall) {
 
 ```{r pdf}
 pdf(file.path(params$baseDir, 
-              params$resultsDir, paste(params$prefix, 
-                                       paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(deobj), perl=TRUE), collapse=''), 
-                                       'deseq2.pdf', sep='.')),
+              params$resultsDir, 
+              paste(params$prefix, 'deseq2.pdf', sep='.')),
     title=paste(params$prefix, paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(deobj), perl=TRUE), collapse=''), 'deseq2', sep='.'),
     width=15, height=15)
 
@@ -948,8 +947,8 @@ for (res in resall){
   print(res[["ph1"]])
   print(res[["ph2"]])
 }
-print(pallexp)
-print(pallvst)
+# print(pallexp)
+# print(pallvst)
 
 dev.off()
 ```
