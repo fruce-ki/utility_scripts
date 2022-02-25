@@ -2,6 +2,7 @@
 
 library(getopt)
 library(DESeq2)
+library(data.table)
 
 spec = matrix(c(
   'all',           'A', 0, "logical",   "Enable round-robin-style pairwise comparisons. Otherwise comparisons only against reference. (False)", 
@@ -11,11 +12,10 @@ spec = matrix(c(
   'designFormula', 'd', 1, "character", "Design formula",
   'countsFile',    'f', 1, "character", "Tab-separated table of raw counts with `row_ID` and all the samples.",
   'forvar',        'F', 1, "character", "Looping variable (ie. carry out the design formula for each level of this var, separately).",
-  'help',          'h', 0, "logical",   "Help",
   'idcol',         'i', 1, "numeric",   "ID column to use (1). The others will be removed. See also -I.",
   'nidcols',       'I', 1, "numeric",   "Number of ID columns at the start of the table (1). See also -i.",
   'prescaled',     'k', 0, "logical",   "Don't let Deseq2 rescale the libraries. (False)",
-  'label',         'L', 0, "logical",   "Add comparison details to the standard column names. Useful for merging multiple outputs.",
+  'label',         'l', 0, "logical",   "Add comparison details to the standard column names. Useful for merging multiple outputs.",
   'ntop',          'n', 1, "numeric",   "Number of hits to highlight (50)",
   'minMean',       'M', 1, "numeric",   "Minimum mean number of reads across all samples combined for a gene to be considered (10).",
   'minSingle',     'm', 1, "numeric",   "Minimum number of reads in any sinlge sample for a gene to be considered if the minMean is not met (100).",
@@ -32,7 +32,7 @@ spec = matrix(c(
 ), byrow=TRUE, ncol=5)
 
 opt = getopt(spec)
-# opt <- list(baseDir='/Volumes/groups/busslinger/Kimon/tanja/R12593_RNAseq', countsFile='process/featureCounts/intron_se_genecounts.txt', resultsDir='results/DE', RDSoutdir='process/DE', samplesFile='description/covars.txt', control='noTir,0,MF,20210924,MBS.bead,Ikzf1_Tir1_0_MBS_bead,25', designFormula='~ Condition', selvar='Group', sellev='25', minMean=10, minSingle=100, lfcthreshold=1, nidcols=6, idcol=1, ntop=50, bmF=FALSE, pcutoff=0.05, all=TRUE, prescaled=FALSE, prefix='intron_se_gene', label=FALSE)
+# opt <- list(baseDir='/Volumes/groups/busslinger/Kimon/anna/R13019_RNAseq', countsFile='process/featureCounts/exon_genecounts.txt', resultsDir='results/DE', RDSoutdir='process/DE', samplesFile='description/covars.txt', control='has_wt,wt_wt', designFormula='~Genotype', selvar=NULL, sellev=NULL, minMean=50, minSingle=100, lfcthreshold=1.5, nidcols=6, idcol=1, ntop=50, bmF=FALSE, pcutoff=0.01, all=TRUE, prescaled=FALSE, prefix='exon_genecounts', label=FALSE)
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -107,7 +107,7 @@ dir.create(file.path(opt$baseDir, opt$resultsDir, opt$prefix), recursive=TRUE)
 
 # Input
 covars <- read.csv(file.path(opt$baseDir, opt$samplesFile), sep="\t", header=TRUE, row.names='Sample', check.names = FALSE, colClasses="character")
-cts <- read.csv(file.path(opt$baseDir, opt$countsFile), sep="\t", header=TRUE, check.names = FALSE, colClasses="character") 
+cts <- fread(file.path(opt$baseDir, opt$countsFile), sep="\t", header=TRUE, check.names = FALSE, colClasses="character") 
 # Setting all columns to character prevents numeric IDs at the top of the ID columns from auto-defining these columns as numeric when there could be character IDs further down that would otherwise become NaN.
 
 # Cut out extra annotation/id columns
@@ -116,15 +116,22 @@ xref <- cts[, 1:opt$nidcols]
 # Now that the IDs are handled, convert the rest to numbers in a matrix
 cts[, (opt$nidcols+1):ncol(cts)] <- lapply(cts[, (opt$nidcols+1):ncol(cts)], as.numeric)
 cts <- as.matrix(cts[, (opt$nidcols+1):ncol(cts)])
-rownames(cts) <- xref[, opt$idcol]
+rownames(cts) <- xref[[opt$idcol]]
 
 # R adds 'X' to the begininng fo matric colnames that start with a digit, regardless of whether they can be misinterpreted as a number or not.
 # That breaks the association with the names in covars and DESeq2 crashes. So the X needs to be added in covars too.
 
 # Calculate RPMs to be used for correlations between samples. This is to remove library size influence.
 colsums <- colSums(cts, na.rm=TRUE)
-RPMs <- as.matrix(as.data.frame(lapply(colnames(cts), function(n) { cts[,n] / colsums[n] * 1e6 }) ))
-colnames(RPMs) <- colnames(cts)
+
+RPMs <- cbind(data.table(gene = rownames(cts)),
+              as.data.table(lapply(colnames(cts), function(n) { cts[,n] / colsums[n] * 1e6 }) ))
+setnames(RPMs, c('gene', paste0(colnames(cts), '.RPM')))
+fwrite(RPMs, 
+       file=file.path(opt$baseDir, opt$resultsDir, opt$prefix, paste0(opt$prefix, '.rpm.tsv')),
+       sep="\t", quote=FALSE, col.names=TRUE)
+RPMs[, gene := NULL]
+RPMs <- as.matrix(RPMs)
 rownames(RPMs) <- rownames(cts)
 
 # Identify control level for the variables (it's less command editing to always provide all the controls, even the ones for variables that will be dropped).
@@ -228,8 +235,8 @@ for (V in names(subcovars)){
     prefix <- paste(opt$prefix, autoname, gsub(' ', '', opt$designFormula), sep='.')
   }
   
-  ddsrds <- file.path(opt$baseDir, opt$RDSoutdir, paste0(prefix, '.deseq2data.RDS'))
-  rpmrds <- file.path(opt$baseDir, opt$RDSoutdir, paste0(prefix, '.rpm.RDS'))
+  ddsrds <- file.path(opt$baseDir, opt$RDSoutdir, opt$prefix, paste0(prefix, '.deseq2data.RDS'))
+  rpmrds <- file.path(opt$baseDir, opt$RDSoutdir, opt$prefix, paste0(prefix, '.rpm.RDS'))
   
   saveRDS(DDS, file=ddsrds)
   saveRDS(subrpm, file=rpmrds)
@@ -253,7 +260,8 @@ for (V in names(subcovars)){
                                 filterBaseMean = opt$bmF,
                                 reducedFormula = opt$reducedFormula,
                                 roundrobin=opt$all,
-                                longlabel=opt$label)
+                                longlabel=opt$label,
+                                covars=subcovars[[V]])
                     )
   # unlink(rpmrds)
   
