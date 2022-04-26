@@ -1,0 +1,16 @@
+{
+	// Use IntelliSense to learn about possible attributes.
+	// Hover to view descriptions of existing attributes.
+	// For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "sequtilities",
+			"type": "python",
+			"request": "launch",
+			"program": "/Volumes/groups/busslinger/Kimon/utility_scripts/sequtilities.py",
+			"console": "integratedTerminal",
+			"args": ["T", "/Volumes/groups/busslinger/Kimon/genome_mm10/reefGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.gtf", "--premRNA", "f"]
+		}
+	]
+}

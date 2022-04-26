@@ -9,13 +9,16 @@ spec = matrix(c(
   'bmF',           'B', 0, "logical",   "Disable baseMean filtering. (False)",
   'baseDir',       'b', 1, "character", "Base directory for everything (.)",
   'lfcthreshold',  'c', 1, "numeric",   "Log2 fold-change threshold (1)",
+  'createID',      'C', 0, "logical",   "Non-summarized intron or exon counts by featureCounts. The first column is not unique IDs because genes are repeated.",
   'designFormula', 'd', 1, "character", "Design formula",
   'countsFile',    'f', 1, "character", "Tab-separated table of raw counts with `row_ID` and all the samples.",
   'forvar',        'F', 1, "character", "Looping variable (ie. carry out the design formula for each level of this var, separately).",
+  'specnorm',       'G', 1, "character", "Special normalisation. Gene ids that match this pattern will not be included for calculation of library sizes for TPM/RPM normalisation.",
   'idcol',         'i', 1, "numeric",   "ID column to use (1). The others will be removed. See also -I.",
   'nidcols',       'I', 1, "numeric",   "Number of ID columns at the start of the table (1). See also -i.",
   'prescaled',     'k', 0, "logical",   "Don't let Deseq2 rescale the libraries. (False)",
   'label',         'l', 0, "logical",   "Add comparison details to the standard column names. Useful for merging multiple outputs.",
+  'sellev',        'L', 1, "character", "Selection variable level. Used together with -S, to reduce the samplesFile to just the rows having that value in that variable.",
   'ntop',          'n', 1, "numeric",   "Number of hits to highlight (50)",
   'minMean',       'M', 1, "numeric",   "Minimum mean number of reads across all samples combined for a gene to be considered (10).",
   'minSingle',     'm', 1, "numeric",   "Minimum number of reads in any sinlge sample for a gene to be considered if the minMean is not met (100).",
@@ -26,13 +29,15 @@ spec = matrix(c(
   'reducedFormula','R', 1, "character", "Reduced formula for LR test",
   'samplesFile',   's', 1, "character", "Tab-separated table with `Sample` column followed by the variable columns. Values must NOT contain punctuation other than '_' !!!",
   'selvar',        'S', 1, "character", "Selection variable (always together with sellev). It is used together with -L. It is applied before -F.",
-  'sellev',        'L', 1, "character", "Selection variable level. Used together with -S, to reduce the samplesFile to just the rows having that value in that variable.",
   'reportTemplate','T', 1, "character", "Template Rmd file for DE report.",
-  'control',       'x', 1, "character", "Comma separated value for each variable to use as reference for all comparisons, in the order variables are listed in samplesfile"
+  'vst',           'v', 0, "logical",   "Plot VST counts instead of rlog2",
+  'widthsFile',    'w', 1, "character", "Full path to table of feature lengths",
+  'control',       'x', 1, "character", "Comma separated value for each variable to use as reference for all comparisons, in the order variables are listed in samplesfile",
+  'widthsCol',      'W', 1, "integer",   "Column in the counts file that contains feature lengths. This should be among the non-count columns, see also -I. It is an alternative to providing a separate lengths file."
 ), byrow=TRUE, ncol=5)
 
 opt = getopt(spec)
-# opt <- list(baseDir='/Volumes/groups/busslinger/Kimon/anna/R13019_RNAseq', countsFile='process/featureCounts/exon_genecounts.txt', resultsDir='results/DE', RDSoutdir='process/DE', samplesFile='description/covars.txt', control='has_wt,wt_wt', designFormula='~Genotype', selvar=NULL, sellev=NULL, minMean=50, minSingle=100, lfcthreshold=1.5, nidcols=6, idcol=1, ntop=50, bmF=FALSE, pcutoff=0.01, all=TRUE, prescaled=FALSE, prefix='exon_genecounts', label=FALSE)
+# opt <- list(createID=FALSE, baseDir='/Volumes/groups/busslinger/Kimon/tanja/R12593_RNAseq', countsFile='process/featureCounts/intron_genecounts.txt', resultsDir='results/DE', RDSoutdir='process/DE', samplesFile='description/covars.txt', control='noTir1,0h,20210924,Tir1_end,2_5h', designFormula='~Condition', forvar="Group", selvar=NULL, sellev=NULL, minMean=50, minSingle=100, lfcthreshold=1, nidcols=6, idcol=1, ntop=50, bmF=FALSE, pcutoff=0.05, all=TRUE, prescaled=FALSE, prefix='intron_genecounts', label=TRUE, widthsCol=6, reportTemplate="/Volumes/groups/busslinger/Kimon/tanja/R12593_RNAseq/code/deseq2_report_template.Rmd")
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -42,98 +47,71 @@ if ( !is.null(opt$help) ) {
 stopifnot(!is.null(opt$countsFile))
 stopifnot(!is.null(opt$samplesFile))
 
-if ( is.null(opt$reportTemplate) ) {
-  opt$reportTemplate <- '~/utility_scripts/deseq2_report_template.Rmd'
-}
-
-if ( is.null(opt$prescaled) ) {
-  opt$prescaled <- FALSE
-}
-
-if ( is.null(opt$label) ) {
-  opt$label <- FALSE
-}
-
-if ( is.null(opt$baseDir    ) ) { 
-  opt$baseDir <- '.'         
-}
-if ( is.null(opt$RDSoutdir ) ) { 
-  opt$RDSoutdir <- './process' 
-}
-if ( is.null(opt$resultsDir ) ) { 
-  opt$resultsDir <- './results' 
-}
-
-if ( is.null(opt$minMean ) ) { 
-  opt$minMean <- 10
-}
-if ( is.null(opt$minSingle ) ) { 
-  opt$minSingle <- 100
-}
-
-if ( is.null(opt$ntop ) ) { 
-  opt$ntop <- 50
-}
-
-if ( is.null(opt$pcutoff ) ) { 
-  opt$pcutoff <- 0.05
-}
-if ( is.null(opt$lfcthreshold ) ) { 
-  opt$lfcthreshold <- 1
-}
-
-if ( is.null(opt$nidcols ) ) { 
-  opt$nidcols <- 1
-}
-if ( is.null(opt$idcol ) ) { 
-  opt$idcol <- 1
-}
-
-if ( is.null(opt$bmF ) ) { 
-  opt$bmF <- FALSE
-}
+if (is.null(opt$reportTemplate))  opt$reportTemplate <- '~/utility_scripts/deseq2_report_template.Rmd'
+if (is.null(opt$createID))  opt$createID <- FALSE 
+if ((!is.null(opt$specnorm)) && opt$specnorm == "NULL") opt$specnorm <- NULL
+if (is.null(opt$prescaled)) opt$prescaled <- FALSE
+if (is.null(opt$label)) opt$label <- FALSE
+if (is.null(opt$baseDir)) opt$baseDir <- '.'
+if (is.null(opt$RDSoutdir)) opt$RDSoutdir <- './process' 
+if (is.null(opt$resultsDir))  opt$resultsDir <- './results' 
+if (is.null(opt$minMean)) opt$minMean <- 10
+if (is.null(opt$minSingle)) opt$minSingle <- 100
+if (is.null(opt$ntop))  opt$ntop <- 50
+if (is.null(opt$pcutoff)) opt$pcutoff <- 0.05
+if (is.null(opt$lfcthreshold))  opt$lfcthreshold <- 1
+if (is.null(opt$nidcols)) opt$nidcols <- 1
+if (is.null(opt$idcol)) opt$idcol <- 1
+if (is.null(opt$bmF)) opt$bmF <- FALSE
 opt$bmF <- !opt$bmF    # Convert -B flag functionality from switch-on to switch-off. 
-
-if ( is.null(opt$all ) ) { 
-  opt$all <- FALSE
-}
-
-
+if (is.null(opt$all)) opt$all <- FALSE
+if (is.null(opt$vst)) opt$vst <- FALSE
 
 # Output destinations
 dir.create(file.path(opt$baseDir, opt$RDSoutdir, opt$prefix), recursive=TRUE)
 dir.create(file.path(opt$baseDir, opt$resultsDir, opt$prefix), recursive=TRUE)
 
 
-# Input
-covars <- read.csv(file.path(opt$baseDir, opt$samplesFile), sep="\t", header=TRUE, row.names='Sample', check.names = FALSE, colClasses="character")
-cts <- fread(file.path(opt$baseDir, opt$countsFile), sep="\t", header=TRUE, check.names = FALSE, colClasses="character") 
+# Covariates
+covars <- read.csv(file.path(opt$baseDir, opt$samplesFile), sep="\t", row.names="Sample", header=TRUE, check.names = FALSE, colClasses="character")
+
+# Counts
+cts <- fread(file.path(opt$baseDir, opt$countsFile), sep="\t", header=TRUE, check.names = FALSE, colClasses="character")
 # Setting all columns to character prevents numeric IDs at the top of the ID columns from auto-defining these columns as numeric when there could be character IDs further down that would otherwise become NaN.
-
-# Cut out extra annotation/id columns
+cts <- unique(cts)         # non-sumxmarized featureCounts have repeated exons from sharing among transcripts.
 xref <- cts[, 1:opt$nidcols]
+cts <- as.matrix(cts[, rownames(covars), with=FALSE])    # Order and subset columns
+cts <- matrix(as.numeric(cts), ncol=ncol(cts))
+colnames(cts) <- row.names(covars)  # because the type conversion lost them
+cts[is.na(cts)] <- 0
+if (opt$createID) {
+  xref[, id := paste0(Geneid, '.', Start, '_', End)]
+  if (any(duplicated(xref$id)))
+    stop()
+  rownames(cts) <- xref$id
+} else {
+  rownames(cts) <- xref[[opt$idcol]]
+}
 
-# Now that the IDs are handled, convert the rest to numbers in a matrix
-cts[, (opt$nidcols+1):ncol(cts)] <- lapply(cts[, (opt$nidcols+1):ncol(cts)], as.numeric)
-cts <- as.matrix(cts[, (opt$nidcols+1):ncol(cts)])
-rownames(cts) <- xref[[opt$idcol]]
+# Feature lengths
+if (!is.null(opt$widthsCol)) {
+  featLens <- data.table(ID=rownames(cts),
+                         LEN=as.integer(xref[[opt$widthsCol]]))
+} else if (!is.null(opt$widthsFile)) {
+  featLens <- fread(opt$widthsFile, sep="\t", header=TRUE, check.names = FALSE, colClasses=c("character", "numeric"))
+  # Match order of feature lengths to order of features
+  setkeyv(featLens, names(featLens)[1])
+  featLens <- featLens[rownames(cts), ]
+} else {
+  featLens <- NULL
+}
 
-# R adds 'X' to the begininng fo matric colnames that start with a digit, regardless of whether they can be misinterpreted as a number or not.
-# That breaks the association with the names in covars and DESeq2 crashes. So the X needs to be added in covars too.
+stopifnot(all(rownames(cts) == featLens[[1]]))
+      
 
-# Calculate RPMs to be used for correlations between samples. This is to remove library size influence.
-colsums <- colSums(cts, na.rm=TRUE)
+## DE prep stuff begins here. Done with the imports.
 
-RPMs <- cbind(data.table(gene = rownames(cts)),
-              as.data.table(lapply(colnames(cts), function(n) { cts[,n] / colsums[n] * 1e6 }) ))
-setnames(RPMs, c('gene', paste0(colnames(cts), '.RPM')))
-fwrite(RPMs, 
-       file=file.path(opt$baseDir, opt$resultsDir, opt$prefix, paste0(opt$prefix, '.rpm.tsv')),
-       sep="\t", quote=FALSE, col.names=TRUE)
-RPMs[, gene := NULL]
-RPMs <- as.matrix(RPMs)
-rownames(RPMs) <- rownames(cts)
-
+    
 # Identify control level for the variables (it's less command editing to always provide all the controls, even the ones for variables that will be dropped).
 refs <- strsplit(opt$control, ',')[[1]]
 names(refs) <- names(covars)
@@ -188,9 +166,7 @@ for (V in names(subcovars)){
   ctsn <- colnames(cts)
   subcts <- cts[, ctsn[match(cdn, ctsn)]]
   subcts[is.na(subcts)] <- 0
-  subrpm <- RPMs[, match(cdn, colnames(RPMs))]
-  subrpm[is.na(subrpm)] <- 0
-
+  
   # DESeq2 begins here
   DDS <- DESeqDataSetFromMatrix(countData = round(subcts, digits=0),
                                 colData = coldata,
@@ -219,9 +195,9 @@ for (V in names(subcovars)){
   }
   if (!is.null(opt$forvar)) {
     if (! is.null(autoname)){
-      autoname <- paste(autoname, paste(opt$forvar, V, sep="-"), sep="_")
+      autoname <- paste(autoname, paste(opt$forvar, V, sep="_"), sep=".")
     } else {
-      autoname <- paste(opt$forvar, V, sep="-")
+      autoname <- paste(opt$forvar, V, sep="_")
     }
   }
   
@@ -236,11 +212,9 @@ for (V in names(subcovars)){
   }
   
   ddsrds <- file.path(opt$baseDir, opt$RDSoutdir, opt$prefix, paste0(prefix, '.deseq2data.RDS'))
-  rpmrds <- file.path(opt$baseDir, opt$RDSoutdir, opt$prefix, paste0(prefix, '.rpm.RDS'))
-  
+
   saveRDS(DDS, file=ddsrds)
-  saveRDS(subrpm, file=rpmrds)
-  
+
   # Fire up an Rmd report
   name <- paste0(prefix, '.deseq2.html')
   rmarkdown::render(opt$reportTemplate, 
@@ -254,16 +228,17 @@ for (V in names(subcovars)){
                                 resultsDir = file.path(opt$resultsDir, opt$prefix),
                                 prefix = prefix,
                                 derds = ddsrds,
-                                rmrds = rpmrds,
                                 minMean = opt$minMean,
                                 minSingle = opt$minSingle,
                                 filterBaseMean = opt$bmF,
                                 reducedFormula = opt$reducedFormula,
                                 roundrobin=opt$all,
                                 longlabel=opt$label,
-                                covars=subcovars[[V]])
+                                covars=subcovars[[V]],
+                                widths = featLens,
+                                specnorm=opt$specnorm,
+                                rlog=!opt$vst)
                     )
-  # unlink(rpmrds)
   
   # # DE
   # if (!is.null(opt$reducedFormula)){

@@ -3,22 +3,27 @@
 library(getopt)
 
 spec = matrix(c(
-  'help',           'h', 0, "logical",   "Help",
   'baseDir',        'b', 1, "character", "Full path to base directory of the project. All other paths relative from here.",
+  'createID',       'C', 0, "logical",   "Non-summarized intron or exon counts by featureCounts. The first column is not unique IDs because genes are repeated.",
   'countsFile',     'f', 1, "character", "Tab-separated table of counts with `row_ID` and all the samples.",
-  'samplesFile',    's', 1, "character", "Tab-separated table with `Sample` column followed by the variable columns.",
-  'resultsDir',     'o', 1, "character", "Directory in which to save the report (.).",
-  'RDSoutdir'    ,  'r', 1, "character", "Directory in which to save the raw computed objects (.).",
-  'idcol',          'i', 1, "integer",   "ID column to use (1). The others will be removed. See also -I.",
-  'nidcols',        'I', 1, "integer",   "Number of ID columns at the start of the table (1). See also -i.",
+  'specnorm',       'G', 1, "character", "Special normalisation. Gene ids that match this pattern will not be included for calculation of library sizes for TPM/RPM normalisation.",
+  'help',           'h', 0, "logical",   "Help",
+  'idcol',          'i', 1, "integer",   "ID column to use (1). The others will be removed. See also -I and -F.",
+  'nidcols',        'I', 1, "integer",   "Number of non-count columns at the start of the table (1). See also -i and -W.",
   'minMean',        'M', 1, "integer",   "Minimum mean count across all samples (10).",
   'minSingle',      'm', 1, "integer",   "Minimum count in at least one single sample (100).",
   'nhit',           'n', 1, "integer",   "Number of hits to report (10).",
-  'reportTemplate', 'T', 1, "character", "Full path to template Rmd file (~/utility_scripts/PCA_report_template.Rmd)."
+  'resultsDir',     'o', 1, "character", "Directory in which to save the report (.).",
+  'RDSoutdir'    ,  'r', 1, "character", "Directory in which to save the raw computed objects (.).",
+  'samplesFile',    's', 1, "character", "Tab-separated table with `Sample` column followed by the variable columns.",
+  'reportTemplate', 'T', 1, "character", "Full path to template Rmd file (~/utility_scripts/PCA_report_template.Rmd).",
+  'widthsFile',     'w', 1, "character", "Full path to table of feature lengths. 2 columns: feature ID and length.  the IDs must match the count IDs and be unique.",
+  'widthsCol',      'W', 1, "integer",   "Column in the counts file that contains feature lengths. This should be among the non-count columns, see also -I. It is an alternative to providing a separate lengths file."
 ), byrow=TRUE, ncol=5)
 
-opt = getopt(spec)
+opt <- getopt(spec)
 
+# opt <- list(baseDir="/Volumes/groups/busslinger/Kimon/robyn/R12658_RNAseq", countsFile="process/featureCounts/intron_genecounts.txt", createID=FALSE, samplesFile="description/covars.txt", resultsDir="results/PCA", RDSoutdir="process/PCA", idcol=1, nidcols=6, minMean=50, minSingle=100, nhit=25, reportTemplate="/Volumes/groups/busslinger/Kimon/robyn/R12658_RNAseq/code/PCA_report_template.Rmd", widthsCol=6, specnorm='^ENSMUSG|^TCR|^IGH')
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -38,6 +43,14 @@ if ( is.null(opt$resultsDir) ) {
 }
 if ( is.null(opt$RDSoutdir ) ) { 
   opt$RDSoutdir <- '.' 
+}
+
+if ( is.null(opt$createID ) ) { 
+  opt$createID <- FALSE 
+}
+
+if ( (!is.null(opt$specnorm)) & opt$specnorm == "NULL" ) { 
+  opt$specnorm <- NULL
 }
 
 if ( is.null(opt$nidcols) ) {
@@ -63,9 +76,10 @@ if ( is.null(opt$nhit) ){
 dir.create(file.path(opt$baseDir, opt$resultsDir), recursive=TRUE)
 dir.create(file.path(opt$baseDir, opt$RDSoutdir), recursive=TRUE)
 
+
 # Fire up the Rmd report
 rmarkdown::render(opt$reportTemplate,
-                  output_file = sub('.txt|.tsv', '_pca.html', basename(opt$countsFile)),
+                  output_file = sub('.txt|.tsv', '.pca.html', basename(opt$countsFile)),
                   output_dir = file.path(opt$baseDir, opt$resultsDir),
                   params=list(cts = file.path(opt$baseDir, opt$countsFile),
                               covars = file.path(opt$baseDir, opt$samplesFile),
@@ -74,5 +88,9 @@ rmarkdown::render(opt$reportTemplate,
                               idcol = opt$idcol,
                               minMean = opt$minMean,
                               minSingle = opt$minSingle,
-                              ntop = opt$nhit)
+                              ntop = opt$nhit,
+                              widthsFile = opt$widthsFile,
+                              widthsCol=opt$widthsCol,
+                              createID=opt$createID,
+                              specnorm=opt$specnorm)
 )

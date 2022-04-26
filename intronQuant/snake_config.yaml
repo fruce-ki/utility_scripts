@@ -1,0 +1,60 @@
+### snakemake --local-cores 1 --jobs 50 --use-envmodules --latency-wait 30 --restart-times 10 --cluster "sbatch -c {threads} --time={resources.maxtime} --mem={resources.mem}" 
+
+projectHome: "/groups/busslinger/Kimon/tanja/R13065_RNAseq"      # UPDATE HERE!
+projectScratch: "/scratch-cbe/users/kimon.froussios/tanja/R13065_RNAseq"      # UPDATE HERE!
+codeDir: "/groups/busslinger/Kimon/tanja/R13065_RNAseq/code"      # UPDATE HERE! always make a fresh copy for a new project
+
+sampleinfo: "description/sample_info.txt"      # UPDATE HERE maybe?
+idcols:        # in sampleinfo above
+  id: 0              # UPDATE HERE maybe?
+  name: 9            # UPDATE HERE!
+idjoin: "__"
+
+vbcf_alignments_table_url: "https://seqmate-archive.vbc.ac.at/alignments/group/busslinger/text"
+
+annotation:      # UPDATE HERE maybe?
+  introns: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.gtf"
+  exons: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.gtf"
+  firstintron: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.firstIntron_lastExon.gtf"
+  lastexon: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.firstIntron_lastExon.gtf"
+  first2introns: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.firstIntrons_lastExons.gtf"
+  last2exons: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.firstIntrons_lastExons.gtf"
+  #premrna: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.all-premRNA_plus_multiExon-mRNA.gtf"
+#kallisto_index: "/groups/busslinger/Kimon/genome_mm10/kallisto/GRCm38.mm10.all-premRNA_plus_multiExon-mRNA"
+reference: "/groups/busslinger/Bioinf/data/genomes/mm10/assembly/GRCm38.mm10.fa"
+
+Dup:
+  stranding: 1                        # Stranding mode for dupRadar.
+
+PCA:
+  minMean: 50                        # minimum mean count across samples
+  minSingle: 100                     # minimum count in a single sample, IF the minimum mean is not met
+  ntop: 15                           # top loading genes to report per principal component
+  covars: "description/covars.txt"   # covariates table for highlighting in plots        UPDATE HERE maybe?
+  #specialnorm: '^ENSMUSG|^TCR|^IGH'  # ignore gene ids that match this pattern for calculation of the library size for TPM/RPM normalisation      UPDATE HERE!
+  specialnorm: 'NULL'
+
+do_DE: True     # ONLY use for a single simple DE formula applicable to all samples. More complex datasets/requirements should be handled outside the pipeline.
+DE:
+  formula: "~Condition"               # no spaces    UPDATE HERE!
+  references: "Ikzf1,Ctrl,no,Tanja"   # reference value for each covariate, in order     UPDATE HERE!
+  loopgroup: TF                       # the formula will be applied within each subset defined by this covariate        UPDATE HERE!
+  lfc_thresh: 1
+  p_cut: 0.05
+  minMean: 50                        # minimum mean count across samples
+  minSingle: 100                     # minimum count in a single sample, IF the minimum mean is not met
+  ntop: 50                           # top DE features to highlight
+  covars: "description/covars.txt"   # covariates table        UPDATE HERE maybe?
+  #specialnorm: '^ENSMUSG|^TCR|^IGH'  # ignore gene ids that match this pattern for calculation of the library size for TPM/RPM normalisation      UPDATE HERE!
+  specialnorm: 'NULL'
+
+Spotfire:
+  lfc_thresh: 1
+  p_cut: 0.05
+  minMean: 50                        # minimum mean count across samples
+  minTPM: 5                     # minimum count in a single sample, IF the minimum mean is not met
+
+pairedend: True
+#minFrag: 100      # Fsk3 fragment sizes must mean something different, these values cause abysmal alignment failures
+#maxFrag: 700
+#readLen: 60

@@ -10,14 +10,18 @@ output:
     toc_float:
       collapsed: false
 params:
-  cts: "./null_xref.tsv"               # a file MUST be specified
-  covars: "./null_covars.txt"          # a file MUST be specified
-  RDSdir: "."                          # a file MUST be specified
-  nidcols: 1                           # how many columns contain alternative IDs, including the col with the row IDs
-  idcol: 1                               # column that has the row IDs
-  ntop: 10                               # maximum number of hits to list
-  minMean: 10                            # Filter out poorly covered genes
-  minSingle: 100                         # Bypass of the above, for genes expressed only in one or few samples
+  cts: "./null_xref.tsv"              # a file MUST be specified
+  covars: "./null_covars.txt"         # a file MUST be specified
+  RDSdir: "."                         # a file MUST be specified
+  nidcols: 1                          # how many columns contain alternative IDs, including the col with the row IDs
+  idcol: 1                            # column that has the row IDs
+  ntop: 10                            # maximum number of hits to list
+  minMean: 10                         # Filter out poorly covered genes
+  minSingle: 100                      # Bypass of the above, for genes expressed only in one or few samples
+  widthsFile: NULL                    # Feature lengths.
+  widthsCol: NULL                     # Feature lengths.
+  createID: FALSE
+  specnorm: NULL
 editor_options:
   chunk_output_type: console
 ---
@@ -40,28 +44,46 @@ library(ggforce)
 library(ggdendro)
 library(ggrepel)
 
+setDTthreads(1)
+
 options(scipen=2)
 
 theme_set(theme_bw())
 ```
 
 ```{r functions}
-# Correlations
-my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NULL, txs=3, minMean=0, minSingle=0, sizefactor=1) {
-  # mat <- counts; samples <- covars$Samp
+# TPM/RPM
+normscale <- function(counts, featLens=NULL, specnorm=params$specnorm){
+  if (!is.null(featLens)) {
+    # Reorder/subset
+    setkeyv(featLens, names(featLens)[1])
+    featLens <- featLens[rownames(counts)]
+    stopifnot(all(!is.na(featLens[, 2])))  # incomplete lengths
+    # Scale by feature size
+    TPMs <- sweep(counts, 1, featLens[[2]], `/`)
+  }
+  # Scale by sequencing depth
+  if (!is.null(specnorm)) {
+    colsums <- colSums(TPMs[!grepl(specnorm, rownames(TPMs), ignore.case=TRUE, perl=TRUE), ], na.rm=TRUE)  # MOUSE only!
+  } else {
+    colsums <- colSums(TPMs, na.rm=TRUE)
+  }
+  TPMs <- sweep(TPMs, 2, colsums, `/`) * 1e6
   
-  # if (method == "pearson") 
-    libsizes <- colSums(mat)
+  return(TPMs)
+}
+
+# Correlations
+my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NULL, txs=3, minMean=0, minSingle=0) {
+  # mat <- tpm[topgenes,]; samples <- covars$Sample
+  
   # Filter
   if (minMean != 0 | minSingle != 0) {
     mat <- mat[rowSums(mat >= minSingle) >= 1 | rowMeans(mat) >= minMean, ]
   } else {
     mat <- mat[rowSums(mat) > 0, ]
   }
-  # Scale
-  # if (method == "pearson") 
-    mat <- sweep(mat, 2, libsizes, `/`) * sizefactor
-
+  
   # Correlations
   cormat <- cor(mat, method=method)
   
@@ -318,12 +340,11 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){  ## helper 
   
   pc12 <- wrap_plots(lapply(ig, function(varname) {
     return(
-      ggplot(pc, aes_string(x=pcxs, y=pcys, label="Sample", fill=varname, colour=varname)) +
+      ggplot(pc, aes_string(x=pcxs, y=pcys, fill=varname, colour=varname)) +
         geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
         geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
         geom_mark_hull(alpha=0.1, colour='transparent') +
         geom_point() +
-        # geom_text_repel(data=subload, inherit.aes=FALSE, aes_string(label="rowID", x=pcxs, y=pcys), size=2) +
         coord_fixed(ratio=1, xlim=c(-lmt, lmt), ylim=c(-lmt, lmt) ) +
         scale_colour_manual(values=mycolours) +
         scale_fill_manual(values=mycolours) +
@@ -353,17 +374,17 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){  ## helper 
   return(list(pc12, pc12v))
 }
 
-do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, topgenes=NULL, minMean=0, minSingle=0, ntop=10) {
+do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, topgenes=NULL, exclude=NULL, minMean=0, minSingle=0, ntop=10) {
   # countsmat <- counts; covars <- covars
   
   nvars <- nrow(countsmat)
-  countsmat <- countsmat[rowSums(countsmat) > 0, ]
+  countsmat <- countsmat[rowSums(countsmat) > 0 & ! rownames(countsmat) %in% exclude, ]
   
   # Mean and Standard Deviation, standardized counts, mean and stdev of standardized counts.
   genevar <- data.table(name = rownames(countsmat),
                         Mean = rowMeans(countsmat),
                         StDev = rowSds(countsmat),
-                        singles = rowSums(countsmat > minSingle))
+                        singles = rowSums(countsmat >= minSingle))
   normcounts <- (countsmat - genevar$Mean) / genevar$StDev
   genevar [, zMean := rowMeans(normcounts)]
   # genevar [, zStDev := rowSds(normcounts)]    # always 1 by definition
@@ -371,9 +392,9 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
   # Select features
   if (is.null(topgenes)) {
     message(paste("Using variable features that exceed either", minMean, "mean count or", minSingle, "count in any single sample."))
-    topgenes = genevar[StDev > 0 & (Mean >= minMean | singles >= 1), name]  # all the variable genes, above min count level
+    topgenes = genevar[StDev > 0 & (Mean >= minMean | singles > 0), name]  # all the variable genes, above min count level
   } else {
-    message("Using variable features among the manually provided list.")
+    message("Using the variable features among the manually provided list.")
     topgenes = genevar[name %in% topgenes & StDev > 0, name] # manually provided features, as long as they are variable
   }
   subcmat <- countsmat[topgenes, ]
@@ -413,7 +434,7 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
               angle=90, vjust=0, hjust=1, size=rel(3)) +
     scale_fill_manual(values=c("grey25", "grey75"), guide="none") +
     scale_x_continuous(breaks=seq.int(1, npc, 1)) +
-    labs(title = "Scree plot", subtitle=paste0(nvars, " features, ", npc, " PCs"), 
+    labs(title = "Scree plot", subtitle=paste0(length(topgenes), " features, ", npc, " PCs"), 
          x = "Principal Component", y='% Variance') +
     theme(panel.grid=element_blank())
     
@@ -452,7 +473,7 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
       scale_y_log10() +
       scale_colour_manual(values=c("black", "red")) +
       annotation_logticks(base=10, sides='lb') +
-      labs(x="Mean", y="Standard Deviation", title=paste("Features:", nrow(genevar), "total"), 
+      labs(x="Mean", y="Standard Deviation", title=paste("Features:", nvars, "total"), 
            subtitle=paste(nrow(genevar[StDev>0,]), "variable,", length(topgenes), "used")) +
       theme(panel.grid=element_blank()),
     type = "histogram")
@@ -487,89 +508,134 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
 # Input
 
 ```{r parameters}
-print( params )
-```
-
-```{r input}
-covars <- fread(params$covars, colClasses = 'character')
-
-counts <- fread(params$cts)
-counts <- counts[, c(names(counts)[1:params$nidcols], covars$Sample), with=FALSE]    # Only samples specified in covars.
-n <- counts[, params$idcol, with=FALSE]
-counts <- as.matrix(counts[, (params$nidcols+1):length(counts)])
-rownames(counts) <- n[[1]]
-counts[is.na(counts)] <- 0
+message(paste("Counts file:", params$cts))
+message(paste("Covariates table:", params$covars))
+message(paste("Minimum mean count across samples:", params$minMean))
+message(paste("Minimum count in a single count, if the minimum mean is not met:", params$minSingle))
+message(paste("Number of features to report per Principle Component:", params$ntop))
+message(paste("Feature lengths provided for count normalization:", !is.null(params$widths)))
+message(paste("Genes to exclude from library size calculations and PCA:", params$specnorm))
 ```
 
 ```{r sample_info}
+# Covariates
+covars <- fread(params$covars, colClasses = 'character')
+
 datatable(covars)
 ```
 
+```{r input}
+# Counts
+counts <- fread(params$cts, colClasses="character")  # prevent any numeric IDs converting a string column to integer
+counts <- unique(counts)         # non-summarized featureCounts have repeated exons from sharing among transcripts.
+xref <- counts[, 1:params$nidcols]
+counts <- as.matrix(counts[, covars$Sample, with=FALSE])    # Order and subset columns
+counts <- matrix(as.numeric(counts), ncol=ncol(counts))
+colnames(counts) <- covars$Sample  # because the type conversion lost them
+counts[is.na(counts)] <- 0
+if (params$createID) {
+  xref[, id := paste0(Geneid, '.', Start, '_', End)]
+  if (any(duplicated(xref$id)))
+    stop()
+  rownames(counts) <- xref$id
+} else {
+  rownames(counts) <- xref[[params$idcol]]
+}
+```
+
+Correlations and PCA will be based on the TPM values. If no feature lengths were provided, RPM values will be used instead.
+
+```{r tpm}
+# Feature lengths
+if (!is.null(opt$widthsCol)) {
+  featLens <- data.table(ID=rownames(counts),
+                         LEN=as.integer(xref[[opt$widthsCol]]))
+  setkey(featLens, ID)
+} else if (!is.null(opt$widthsFile)) {
+  featLens <- fread(file.path(opt$baseDir, opt$widthsFile), sep="\t", header=TRUE, check.names = FALSE, colClasses=c("character", "numeric"))
+  setkey(featLens, ID)
+} else {
+  featLens <- NULL
+}
+
+tpm <- normscale(counts, featLens)
+TPM <- data.table(id=rownames(tpm), tpm)
+
+widths <- all(is.null(params$widthsFile), is.null(params$widthsCol))
+if (widths) {
+  message('Scaled counts to RPM.')
+} else {
+  message('Scaled counts to TPM.')
+}
+
+setnames(TPM, c('id', paste0(colnames(tpm), ifelse(is.null(widths), '.RPM', '.TPM')) ))
+fwrite(TPM, file=sub(".txt|.tsv", ".scaled.txt", params$cts), quote=FALSE, sep="\t")
+```
+
+
+# Filter
+
+Genes with mean raw count across all samples below `r params$minMean` are excluded, unless any of the samples has raw count of at least `r params$minSingle`. Fr PCA all genes are given equal weight, but low expression genes are proportionally more variable, so filtering them in advance reduces noise.
+
+```{r filter}
+message(paste("Using variable features that exceed either", params$minMean, "mean count across samples or", params$minSingle, "count in any single sample."))
+n <- nrow(tpm)
+topgenes <- rownames(tpm)[(rowMeans(counts) >= params$minMean) | (rowSums(counts >= params$minSingle) > 0)]
+message(paste(n - length(topgenes), "features eliminated, out of", n))
+
+if (!is.null(params$specnorm)) {
+  n <- length(topgenes)
+  topgenes <- topgenes[! topgenes %in% rownames(tpm)[grepl(params$specnorm, rownames(tpm), ignore.case=TRUE, perl=TRUE)] ]
+  message(paste("Additionally excluding", n - length(topgenes), "genes by name pattern."))
+}
+```
+
+
 # Correlations
 
-Similarly as for the PCA in the next section of the report, genes with mean raw count across all samples below `r params$minMean` are excluded, unless any of the samples has raw count of at least `r params$minSingle`. 
+The *Pearson* correlation coefficient between samples X and Y measures how much their observations can be represented as `Y = A * X`. Perfect PCC is a straight line in a 2D plot of corresponding X,Y value pairs. 
 
-The *Pearson* correlation coefficient between samples X and Y measures how much their observations can be represented as `Y = A * X`. Perfect PCC is a straight line in a 2D plot of corresponding X,Y value pairs. The *Spearman* correlation coefficient does the same for the rank of the observations instead of their values. Perfect SCC is any monotonic line beteen X and Y values (straight, curved, or zigzag).
-Between true replicate samples, linearity might be expected and PCC should be high, but gene expression is noisy so SCC is often a little better. With samples from different conditions, the coefficients may disagree as a result of how observation density is distributed along the axes. SCC will amplify differences in areas dense with observations while down-playing differences in sparse areas.
+The *Spearman* correlation coefficient does the same for the rank of the observations instead of their values. Perfect SCC is any monotonic line between X and Y values (straight, curved, or zigzag).
 
-The *first plot* in each subsection below is scaled to the full range of correlation values `(-1, 1)`, and gives an objective overview of how good correlations are (or aren't). The samples are ordered on the axes as per the order provided.
-The *second plot* is scaled to the range of values actually obtained for this dataset and the samples are ordered by hierarchical clustering. This amplifies contrast and highlights structure. Samples belonging to the same condition are expected to cluster next to each other.
+The coefficients may disagree to some considerable extent, as a result of how observation density is distributed along the axes. SCC is more sensitive to value changes in the centre of the bell distribution where there are more measurements near one another, and less sensitive in the tails of the bell where there are fewer measurements and they are farther apart from one another.
 
-To remove any influence of library size that may affect correlation, samples are first scaled to RPM.
-
-## Pearson
-
-
-```{r pearson1, fig.height=12, fig.width=12}
-# scaling is built into the function
-corels1 <- my_pairwise_internal_corels(counts, covars$Sample, method="pearson",
-                                      minMean = params$minMean, minSingle = params$minSingle,
-                                      sizefactor=1000000,
+```{r corr1, fig.height=6, fig.width=9}
+corels1 <- my_pairwise_internal_corels(tpm[topgenes,], covars$Sample, method="pearson",
+                                      minMean = 0, minSingle = 0,
                                       rds = file.path(params$RDSdir,
                                                       sub(".txt|.tsv", "_corrP.RDS", basename(params$cts))))
-print(corels1[["frnc"]])
-```
-
-```{r pearson2, fig.height=12, fig.width=16}
-print(corels1[["drc"]])
-```
-
-
-## Spearman
-
-```{r spearman1, fig.height=12, fig.width=12}
-corels2 <- my_pairwise_internal_corels(counts, covars$Sample, method="spearman",
-                                      minMean = params$minMean, minSingle = params$minSingle,
+corels2 <- my_pairwise_internal_corels(tpm[topgenes, ], covars$Sample, method="spearman",
+                                      minMean = 0, minSingle = 0,
                                       rds = file.path(params$RDSdir,
                                                       sub(".txt|.tsv", "_corrS.RDS", basename(params$cts))))
-print(corels2[["frnc"]])
+
+print( (corels1[['frnc']] + theme(legend.position="none")) | 
+         (corels2[['frnc']] + theme(axis.text.y=element_blank())) )
 ```
 
-```{r spearman2, fig.height=12, fig.width=16}
-print(corels2[["drc"]])
+```{r corr2, fig.height=9, fig.width=7}
+print( (corels1[['drc']]) / (corels2[['drc']] + theme(axis.text.x=element_blank())) )
 ```
+
 
 
 # PCA
 
-For this report, the expression of the genes have been standardized. This compensates for large differences in magnitude range and gives every gene equal weight. Otherwise the variance from high expression genes would dominate in the determination of principal components. Genes with exactly `0` variability have to be excluded for PCA, they are typically genes that are not detected in any of the samples.
-
-Giving equal weight to all genes, can introduce noise from low expression genes. To reduce this, genes with mean raw count across all samples below `r params$minMean` are excluded, unless any of the samples has raw count of at least `r params$minSingle`. This exception should allow for fringe cases where most samples do not express a gene, but a small subset do express it, as might happen in an experimental setup with many samples and many conditions.
+For this, the expression of the features has been standardized. This compensates for large differences in magnitude range and gives every feature equal weight. Otherwise the variance from high expression features would dominate in the determination of principal components. Features with exactly `0` variability have to be excluded for PCA, they are typically features that are not detected in any of the samples.
 
 ```{r pca}
-all_pca <- do_pca(counts, covars, 
-                  minMean = params$minMean, minSingle = params$minSingle, ntop = params$ntop,
+all_pca <- do_pca(tpm, covars, ntop = params$ntop,
+                  topgenes= topgenes,
+                  minMean = 0, minSingle = 0, 
                   rds = file.path(params$RDSdir,
                                   sub(".txt|.tsv", "_pca.RDS", basename(params$cts))))
 ```
 
 ## Plots
 
-2D plots of the principal components in pairs.
-
 ### Selected features
 
-This shows the mean value and standard deviation for the variable features that were selected for the correlation and PCA, agaisnt the total of variable features. Non-variable features are not shown, due to log-scaled axes.
+This shows the mean TPM (or RPM) value and standard deviation for the variable features that were selected for the correlation and PCA, against the total of variable features. Non-variable features are not shown, due to log-scaled axes.
 
 ```{r varmean}
 # Selected features
@@ -602,11 +668,11 @@ Only the top `r params$ntop` genes are listed here, in order of decreasing assoc
 If a PC aligns well with an experimental variable of interest, the associated genes for that PC could merit follow-up.
 
 ```{r highload}
-for (pc in names(all_pca$highloads)) {
-  cat("\n")
-  print( pc )
-  print( head(all_pca$highloads[[pc]], params$ntop) )
-}
+TL <- as.data.frame(lapply (names(all_pca$highloads), function(pc) {
+  head(all_pca$highloads[[pc]], params$ntop) }) )
+names(TL) <- names(all_pca$highloads)
+
+datatable(TL)
 ```
 
 
@@ -624,8 +690,6 @@ for (pc in names(all_pca$highloads)) {
 
 ```{r pdf}
 ## Plots to PDF ##
-
-
 pdf(file.path(params$RDSdir,
               sub(".txt|.tsv", "_pca.pdf", basename(params$cts))),
     width=max(12, ceiling(nrow(covars) / 3)), height=max(12, ceiling(nrow(covars) / 3))) # Scale up when many samples, but don't scale down when few.

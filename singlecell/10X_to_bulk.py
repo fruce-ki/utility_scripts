@@ -6,7 +6,7 @@ import gzip
 from Bio.SeqIO.QualityIO import FastqGeneralIterator
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 
-usage = "Chromosome surgery: Splice something into and/or out of a chromosome."
+usage = "Join barcode and read."
 # Main Parsers
 parser = ArgumentParser(description=usage, formatter_class=RawDescriptionHelpFormatter)
 parser.add_argument("-1", "--R1", type=str, required=True, help="fastq.gz with barcode/umi reads. Will form the 1st part of the merged read.")

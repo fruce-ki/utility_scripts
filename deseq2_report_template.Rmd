@@ -11,7 +11,6 @@ output:
 params:
   selfname: ""
   derds: "null.RDS"     # MUST be specified, DESeq2 Dataset object file (before model creation)
-  rmrds: "null.RDS"     # MUST be specified, RPM matrix object
   prefix: ""
   resultsDir: "."
   baseDir: "."
@@ -25,6 +24,9 @@ params:
   roundrobin: True      # do all-vs-all comparisons (for single-factor comparisons only). Otherwise only vs assigned reference condition.
   longlabel: false     # Prepend comparison info to standard column names.
   covars: NULL
+  widths: NULL         # Feature lengths table.
+  specnorm: NULL
+  rlog: TRUE          # FALSE for VST instead
 ---
 
 ```{r setup, include=FALSE}
@@ -60,52 +62,82 @@ if (!is.null(params$reducedFormula)){
 ```
 
 ```{r preprocess}
+# DESeq2 object set up with he relevant materials for this comparison formula
 deobj <- readRDS(params$derds)
-rpm <- readRDS(params$rmrds)
 
-vstmat = NULL
-tryCatch(vstmat <- assay(vst(deobj, blind=FALSE)),     # Variance stabisized counts,
-         error = function(e) {
-           print(e)
-           stop("At least two samples per condition are expected, and at least 1000 expressed genes in the relevant samples.")
-         }
-)
+# Variance-regularized counts
+if (params$rlog) {
+  vstmat <- assay(rlog(deobj, blind = TRUE))
+} else {
+  vstmat <- assay(vst(deobj, blind=FALSE))
+}
 
-cD <- colData(deobj)[, 1:length(colData(deobj)), drop=FALSE]  # before model building, there in no size factor as last column
+# TPM/RPM
+normscale <- function(counts, featLens=NULL, specnorm=params$specnorm){
+  if (!is.null(featLens)) {
+    # Reorder/subset
+    setkeyv(featLens, names(featLens)[1])
+    featLens <- featLens[rownames(counts)]
+    stopifnot(all(!is.na(featLens[, 2])))  # incomplete lengths
+    # Scale by feature size
+    TPMs <- sweep(counts, 1, featLens[[2]], `/`)
+  }
+  # Scale by sequencing depth
+  if (!is.null(specnorm)) {
+    colsums <- colSums(TPMs[!grepl(specnorm, rownames(TPMs), ignore.case=TRUE, perl=TRUE), ], na.rm=TRUE)  # MOUSE only!
+  } else {
+    colsums <- colSums(TPMs, na.rm=TRUE)
+  }
+  TPMs <- sweep(TPMs, 2, colsums, `/`) * 1e6
+  
+  return(TPMs)
+}
+
+tpm <- normscale(counts(deobj, normalized = FALSE, replaced = FALSE), params$widths)
+
+if (is.null(params$widths)){
+  message('Scaled counts to RPM.')
+  colsuffix <- 'RPM'
+#  colnames(tpm) <- paste0(colnames(tpm), '.RPM')
+} else {
+  message('Scaled counts to TPM.')
+  colsuffix <- 'TPM'
+#  colnames(tpm) <- paste0(colnames(tpm), '.TPM')
+}
+
+
+# Covariates relevant to this comparison
+cD <- colData(deobj)[, 1:length(colData(deobj)), drop=FALSE]  # before model building there in no size factor as last column
 
 cat(paste("Prepared input: ", params$derds))
-cat(paste("Report name: ", params$selfname))
-
 cat(paste("Min required mean raw counts across relevant samples:", params$minMean))
 cat(paste("Min required raw count in a single sample when the min mean is not met:", params$minSingle))
 cat(paste("DESeq2 independent filtering:", params$filterBaseMean))
 cat(paste("Significance level:", params$pcutoff))
-cat(paste0("log2FC threshold: ", params$lfcthreshold, " , (i.e. ", 2 ^ params$lfcthreshold, "-fold change)"))
+cat(paste0("log2FC threshold: ", params$lfcthreshold, " , (i.e. ", round(2 ^ params$lfcthreshold, 2), "-fold change)"))
 cat(paste("Max number of top hits to highlight:", params$ntop))
 cat(paste("Round-robin comparisons between treatments:", params$roundrobin))
+cat(paste("Variance regularized counts type: ", ifelse(params$rlog, "rlog2", "VST")))
+cat(paste("Genes excluded from library size calculations (only affects TPM/RPM, does not affect DESeq2):", params$specnorm))
 
 print( datatable(params$covars) )
 ```
+
 
 # Correlations
 
 ```{r functionC}
 # Correlations
-my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NULL, txs=3, minMean=0, minSingle=0, sizefactor=1) {
+my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NULL, txs=3, minMean=0, minSingle=0) {
   # mat <- vstmat; samples <- colnames(rpm)
   
-  # if (method == "pearson") 
-  #   libsizes <- colSums(mat)
   # Filter
   if (minMean != 0 | minSingle != 0) {
     mat <- mat[rowSums(mat >= minSingle) >= 1 | rowMeans(mat) >= minMean, ]
   } else {
     mat <- mat[rowSums(mat) > 0, ]
   }
-  # Scale
-  # if (method == "pearson") 
-  #   mat <- sweep(mat, 2, libsizes, `/`) * sizefactor
-
+  
   # Correlations
   cormat <- cor(mat, method=method)
   
@@ -344,36 +376,37 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
 }
 ```
  
-Correlations of the samples, based on the RPM-scaled counts and the Variance-Stabilisation-Transformed counts. The RPMs ensure that library size does not influence correlation. VST counts adjust for the inflated variance of low count genes. 
+Using TPM (RPM if no feature lengths were available) ensures that size effects do not influence correlation. VST counts adjust for the inflated variance of low count genes and often offer a clearer view less influenced by expression noise. 
 
-Pearson correlation uses the actual values and measures the linear relationsip between samples (ie that gene expressions between two samples differ only by a constant factor applied to all genes). Spearman correlation instead uses the rank of the features's expression within the transcriptome, and is not sensitive to the exact expression values.
+The *Pearson* correlation coefficient between samples X and Y measures how much their observations can be represented as `Y = A * X`. Perfect PCC is a straight line in a 2D plot of corresponding X,Y value pairs.
 
-The first plot in each subsection is scaled to the full range of correlation values, and gives an objective overview of how good correlations are (or aren't). The samples are ordered on the axes as per the order provided.
-The second plot is scaled to the range of values actually obtained for this dataset and the samples are ordered by hierarchical clustering. This amplifies contrast and structure. Samples belonging to the same condition are expected to cluster next to each other.
+The *Spearman* correlation coefficient does the same for the rank of the observations instead of their values. Perfect SCC is any monotonic line between X and Y values (straight, curved, or zigzag).
 
-## RPM counts
+PCC and SCC can disagree to considerable extent, depending on the context of the expression differences. The change in a feature's rank depends not so much on the magnitude of the expression change itself, but instead on how many other features have similar expression levels and how close their values are.
 
-```{r correlations1, fig.height=6, fig.width=9}
-corels1p <- my_pairwise_internal_corels(rpm, colnames(rpm), method="pearson", 
-                                       minMean=params$minMean, minSingle=params$minSingle)
-corels1s <- my_pairwise_internal_corels(rpm, colnames(rpm), method="spearman", 
-                                       minMean=params$minMean, minSingle=params$minSingle)
+## TPM (or RPM)
+
+```{r correlations1, fig.height=8, fig.width=12}
+corels1p <- my_pairwise_internal_corels(tpm, colnames(tpm), method="pearson", 
+                                       minMean=0, minSingle=0)   # pre-filtered when making the DESeq object
+corels1s <- my_pairwise_internal_corels(tpm, colnames(tpm), method="spearman", 
+                                       minMean=0, minSingle=0)
 
 print( (corels1p[['frnc']] + theme(legend.position="none")) | 
          (corels1s[['frnc']] + theme(axis.text.y=element_blank())) )
 # The axes and fill range are deterministic and fixed, so I can drop the redundant details.
 ```
 
-```{r correlations2, fig.height=9, fig.width=9}
+```{r correlations2, fig.height=12, fig.width=9}
 print( (corels1p[['drc']]) / (corels1s[['drc']] + theme(axis.text.x=element_blank())) )
 ```
 
-## VST counts
+## Variance regularized counts
 
 ```{r correlations3, fig.height=6, fig.width=9}
-corels2p <- my_pairwise_internal_corels(vstmat, colnames(rpm), method="pearson", 
+corels2p <- my_pairwise_internal_corels(vstmat, colnames(tpm), method="pearson", 
                                        minMean=0, minSingle=0)
-corels2s <- my_pairwise_internal_corels(vstmat, colnames(rpm), method="spearman", 
+corels2s <- my_pairwise_internal_corels(vstmat, colnames(tpm), method="spearman", 
                                        minMean=0, minSingle=0)
 
 print( (corels2p[['frnc']] + theme(legend.position="none")) | 
@@ -389,12 +422,12 @@ print( (corels2p[['drc']]) / (corels2s[['drc']] + theme(axis.text.x=element_blan
 
 # DE
 
-The first subsection below contains static volcano and MA plots of *all the genes*.
+The first subsection below contains static plots of *all the genes*.
 The plots are generated at sufficient resolution but may be scaled to fit the page width. Simply right-click and open image in new tab to get a more legible view.
 
 The second subsection contains interactive versions of these plots, filtered to show only the genes that meet the thresholds. There you can hover over points to see their ID, zoom in, etc.
 
-The highlighted red triangles are the up to `r params$ntop` top hits out of all the points that meet the thresholds. This number limit is arbitrary. "Top-ness" of hits is ranked roughly based on their "distance" from the origin of the axes in the volcano plots and is not a substitute for judgement based on experience.
+The highlighted red points are the up to `r params$ntop` top hits out of all the points that meet the thresholds. This number limit is arbitrary and serves mainly to allow the convenience of labelling potentially interesting hits while also preventing over-crowding the plots. "Top-ness" of hits is ranked roughly based on their "distance" from the origin of the axes in the volcano plots,
 
 If a contrast does not have any hits that meet the thresholds defined at the beginning of this report, a warning message will indicate that there are no hits, and there will be no highlighted points. Instead, the `r params$ntop` "top-est" non-hit points will be listed in the table and shown in the interactive plots for exploration.
 
@@ -412,8 +445,9 @@ coeffs <- resultsNames(deobj)[resultsNames(deobj) != "Intercept"]
 
 ```{r functionDE}
 # DE
-do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, addPrefix = params$longlabel,
-                        pcutoff = params$pcutoff, lfcthreshold = params$lfcthreshold, filterBM=params$filterBaseMean, prefix=params$prefix){
+do_de_plots <- function(contrast, dds = deobj, rpms = tpm, ntop = params$ntop, addPrefix = params$longlabel,
+                        pcutoff = params$pcutoff, lfcthreshold = params$lfcthreshold, filterBM=params$filterBaseMean, 
+                        prefix=params$prefix, PMtype=colsuffix, rlog=params$rlog){
   # contrast <- coeffs[1]
   highlight <- c("non-significant", "significant, FC low", "significant", paste("significant, top", params$ntop))
   hlcol <- c("grey50", "black", "blue", "red")
@@ -422,17 +456,20 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, a
   # Get DE for given contrast
   lfc <- results(dds, name=contrast, independentFiltering = filterBM, alpha=pcutoff)
   shrink <- lfcShrink(dds, coef=contrast, type='apeglm')
-  
   lfc <- cbind(data.table(name=rownames(lfc)), as.data.table(lfc))
-  lfc[, mlog10p := -log10(padj)]
   shrink <- cbind(data.table(name=rownames(shrink)), as.data.table(shrink))
+  
+  # Precompute useful conversions
+  lfc[, mlog10p := -log10(padj)]
   shrink[, mlog10p := -log10(padj)] 
   shrink[, absl2fc := abs(log2FoldChange)]
   
   # Combine shrunken and non-shrunken LFC tables for output, minus identical columns
   outtab <- merge(lfc, shrink[, ! names(shrink) %in% c('baseMean', 'pvalue'), with=FALSE], by="name", all=TRUE, suffixes=c('', '.shrink'))
   
-  ## Heuristic selection of top hits to highlight, by eucledian distance from origin.
+  
+  ## Home-brewed selection of top hits to highlight, by euclidian distance from origin.
+  # It mostly works sensibly enough, but the selection should not be taken as gospel.
   
   # Thresholds.
   outtab[, meetthresh := !is.na(padj) & absl2fc >= lfcthreshold & padj < pcutoff]
@@ -462,7 +499,7 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, a
   }
   if (nrow(subfc) < ntop) {
     subfc <- outtab[mlog10p > 0.1, ]
-    # Scrape the bottom of the barel.
+    # Scrape the bottom of the barrel.
   }
   if (nrow(subfc) < ntop) {
     subfc <- head(outtab, n=ntop)
@@ -556,23 +593,28 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, a
   mM <- attr(dds, "modelMatrix")
   refs <- rownames(mM[apply(mM, 1, sum) == 1, , drop=FALSE])
   treats <- rownames(mM)[mM[, contrast] == 1]
-  selvst <- assay(vst(dds, blind=FALSE))[head(subfc$name, n=ntop), ]
   selcnt <- rpms[head(subfc$name, n=ntop), ]
+  if (rlog) {
+    selvst <- assay(rlog(deobj, blind = TRUE))[head(subfc$name, n=ntop), ]
+  } else {
+    selvst <- assay(vst(deobj, blind=FALSE))[head(subfc$name, n=ntop), ]
+  }
+  
   if (is.null(dim(selcnt))) {
     # if there is only one hit
     selvst <- as.data.frame( c(as.list(selvst[c(refs, treats)]), list(name=subfc$name)) )
-    selvst$type <- "VST count"
+    selvst$type <- ifelse(rlog, "rlog_count", "VST_count")
     selcnt <- as.data.frame( c(as.list(selcnt[c(refs, treats)]), list(name=subfc$name)) )
-    selcnt$type <- "RPM"
+    selcnt$type <- PMtype
     # selcnt <- rbind(selcnt, selvst)
-    selcnt <- melt(selcnt, id.vars="name", variable.name="sample", value.name="RPM")
-    selvst <- melt(selvst, id.vars="name", variable.name="sample", value.name="VST_count")
+    selcnt <- melt(selcnt, id.vars="name", variable.name="sample", value.name=PMtype)
+    selvst <- melt(selvst, id.vars="name", variable.name="sample", value.name=ifelse(rlog, "rlog_count", "VST_count"))
     # rn <- subfc$name
   } else {
     selcnt <- selcnt[, c(refs, treats)]
     selvst <- selvst[, c(refs, treats)]
     
-    # Custer row and columns
+    # Cluster row and columns
     cfit <- hclust(dist(scale(t(selvst), center=TRUE))) # cluster columns
     rfit <- hclust(dist(scale(selvst, center=FALSE)))    # cluster rows
     selcnt <- selcnt[rfit$order, cfit$order]
@@ -583,43 +625,29 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, a
     # Tidy
     selcnt <- as.data.table(cbind(data.table(name=rownames(selcnt)), as.data.frame(selcnt)))
     selcnt[, name := factor(name, ordered=TRUE, levels=rn)]
-    selcnt[, type := "RPM"]
+    selcnt[, type := PMtype]
     selvst <- as.data.table(cbind(data.table(name=rownames(selvst)), as.data.frame(selvst)))
     selvst[, name := factor(name, ordered=TRUE, levels=rn)]
-    selvst[, type := "VST count"]
+    selvst[, type := ifelse(rlog, "rlog_count", "VST_count")]
     # selcnt <- rbind(selcnt, selvst)
-    selcnt <- melt(selcnt, id.vars=c("name", "type"), variable.name="sample", value.name="RPM")
+    selcnt <- melt(selcnt, id.vars=c("name", "type"), variable.name="sample", value.name=PMtype)
     selcnt[, sample := factor(sample, ordered=TRUE, levels=cn)]
-    selvst <- melt(selvst, id.vars=c("name", "type"), variable.name="sample", value.name="VST_count")
+    selvst <- melt(selvst, id.vars=c("name", "type"), variable.name="sample", value.name=ifelse(rlog, "rlog_count", "VST_count"))
     selvst[, sample := factor(sample, ordered=TRUE, levels=cn)]
   }
-
-  # Cluster the genes and plot the heatmaps
-  mat <- dcast(selcnt, name ~ sample, value.var='RPM')
-  rn <- mat[[1]]
-  cn <- names(mat)
-  mat <- as.matrix(mat[,2:length(mat), with=FALSE])
-  colnames(mat) <- cn[2:length(cn)]
-  rownames(mat) <- rn
-  hcfit <- hclust(dist(scale(mat, center=TRUE)))
-  selcnt[, name := factor(name, ordered=TRUE, levels=rn[hcfit$order])]
-  selcnt[, sample := factor(sample, ordered=TRUE, levels=rownames(coldata))]
-  # Keep the same gene order
-  selvst[, name := factor(name, ordered=TRUE, levels=rn[hcfit$order])]
-  selvst[, sample := factor(sample, ordered=TRUE, levels=rownames(coldata))]
   
-  ph1 <- ggplot(selcnt, aes(x=sample, y=name, fill=log10(RPM))) +
+  ph1 <- ggplot(selcnt, aes(x=sample, y=name, fill=log10(selcnt[["TPM"]]))) +
             geom_tile() +
-            facet_grid(. ~ type) +
-            scale_fill_gradient(high="white", low="darkgreen", na.value = "black") +
+            # facet_grid(. ~ type) +
+            scale_fill_gradient(high="yellow2", low="darkgreen", na.value = "black", name="log10(TPM)") +
             labs(title=contrast) +
             theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
                   panel.grid = element_blank())
   
-  ph2 <- ggplot(selvst, aes(x=sample, y=name, fill=VST_count)) +
+  ph2 <- ggplot(selvst, aes_string(x="sample", y="name", fill=ifelse(rlog, "rlog_count", "VST_count"))) +
             geom_tile() +
-            facet_grid(. ~ type) +
-            scale_fill_gradient(high="white", low="darkgreen", na.value = "black") +
+            # facet_grid(. ~ type) +
+            scale_fill_gradient(high="yellow2", low="darkgreen", na.value = "black") +
             labs(title=contrast) +
             theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
                   panel.grid = element_blank())
@@ -632,13 +660,15 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, a
                            # counts(dds)[outtab$name, c(refs, treats), drop=FALSE],
                            refMean = rowMeans(counts(dds)[outtab$name, refs, drop=FALSE]),
                            treatMean = rowMeans(counts(dds)[outtab$name, treats, drop=FALSE]),
+                           meanCount = rowMeans(counts(dds)[outtab$name, c(refs, treats), drop=FALSE]),
                            refStDev = sqrt(rowVars(counts(dds)[outtab$name, refs, drop=FALSE])),
                            treatStDev = sqrt(rowVars(counts(dds)[outtab$name, treats, drop=FALSE])) ),
                 data.table(name=rownames(rpms), 
                            # rpms[, c(refs, treats), drop=FALSE],
-                           refMeanRPM=rowMeans(rpms[, refs]),
-                           treatMeanRPM=rowMeans(rpms[, treats])),
-                all=TRUE, by="name", suffixes = c('.Count', '.RPM') )
+                           refMeanTPM = rowMeans(rpms[, refs]),
+                           treatMeanTPM = rowMeans(rpms[, treats]),
+                           meanScaledCount = rowMeans(rpms[, c(refs, treats )]) ),
+                all=TRUE, by="name" )
   
   outtab <-merge(outtab,
                  cnt,
@@ -647,9 +677,9 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, a
  
   # Increment the 0s so they survive the log-transformation, but in a way they don't mix with non-zero data.
   # If data has been pre-filtered with minMean, there should be no remaining zeros.
-  zeros <- min(outtab[refMeanRPM > 0, refMeanRPM], outtab[treatMeanRPM > 0, treatMeanRPM]) / 10
+  zeros <- min(outtab[refMeanTPM > 0, refMeanTPM], outtab[treatMeanTPM > 0, treatMeanTPM]) / 10
   
-  pe1 <- ggplot(NULL, aes(x=refMeanRPM + zeros, y=treatMeanRPM + zeros, label=name, colour=category)) +
+  pe1 <- ggplot(NULL, aes(x=refMeanTPM + zeros, y=treatMeanTPM + zeros, label=name, colour=category)) +
       geom_abline(intercept = 0, slope = 1, colour='black') +
       geom_point(data=outtab[category == highlight[1], ], alpha=0.4, size=rel(0.8)) +
       geom_point(data=outtab[category == highlight[2], ], alpha=0.7, size=rel(0.8)) +
@@ -661,20 +691,20 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, a
       scale_y_log10() +
       scale_colour_manual(values=hlcol) +
       annotation_logticks(base=10, sides='lrtb') +
-      labs(title=contrast, x='reference Mean RPM', y='treatment Mean RPM') +
+      labs(title=contrast, x=paste('reference Mean', PMtype), y=paste('treatment Mean', PMtype)) +
       theme(panel.grid.minor = element_blank())
   
-  pe1ly <- ggplot(NULL, aes(x=refMeanRPM + zeros, y=treatMeanRPM, label=name, colour=category)) +
+  pe1ly <- ggplot(NULL, aes(x=refMeanTPM + zeros, y=treatMeanTPM, label=name, colour=category)) +
       geom_abline(intercept = 0, slope = 1, colour='black') +
       geom_point(data=outtab[category == highlight[3], ], alpha=0.7) +
       geom_point(data=outtab[category == highlight[4], ]) +
       scale_x_log10() + 
       scale_y_log10() +
       scale_colour_manual(values=hlcol) +
-      labs(title=contrast, x='reference Mean RPM', y='treatment Mean RPM') +
+      labs(title=contrast, x=paste('reference Mean', PMtype), y=paste('treatment Mean', PMtype)) +
       theme(legend.position = "none", panel.grid.minor = element_blank()) 
   
-  pe2 <- ggplot(NULL, aes(x=refMeanRPM + zeros, y=refStDev, label=name, colour=category)) +
+  pe2 <- ggplot(NULL, aes(x=refMeanTPM + zeros, y=refStDev, label=name, colour=category)) +
       geom_point(data=outtab[category == highlight[1], ], alpha=0.4, size=0.8) +
       geom_point(data=outtab[category == highlight[2], ], alpha=0.7, size=0.8) +
       geom_point(data=outtab[category == highlight[3], ], alpha=0.7) +
@@ -685,10 +715,10 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, a
       scale_y_log10() +
       scale_colour_manual(values=hlcol) +
       annotation_logticks(base=10, sides='lrtb') +
-      labs(title=contrast, x='reference Mean RPM', y='reference St Dev') +
+      labs(title=contrast, x=paste('reference Mean', PMtype), y='reference St.Dev.') +
       theme(panel.grid.minor = element_blank()) 
   
-  pe3 <- ggplot(NULL, aes(x=treatMeanRPM, y=treatStDev, label=name, colour=category)) +
+  pe3 <- ggplot(NULL, aes(x=treatMeanTPM, y=treatStDev, label=name, colour=category)) +
       geom_point(data=outtab[category == highlight[1], ], alpha=0.4, size=0.8) +
       geom_point(data=outtab[category == highlight[2], ], alpha=0.7, size=0.8) +
       geom_point(data=outtab[category == highlight[3], ], alpha=0.7) +
@@ -699,21 +729,21 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, a
       scale_y_log10() +
       scale_colour_manual(values=hlcol) +
       annotation_logticks(base=10, sides='lrtb') +
-      labs(title=contrast, x='treatment Mean RPM', y='treatment St Dev') +
+      labs(title=contrast, x=paste('treatment Mean', PMtype), y='treatment St.Dev.') +
       theme(panel.grid.minor = element_blank()) 
   
   ## Table pt2
   
   hashits <- any(outtab[, meetthresh], na.rm=TRUE)
   
-  # Drop columns I never use
-  outtab[, stat := NULL]
-  outtab[, mlog10p := NULL]
-  outtab[, mlog10p.shrink:= NULL]
-  outtab[, padj.shrink := NULL]
-  outtab[, lfcSE.shrink := NULL]
+  setnames(outtab, sub('TPM|RPM', paste0('.', PMtype), names(outtab)))
   
+  virgin <- NULL
   if (addPrefix) {
+    # Pristine copy, without prefixes. Drop columns I don't need
+    keep <- names(outtab)[!grepl("stat|mlog10p.shrink|padj.shrink|lfcSE|pvalue|meetthresh|istop|category|StDev", names(outtab))]
+    virgin <- copy(outtab[, keep, with=FALSE])
+    
     # Prepare column names for merging the files later
     prefix <- paste(prefix,
                      # paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(dds), perl=TRUE), collapse=''),
@@ -724,8 +754,8 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, a
     #            paste(prefix,
     #                  names(outtab)[2:length(outtab)], sep='.') ) )
     
-    # Add as suffix insted. Makes life easier in spotfire
-    setnames(outtab, c(names(outtab)[1],      # keep uniform name across tables for the joining key
+    # Add as suffix instead. Makes life easier in spotfire
+    setnames(outtab, c(names(outtab)[1],      # keep uniform name across tables for use as joining key
                        paste(names(outtab)[2:length(outtab)],  prefix, sep='.')) )
   
   }
@@ -736,7 +766,7 @@ do_de_plots <- function(contrast, dds = deobj, rpms = rpm, ntop = params$ntop, a
               pe1=pe1, pe2=pe2, pe3=pe3, pe1ly=ggplotly(pe1ly, dynamicTicks = TRUE),
               ph1=ph1, ph2=ph2, 
               tophits=rn, hashits=hashits,
-              outtab=outtab))
+              outtab=outtab, virgin=virgin))
 }
 ```
 
@@ -751,11 +781,13 @@ resall <- lapply(coeffs, function(contrast) {
 names(resall) <- vapply(resall, function(x) { x$contrast }, character(1))
 
 
-if (length(cD) == 1 && params$roundrobin) {
+if (length(cD) == 1 && params$roundrobin && length(coeffs) > 1) {
   # Determine which was the reference and rotate each other level as reference.
-  isref <- vapply(levels(cD[[1]]),
-                   function(x) { all(grepl(x, coeffs[1]), grepl(x, coeffs[2])) },
-                   logical(1) )
+  ## I don't remember why this works, P
+  ## Also possibly designed for 3 conditions. Not sure how/if it works correctly for more than 3.
+  isref <- vapply(levels(cD[[1]]), function(x) {
+                    all(grepl(x, coeffs[1]), grepl(x, coeffs[2]))
+           }, logical(1) )
   ref <- levels(cD[[1]])[isref]
   remaining <- levels(cD[[1]])[!isref]
   for (lev in levels(cD[[1]])[!isref]) {
@@ -776,30 +808,21 @@ if (length(cD) == 1 && params$roundrobin) {
   # The rotation is brute-force-y and creates duplicate results A vs B and B vs A. Get rid of redundant contrasts.
   
   allcoeffs <- vapply(resall, function(x) { x$contrast }, character(1))
-  # The reference condition shoud always be on the right-hand side of the VS.
-  keep <- allcoeffs[!grepl(paste0(ref, "_vs"), allcoeffs)]
-  # For the rest, either of each duplicate is fine. Let R create a vector of pairwise combinations.
+  # The reference condition should always be on the right-hand side of the VS. 
+  # Careful, the reference might also be a substring of another condition, so the pattern has to be quite explicit,
+  keep <- allcoeffs[!grepl(paste0("_", ref, "_vs"), allcoeffs, perl=TRUE)]
+  # For the rest, either of each duplicate is assumed to be equally intuitive. 
+  # Let R create a vector of pairwise combinations.
   uniqcoeffs <- vapply(as.data.frame(combn(levels(cD[[1]]), 2), stringsAsFactors=FALSE),
                           function(x) { paste(names(cD)[1], x[2], "vs", x[1], sep="_") },
                           character(1) )
-  uniqcoeffs <- uniqcoeffs[!grepl(ref, uniqcoeffs)] # already filtered the coefficients involving reference.
+  uniqcoeffs <- uniqcoeffs[!grepl(paste0("_", ref, "_vs|vs_", ref, "$"), uniqcoeffs)] # already filtered the coefficients involving reference.
   keep <- keep[! keep %in% uniqcoeffs]
   resall <- resall[keep]
 }
 ```
 
 ## Results by comparison
-
-For each comparison the following are shown:
-
-* A list of highlighted "top" hit genes. This selection is for quick first view purposes. An effort is made to prioritize highest fold-change lowest p-value genes in this selection, but it is not a definitive selection of "best" candidates. The number of genes highlighted is arbitrary and reflects practical considerations of how many labels can reasonably be displayed in a scatter plot of a given size and resolution without overcrowding. 
-* Volcano plot with the "top" hits highlighted.
-* MA plot with the "top" hits highlighted. This is a way to check how much support there is across the samples for the fold-change of a gene. MA plots also show if there is a global skew in fold changes, though this is only the case when DESeq2 is explicitly prevented from scaling the data.
-* Covariation scatter plot of the mean RPMs for the two conditions, with all hits highlighted. Mean RPMs are increased by 1/10th the value of the smallest non-zero RPM value in the dataset, in order to allow genes with a zero mean value in one condition to be displayed on log-scale axes while remaining distinct from non-zero values and without significant impact on non-zero values.
-
-Fold-change shrinking is a procedure that aims to counter the inflated fold-changes that are produced by low-counts, and can be considered an alternative/orthogonal method to the p-value. "Top" hits selected here have shrunken LFCs that still satisfy the LFC threshold. Therefore, if you see hits in the standard plots below that seem like they should have been marked as "top" but were skipped, it is likely because they have low raw count and their shrunken LFC fell below the threshold.
-
-The plots below, as well as additional plots including versions with shrunken LFCs, are available in the accompanying PDF file.
 
 IMPORTANT: In the name of each comparison, the condition used as **"reference" is always shown to the right** of the `vs` in the name, whereas the condition used as **"treatment" is always shown on the left** of the `vs`.
 
@@ -826,9 +849,10 @@ for (res in resall) {
   # Plots
   ################
   
+  print(res[["pe1"]])
   print(res[["pv1"]])
   print(res[["pma1"]])
-  print(res[["pe1"]])
+  print(res[["ph2"]])
 }
 ```
 
@@ -848,57 +872,59 @@ ly <- lapply(resall, function(res) {
 htmltools::tagList(ly)
 ```
 
-<!-- ## Expression heatmap  -->
+## Expression heatmap
 
-<!-- Heatmap of all the top hits from all the comparisons in this report. -->
+Heatmap of all the top hits from all the comparisons in this report.
 
-<!-- ```{r dexp, fig.height=15, fig.width=7} -->
-<!-- # Collect all the top50s -->
-<!-- allhits <- Reduce(union, lapply(resall, function(res) { -->
-<!--   return(res[["tophits"]]) -->
-<!-- })) -->
+```{r dexp, fig.height=15, fig.width=7}
+# Collect all the top50s
+allhits <- Reduce(union, lapply(resall, function(res) {
+  return(res[["tophits"]])
+}))
 
-<!-- # Counts -->
-<!-- mat1 <- vstmat[allhits, ] -->
-<!-- mat2 <- rpm[allhits, ] -->
+# Counts
+mat1 <- vstmat[allhits, ]
+mat2 <- tpm[allhits, ]
 
-<!-- # Custer row and columns -->
-<!-- cfit <- hclust(dist(scale(t(mat1), center=TRUE))) # cluster columns -->
-<!-- rfit <- hclust(dist(scale(mat1, center=FALSE)))    # cluster rows -->
-<!-- cn <- colnames(mat1)[cfit$order] -->
-<!-- rn <- rownames(mat1)[rfit$order] -->
+# Custer row and columns
+cfit <- hclust(dist(scale(t(mat1), center=TRUE))) # cluster columns
+rfit <- hclust(dist(scale(mat1, center=FALSE)))    # cluster rows
+cn <- colnames(mat1)[cfit$order]
+rn <- rownames(mat1)[rfit$order]
 
-<!-- allhitdf <- as.data.table(mat2) -->
-<!-- allhitdf[, Feature := rownames(mat2)] -->
-<!-- allhitdf <- melt(allhitdf, value.name = "RPM", variable.name = "Sample", id.vars = "Feature") -->
-<!-- allhitdf[, Feature := ordered(Feature, levels=rn)] -->
-<!-- allhitdf[, Sample := ordered(Sample, levels=cn)] -->
+allhitdf <- as.data.table(mat2)
+allhitdf[, Feature := rownames(mat2)]
+allhitdf <- melt(allhitdf, value.name = "RPM", variable.name = "Sample", id.vars = "Feature")
+allhitdf[, Feature := ordered(Feature, levels=rn)]
+allhitdf[, Sample := ordered(Sample, levels=cn)]
 
-<!-- pallexp <- ggplot(allhitdf, aes(y=Feature, x=Sample, fill=log10(RPM))) + -->
-<!--   geom_tile() + -->
-<!--   scale_fill_gradient(na.value='black') + -->
-<!--   labs(y='', x='') + -->
-<!--   theme(axis.text.x = element_text(angle=90, hjust = 1, vjust = 0.5, size=rel(1)), -->
-<!--         axis.text.y = element_text(size=rel(0.6)), -->
-<!--         panel.grid = element_blank()) -->
+pallexp <- ggplot(allhitdf, aes(y=Feature, x=Sample, fill=log10(RPM))) +
+  geom_tile() +
+  scale_fill_gradient(high="skyblue", low="darkblue", na.value='black') +
+  labs(y='', x='') +
+  theme(axis.text.x = element_text(angle=90, hjust = 1, vjust = 0.5, size=rel(1)),
+        axis.text.y = element_text(size=rel(0.6)),
+        panel.grid = element_blank())
 
-<!-- allhitdf <- as.data.table(mat1) -->
-<!-- allhitdf[, Feature := rownames(mat1)] -->
-<!-- allhitdf <- melt(allhitdf, value.name = "VSTcounts", variable.name = "Sample", id.vars = "Feature") -->
-<!-- allhitdf[, Feature := ordered(Feature, levels=rn)] -->
-<!-- allhitdf[, Sample := ordered(Sample, levels=cn)] -->
+allhitdf <- as.data.table(mat1)
+allhitdf[, Feature := rownames(mat1)]
+allhitdf <- melt(allhitdf, value.name = ifelse(params$rlog, "rlog_count", "VST_count"), 
+                 variable.name = "Sample", id.vars = "Feature")
+allhitdf[, Feature := ordered(Feature, levels=rn)]
+allhitdf[, Sample := ordered(Sample, levels=cn)]
 
-<!-- pallvst <- ggplot(allhitdf, aes(y=Feature, x=Sample, fill=VSTcounts)) + -->
-<!--   geom_tile() + -->
-<!--   scale_fill_gradient(na.value='black') + -->
-<!--   labs(y='', x='') + -->
-<!--   theme(axis.text.x = element_text(angle=90, hjust = 1, vjust = 0.5, size=rel(1)), -->
-<!--         axis.text.y = element_text(size=rel(0.6)), -->
-<!--         panel.grid = element_blank()) -->
+pallvst <- ggplot(allhitdf, 
+                  aes_string(y="Feature", x="Sample", fill=ifelse(params$rlog, "rlog_count", "VST_count"))) +
+  geom_tile() +
+  scale_fill_gradient(high="skyblue", low="darkblue", na.value = "black") +
+  labs(y='', x='') +
+  theme(axis.text.x = element_text(angle=90, hjust = 1, vjust = 0.5, size=rel(1)),
+        axis.text.y = element_text(size=rel(0.6)),
+        panel.grid = element_blank())
 
-<!-- print(pallexp) -->
-<!-- print(pallvst) -->
-<!-- ``` -->
+print(pallvst)
+print(pallexp)
+```
 
 
 # Files out
@@ -907,12 +933,18 @@ htmltools::tagList(ly)
 
 ```{r csv}
 for (res in resall) {
-  res$outtab[, meetthresh := NULL]
-  res$outtab[, istop := NULL]
-  fwrite(res$outtab,
+  # Drop columns I don't need
+  keep <- names(res$outtab)[!grepl("stat|mlog10p.shrink|padj.shrink|lfcSE|pvalue|meetthresh|istop|category|StDev", names(res$outtab))]
+  fwrite(res$outtab[, keep, with=FALSE],
          file = file.path(params$baseDir,
                           params$resultsDir,
                           paste(params$prefix, res$contrast, 'deseq2.tsv', sep='.')),
+         sep = "\t", quote = FALSE, row.names = FALSE, col.names = TRUE)
+  if (params$longlabel)
+    fwrite(res$virgin,
+         file = file.path(params$baseDir,
+                          params$resultsDir,
+                          paste(params$prefix, res$contrast, 'deseq2.nolab.tsv', sep='.')),
          sep = "\t", quote = FALSE, row.names = FALSE, col.names = TRUE)
 }
 ```
@@ -929,8 +961,8 @@ pdf(file.path(params$baseDir,
 
 
 # Correlation plots
-print(corels1p[['frnc']] + labs(substitle='RPM'))
-print(corels1s[['drc']] + labs(substitle='RPM'))
+print(corels1p[['frnc']] + labs(substitle=colsuffix))
+print(corels1s[['drc']] + labs(substitle=colsuffix))
 print(corels2p[['frnc']] + labs(substitle='VST counts'))
 print(corels2s[['drc']] + labs(substitle='VST counts'))
 
