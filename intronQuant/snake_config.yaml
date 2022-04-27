@@ -31,7 +31,7 @@ PCA:
   minSingle: 100                     # minimum count in a single sample, IF the minimum mean is not met
   ntop: 15                           # top loading genes to report per principal component
   covars: "description/covars.txt"   # covariates table for highlighting in plots        UPDATE HERE maybe?
-  #specialnorm: '^ENSMUSG|^TCR|^IGH'  # ignore gene ids that match this pattern for calculation of the library size for TPM/RPM normalisation      UPDATE HERE!
+  #specialnorm: "'^ENSMUSG|^TCR|^IGH'"  # ignore gene ids that match this pattern for calculation of the library size for TPM/RPM normalisation      UPDATE HERE!
   specialnorm: 'NULL'
 
 do_DE: True     # ONLY use for a single simple DE formula applicable to all samples. More complex datasets/requirements should be handled outside the pipeline.
@@ -45,7 +45,7 @@ DE:
   minSingle: 100                     # minimum count in a single sample, IF the minimum mean is not met
   ntop: 50                           # top DE features to highlight
   covars: "description/covars.txt"   # covariates table        UPDATE HERE maybe?
-  #specialnorm: '^ENSMUSG|^TCR|^IGH'  # ignore gene ids that match this pattern for calculation of the library size for TPM/RPM normalisation      UPDATE HERE!
+  #specialnorm: "'^ENSMUSG|^TCR|^IGH'"  # ignore gene ids that match this pattern for calculation of the library size for TPM/RPM normalisation      UPDATE HERE!
   specialnorm: 'NULL'
 
 Spotfire:
