@@ -56,8 +56,7 @@ if config["do_DE"]:
 		rule all:
 			input:
 				HOME + "/process/multiqc_pre/multiqc_report.html",
-				HOME + "/process/duprates/duprates.pdf",
-				#expand(HOME + "/process/duprates/{countsfile}.duprate.txt", countsfile=COMBONAME),
+				HOME + "/process/duprates/duprates.txt",
 				expand(HOME + "/process/featureCounts/{countsfile}.txt", countsfile=FLAVOURS),
 				expand(HOME + "/results/PCA/{countsfile}.pca.html", countsfile=FLAVOURS),
 				expand(HOME + "/results/DE/{countsfile}.{group}." + config["DE"]["formula"] + ".deseq2.html", countsfile=FLAVOURS, group=GROUPS),
@@ -72,8 +71,7 @@ if config["do_DE"]:
 		rule all:
 			input:
 				HOME + "/process/multiqc_pre/multiqc_report.html",
-				HOME + "/process/duprates/duprates.pdf",
-				#expand(HOME + "/process/duprates/{countsfile}.duprate.txt", countsfile=COMBONAME),
+				HOME + "/process/duprates/duprates.txt",
 				expand(HOME + "/process/featureCounts/{countsfile}.txt", countsfile=FLAVOURS),
 				expand(HOME + "/results/PCA/{countsfile}.pca.html", countsfile=FLAVOURS),
 				expand(HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".deseq2.html", countsfile=FLAVOURS),
@@ -88,8 +86,7 @@ else:
 	rule all:
 		input:
 			HOME + "/process/multiqc_pre/multiqc_report.html",
-			HOME + "/process/duprates/duprates.pdf",
-			#expand(HOME + "/process/duprates/{countsfile}.duprate.txt", countsfile=COMBONAME),
+			HOME + "/process/duprates/duprates.txt",
 			expand(HOME + "/process/featureCounts/{countsfile}.txt", countsfile=FLAVOURS),
 			expand(HOME + "/results/PCA/{countsfile}.pca.html", countsfile=FLAVOURS)
 		params:
@@ -237,12 +234,12 @@ rule fastqc_mapped:
 
 
 if config["pairedend"]:
+
 	rule dupRadar:
 		input:
 			SCRATCH + "/data_chrfixed/{comboname}.aligned.bam"
 		output:
 			table=SCRATCH + "/duprate/{comboname}.duprate.txt",
-			table2=HOME + "/process/duprates/{comboname}.duprate.txt",
 			figure=SCRATCH + "/duprate/{comboname}.duprate.pdf"
 		params:
 			code=config["codeDir"],
@@ -251,7 +248,7 @@ if config["pairedend"]:
 			home=HOME
 		threads: 4
 		resources:
-			maxtime=30,
+			maxtime=3,
 			mem='4G'
 		envmodules:
 			"build-env/f2021",
@@ -259,19 +256,16 @@ if config["pairedend"]:
 		shell:
 			"""
 			mkdir -p $(dirname {output.table}) &&
-			Rscript {params.code}/dupRadar_run.R -b {input} -g {params.ann} -o {output.table} -p -s {params.stranding} -t {threads} &&
-			mkdir -p $(dirname {output.table2}) &&
-			cp {output.table} {output.table2}
+			Rscript {params.code}/dupRadar_run.R -b {input} -g {params.ann} -o {output.table} -p -s {params.stranding} -t {threads}
 			"""
-			
 			
 else:	
+
 	rule dupRadar:
 		input:
 			SCRATCH + "/data_chrfixed/{comboname}.aligned.bam"
 		output:
 			table=SCRATCH + "/duprate/{comboname}.duprate.txt",
-			table2=HOME + "/process/duprates/{comboname}.duprate.txt",
 			figure=SCRATCH + "/duprate/{comboname}.duprate.pdf"
 		params:
 			code=config["codeDir"],
@@ -288,9 +282,7 @@ else:
 		shell:
 			"""
 			mkdir -p $(dirname {output.table}) &&
-			Rscript {params.code}/dupRadar_run.R -b {input} -g {params.ann} -o {output.table} -s {params.stranding} -t {threads} &&
-			mkdir -p $(dirname {output.table2}) &&
-			cp {output.table} {output.table2}
+			Rscript {params.code}/dupRadar_run.R -b {input} -g {params.ann} -o {output.table} -s {params.stranding} -t {threads}
 			"""
 
 
@@ -310,18 +302,32 @@ rule multiqc_pre:
 		"multiqc -f -o {params.project}/process/multiqc_pre $(dirname {input.fastqc[0]}) $(dirname {input.flagstats[0]}) $(dirname {input.bamstats[0]})"
 
 
-rule merge_dup_pdf:
+rule merge_dup:
 	input:
-		pdf=expand(SCRATCH + "/duprate/{comboname}.duprate.pdf", comboname=COMBONAME)
+		pdf=expand(SCRATCH + "/duprate/{comboname}.duprate.pdf", comboname=COMBONAME),
+		table=expand(SCRATCH + "/duprate/{comboname}.duprate.txt", comboname=COMBONAME)
 	output:
-		HOME + "/process/duprates/duprates.pdf"
+		pdf=HOME + "/process/duprates/duprates.pdf",
+		table=HOME + "/process/duprates/duprates.txt"
+	params:
+		code=config["codeDir"],
+		scratch=SCRATCH,
+		home=HOME
+	envmodules:
+		"build-env/f2021",
+		"python/3.8.6-gcccore-10.2.0",
+		"scipy-bundle/2020.11-foss-2020b"
 	resources:
 		maxtime=5,
 		mem='1G'
 	shell:
 		"""
+		mkdir -p {params.home}/process/duprates &&
+
 		pdfmerge() {{ gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/default -dNOPAUSE -dQUIET -dBATCH -dDetectDuplicateImages -dCompressFonts=true -r150 -sOutputFile=$@ ; }}
-		pdfmerge {output} {input}
+		pdfmerge {output.pdf} {input.pdf} &&
+
+		{params.code}/fileutilities.py T {params.scratch}/duprate/*duprate.txt -i -l --cols 10 12 | perl -pe '~s/_\|10//g;~s/\.duprate_\|12/.RPKb/g;print' > {output.table}
 		"""
 ##
 
@@ -731,7 +737,7 @@ rule PCA:
 		mem='4G'
 	shell:
 		"""
-		Rscript {params.code}/pca_run.R -b {params.home} -f process/featureCounts/$(basename {input}) -G {params.pattern} -I 6 -i 1 -M {params.minMean} -m {params.minSingle} -n {params.ntop} -o results/PCA -r process/PCA -s {params.covars} -T {params.code}/pca_report_template.Rmd -W 6
+		Rscript {params.code}/pca_run.R -b {params.home} -f process/featureCounts/$(basename {input}) -G {params.pattern} -I 6 -i 1 -M {params.minMean} -m {params.minSingle} -n {params.ntop} -o results/PCA -r process/PCA -s {params.covars} -T {params.code}/PCA_report_template.Rmd -W 6
 		"""
 ##
 
@@ -945,9 +951,9 @@ if config["do_DE"]:
 		shell:
 			# A bit of a fuss to predetermine the number and names of all the individual table files that my deseq script will automatically create, so cheat by using my looping script.
 			"""
-			Rscript {params.code}/deseq2_prepare_for_spotfire.R -D {input.de} -f {params.lfc} -p {params.pcut} -c {params.minMean} -t {params.minTPM} -s &&
+			Rscript {params.code}/prepare_for_spotfire.R -D {input.de} -f {params.lfc} -p {params.pcut} -c {params.minMean} -t {params.minTPM} -s &&
 
-			{params.code}/fileutilities.py T $(dirname {input.de}) --dir deseq2.nolab.tsv | {params.code}/fileutilities.py P --loop Rscript {params.code}/deseq2_prepare_for_spotfire.R ,-D {{abs}} ,-f {params.lfc} ,-p {params.pcut} ,-c {params.minMean} ,-t {params.minTPM} ,-s &&
+			{params.code}/fileutilities.py T $(dirname {input.de}) --dir deseq2.nolab.tsv | {params.code}/fileutilities.py P --loop Rscript {params.code}/prepare_for_spotfire.R ,-D {{abs}} ,-f {params.lfc} ,-p {params.pcut} ,-c {params.minMean} ,-t {params.minTPM} ,-s &&
 			{params.code}/fileutilities.py T $(dirname {input.de}) --dir deseq2.spotfire.tsv | {params.code}/fileutilities.py P --loop cp {{abs}} {params.home}/results/DE/
 			"""
 
