@@ -251,7 +251,7 @@ if config["pairedend"]:
 			home=HOME
 		threads: 4
 		resources:
-			maxtime=3,
+			maxtime=30,
 			mem='4G'
 		envmodules:
 			"build-env/f2021",
