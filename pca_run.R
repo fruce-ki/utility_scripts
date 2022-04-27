@@ -31,7 +31,7 @@ if ( !is.null(opt$help) ) {
 }
  
 if ( is.null(opt$reportTemplate) ) {
-  opt$reportFile <- '~/utility_scripts/PCA_report_template.Rmd'
+  opt$reportFile <- '~/utility_scripts/pca_report_template.Rmd'
 }
 
 stopifnot(!is.null(opt$baseDir))
