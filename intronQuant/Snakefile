@@ -737,7 +737,7 @@ rule PCA:
 		mem='4G'
 	shell:
 		"""
-		Rscript {params.code}/pca_run.R -b {params.home} -f process/featureCounts/$(basename {input}) -G {params.pattern} -I 6 -i 1 -M {params.minMean} -m {params.minSingle} -n {params.ntop} -o results/PCA -r process/PCA -s {params.covars} -T {params.code}/PCA_report_template.Rmd -W 6
+		Rscript {params.code}/pca_run.R -b {params.home} -f process/featureCounts/$(basename {input}) -G {params.pattern} -I 6 -i 1 -M {params.minMean} -m {params.minSingle} -n {params.ntop} -o results/PCA -r process/PCA -s {params.covars} -T {params.code}/pca_report_template.Rmd -W 6
 		"""
 ##
 

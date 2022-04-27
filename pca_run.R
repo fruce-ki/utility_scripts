@@ -16,7 +16,7 @@ spec = matrix(c(
   'resultsDir',     'o', 1, "character", "Directory in which to save the report (.).",
   'RDSoutdir'    ,  'r', 1, "character", "Directory in which to save the raw computed objects (.).",
   'samplesFile',    's', 1, "character", "Tab-separated table with `Sample` column followed by the variable columns.",
-  'reportTemplate', 'T', 1, "character", "Full path to template Rmd file (~/utility_scripts/PCA_report_template.Rmd).",
+  'reportTemplate', 'T', 1, "character", "Full path to template Rmd file (~/utility_scripts/pca_report_template.Rmd).",
   'widthsFile',     'w', 1, "character", "Full path to table of feature lengths. 2 columns: feature ID and length.  the IDs must match the count IDs and be unique.",
   'widthsCol',      'W', 1, "integer",   "Column in the counts file that contains feature lengths. This should be among the non-count columns, see also -I. It is an alternative to providing a separate lengths file."
 ), byrow=TRUE, ncol=5)
