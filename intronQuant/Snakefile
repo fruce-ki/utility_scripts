@@ -327,7 +327,7 @@ rule merge_dup:
 		pdfmerge() {{ gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/default -dNOPAUSE -dQUIET -dBATCH -dDetectDuplicateImages -dCompressFonts=true -r150 -sOutputFile=$@ ; }}
 		pdfmerge {output.pdf} {input.pdf} &&
 
-		{params.code}/fileutilities.py T {params.scratch}/duprate/*duprate.txt -i -l --cols 10 12 | perl -pe '~s/_\|10//g;~s/\.duprate_\|12/.RPKb/g;print' > {output.table}
+		{params.code}/fileutilities.py T {params.scratch}/duprate/*duprate.txt -i -l --cols 10 12 | perl -pe '~s/_\|10//g;~s/\.duprate_\|12/.RPKb/g' > {output.table}
 		"""
 ##
 
