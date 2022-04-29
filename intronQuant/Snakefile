@@ -57,6 +57,7 @@ if config["do_DE"]:
 			input:
 				HOME + "/process/multiqc_pre/multiqc_report.html",
 				HOME + "/process/duprates/duprates.txt",
+				HOME + "/process/duprates/duprates.melted.txt",
 				expand(HOME + "/process/featureCounts/{countsfile}.txt", countsfile=FLAVOURS),
 				expand(HOME + "/results/PCA/{countsfile}.pca.html", countsfile=FLAVOURS),
 				expand(HOME + "/results/DE/{countsfile}.{group}." + config["DE"]["formula"] + ".deseq2.html", countsfile=FLAVOURS, group=GROUPS),
@@ -72,6 +73,7 @@ if config["do_DE"]:
 			input:
 				HOME + "/process/multiqc_pre/multiqc_report.html",
 				HOME + "/process/duprates/duprates.txt",
+				HOME + "/process/duprates/duprates.melted.txt",
 				expand(HOME + "/process/featureCounts/{countsfile}.txt", countsfile=FLAVOURS),
 				expand(HOME + "/results/PCA/{countsfile}.pca.html", countsfile=FLAVOURS),
 				expand(HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".deseq2.html", countsfile=FLAVOURS),
@@ -87,6 +89,7 @@ else:
 		input:
 			HOME + "/process/multiqc_pre/multiqc_report.html",
 			HOME + "/process/duprates/duprates.txt",
+			HOME + "/process/duprates/duprates.melted.txt",
 			expand(HOME + "/process/featureCounts/{countsfile}.txt", countsfile=FLAVOURS),
 			expand(HOME + "/results/PCA/{countsfile}.pca.html", countsfile=FLAVOURS)
 		params:
@@ -308,7 +311,8 @@ rule merge_dup:
 		table=expand(SCRATCH + "/duprate/{comboname}.duprate.txt", comboname=COMBONAME)
 	output:
 		pdf=HOME + "/process/duprates/duprates.pdf",
-		table=HOME + "/process/duprates/duprates.txt"
+		table=HOME + "/process/duprates/duprates.txt",
+		melt=HOME + "/process/duprates/duprates.melted.txt"
 	params:
 		code=config["codeDir"],
 		scratch=SCRATCH,
@@ -316,7 +320,8 @@ rule merge_dup:
 	envmodules:
 		"build-env/f2021",
 		"python/3.8.6-gcccore-10.2.0",
-		"scipy-bundle/2020.11-foss-2020b"
+		"scipy-bundle/2020.11-foss-2020b",
+		"r-bundle-bioconductor/3.12-foss-2020b-r-4.0.3"
 	resources:
 		maxtime=5,
 		mem='1G'
@@ -327,7 +332,8 @@ rule merge_dup:
 		pdfmerge() {{ gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/default -dNOPAUSE -dQUIET -dBATCH -dDetectDuplicateImages -dCompressFonts=true -r150 -sOutputFile=$@ ; }}
 		pdfmerge {output.pdf} {input.pdf} &&
 
-		{params.code}/fileutilities.py T {params.scratch}/duprate/*duprate.txt -i -l --cols 10 12 | perl -pe '~s/_\|10//g;~s/\.duprate_\|12/.RPKb/g' > {output.table}
+		{params.code}/fileutilities.py T {params.scratch}/duprate/*duprate.txt -i -l --cols 10 12 | perl -pe '~s/_\|10//g;~s/\.duprate_\|12/.RPKb/g' > {output.table} &&
+		Rscript {params.code}/dup_melt.R {output.table}
 		"""
 ##
 
