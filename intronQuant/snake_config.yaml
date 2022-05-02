@@ -23,9 +23,6 @@ annotation:      # UPDATE HERE maybe?
 #kallisto_index: "/groups/busslinger/Kimon/genome_mm10/kallisto/GRCm38.mm10.all-premRNA_plus_multiExon-mRNA"
 reference: "/groups/busslinger/Bioinf/data/genomes/mm10/assembly/GRCm38.mm10.fa"
 
-Dup:
-  stranding: 1                        # Stranding mode for dupRadar.
-
 PCA:
   minMean: 50                        # minimum mean count across samples
   minSingle: 100                     # minimum count in a single sample, IF the minimum mean is not met
@@ -54,7 +51,8 @@ Spotfire:
   minMean: 50                        # minimum mean count across samples
   minTPM: 5                     # minimum count in a single sample, IF the minimum mean is not met
 
-pairedend: True
+stranding: 1                        # Stranding mode for dupRadar and featureCoutns.      UPDATE HERE!
+pairedend: True                                                                         # UPDATE HERE!
 #minFrag: 100      # Fsk3 fragment sizes must mean something different, these values cause abysmal alignment failures
 #maxFrag: 700
 #readLen: 60

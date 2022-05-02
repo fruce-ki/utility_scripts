@@ -247,7 +247,7 @@ if config["pairedend"]:
 		params:
 			code=config["codeDir"],
 			ann=config["annotation"]["exons"],
-			stranding=config["Dup"]["stranding"],
+			stranding=config["stranding"],
 			home=HOME
 		threads: 4
 		resources:
@@ -273,7 +273,7 @@ else:
 		params:
 			code=config["codeDir"],
 			ann=config["annotation"]["exons"],
-			stranding=config["Dup"]["stranding"],
+			stranding=config["stranding"],
 			home=HOME
 		threads: 4
 		resources:
@@ -355,6 +355,7 @@ if pairedend:
 		output:
 			SCRATCH + "/featureCounts/exon_genecounts.txt"
 		params:
+			stranding=config["stranding"],
 			ann=config["annotation"]["exons"]
 		envmodules:
 			"build-env/f2021",
@@ -367,7 +368,7 @@ if pairedend:
 		shell:
 			"""
 			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t exon -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} {input}
+			featureCounts -T {threads} -t exon -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} -s {params.stranding} {input}
 			"""
 
 
@@ -377,6 +378,7 @@ if pairedend:
 		output:
 			SCRATCH + "/featureCounts/intron_genecounts.txt"
 		params:
+			stranding=config["stranding"],
 			ann=config["annotation"]["introns"]
 		envmodules:
 			"build-env/f2021",
@@ -389,7 +391,7 @@ if pairedend:
 		shell:
 			"""
 			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t intron -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} {input}
+			featureCounts -T {threads} -t intron -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} -s {params.stranding} {input}
 			"""
 
 
@@ -399,6 +401,7 @@ if pairedend:
 			output:
 				SCRATCH + "/featureCounts/exon_spliced_genecounts.txt"
 			params:
+				stranding=config["stranding"],
 				ann=config["annotation"]["exons"]
 			envmodules:
 				"build-env/f2021",
@@ -409,7 +412,7 @@ if pairedend:
 				maxtime=30,
 				mem='4G'
 			shell:
-				"featureCounts -T {threads} -t exon --splitOnly -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} {input}"
+				"featureCounts -T {threads} -t exon --splitOnly -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} -s {params.stranding} {input}"
 
 
 	rule quantify_genes_lastexon_pairedend:
@@ -418,6 +421,7 @@ if pairedend:
 		output:
 			SCRATCH + "/featureCounts/exonL1_genecounts.txt"
 		params:
+			stranding=config["stranding"],
 			ann=config["annotation"]["lastexon"]
 			#minL=config["minFrag"],
 			#maxL=config["minFrag"]
@@ -432,7 +436,7 @@ if pairedend:
 		shell:
 			"""
 			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t exon -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} {input}
+			featureCounts -T {threads} -t exon -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} -s {params.stranding} {input}
 			"""
 
 
@@ -442,6 +446,7 @@ if pairedend:
 		output:
 			SCRATCH + "/featureCounts/intronF1_genecounts.txt"
 		params:
+			stranding=config["stranding"],
 			ann=config["annotation"]["firstintron"]
 			#minL=config["minFrag"],
 			#maxL=config["minFrag"]
@@ -456,7 +461,7 @@ if pairedend:
 		shell:
 			"""
 			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t intron -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} {input}
+			featureCounts -T {threads} -t intron -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} -s {params.stranding} {input}
 			"""
 
 
@@ -466,6 +471,7 @@ if pairedend:
 		output:
 			SCRATCH + "/featureCounts/exonL2_genecounts.txt"
 		params:
+			stranding=config["stranding"],
 			ann=config["annotation"]["last2exons"]
 		envmodules:
 			"build-env/f2021",
@@ -478,7 +484,7 @@ if pairedend:
 		shell:
 			"""
 			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t exon -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} {input}
+			featureCounts -T {threads} -t exon -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} -s {params.stranding} {input}
 			"""
 
 
@@ -488,6 +494,7 @@ if pairedend:
 		output:
 			SCRATCH + "/featureCounts/intronF2_genecounts.txt"
 		params:
+			stranding=config["stranding"],
 			ann=config["annotation"]["first2introns"]
 		envmodules:
 			"build-env/f2021",
@@ -500,7 +507,7 @@ if pairedend:
 		shell:
 			"""
 			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t intron -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} {input}
+			featureCounts -T {threads} -t intron -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} -s {params.stranding} {input}
 			"""
 
 
@@ -510,6 +517,7 @@ if pairedend:
 		output:
 			SCRATCH + "/featureCounts/exonL2_spliced_genecounts.txt"
 		params:
+			stranding=config["stranding"],
 			ann=config["annotation"]["last2exons"]
 		envmodules:
 			"build-env/f2021",
@@ -520,7 +528,7 @@ if pairedend:
 			maxtime=30,
 			mem='4G'
 		shell:
-			"featureCounts -T {threads} -t exon --splitOnly -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} {input}"
+			"featureCounts -T {threads} -t exon --splitOnly -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} -s {params.stranding} {input}"
 
 else:
 
@@ -530,6 +538,7 @@ else:
 		output:
 			SCRATCH + "/featureCounts/exon_genecounts.txt"
 		params:
+			stranding=config["stranding"],
 			ann=config["annotation"]["exons"]
 		envmodules:
 			"build-env/f2021",
@@ -542,7 +551,7 @@ else:
 		shell:
 			"""
 			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t exon -O --fraction -a {params.ann} -o {output} {input}
+			featureCounts -T {threads} -t exon -O --fraction -a {params.ann} -o {output} -s {params.stranding} {input}
 			"""
 
 
@@ -552,6 +561,7 @@ else:
 		output:
 			SCRATCH + "/featureCounts/intron_genecounts.txt"
 		params:
+			stranding=config["stranding"],
 			ann=config["annotation"]["introns"]
 		envmodules:
 			"build-env/f2021",
@@ -564,7 +574,7 @@ else:
 		shell:
 			"""
 			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t intron -O --fraction -a {params.ann} -o {output} {input}
+			featureCounts -T {threads} -t intron -O --fraction -a {params.ann} -o {output} -s {params.stranding} {input}
 			"""
 
 
@@ -574,6 +584,7 @@ else:
 			output:
 				SCRATCH + "/featureCounts/exon_spliced_genecounts.txt"
 			params:
+				stranding=config["stranding"],
 				ann=config["annotation"]["exons"]
 			envmodules:
 				"build-env/f2021",
@@ -584,7 +595,7 @@ else:
 				maxtime=30,
 				mem='4G'
 			shell:
-				"featureCounts -T {threads} -t exon --splitOnly -O --fraction -a {params.ann} -o {output} {input}"
+				"featureCounts -T {threads} -t exon --splitOnly -O --fraction -a {params.ann} -o {output} -s {params.stranding} {input}"
 
 
 	rule quantify_genes_lastexon_pairedend:
@@ -593,6 +604,7 @@ else:
 		output:
 			SCRATCH + "/featureCounts/exonL1_genecounts.txt"
 		params:
+			stranding=config["stranding"],
 			ann=config["annotation"]["lastexon"]
 		envmodules:
 			"build-env/f2021",
@@ -605,7 +617,7 @@ else:
 		shell:
 			"""
 			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t exon -O --fraction -a {params.ann} -o {output} {input}
+			featureCounts -T {threads} -t exon -O --fraction -a {params.ann} -o {output} -s {params.stranding} {input}
 			"""
 
 	rule quantify_genes_firstintron_pairedend:
@@ -614,6 +626,7 @@ else:
 		output:
 			SCRATCH + "/featureCounts/intronF1_genecounts.txt"
 		params:
+			stranding=config["stranding"],
 			ann=config["annotation"]["firstintron"]
 		envmodules:
 			"build-env/f2021",
@@ -626,7 +639,7 @@ else:
 		shell:
 			"""
 			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t intron -O --fraction -a {params.ann} -o {output} {input}
+			featureCounts -T {threads} -t intron -O --fraction -a {params.ann} -o {output} -s {params.stranding} {input}
 			"""
 
 
@@ -636,6 +649,7 @@ else:
 		output:
 			SCRATCH + "/featureCounts/exonL2_genecounts.txt"
 		params:
+			stranding=config["stranding"],
 			ann=config["annotation"]["last2exons"]
 		envmodules:
 			"build-env/f2021",
@@ -648,7 +662,7 @@ else:
 		shell:
 			"""
 			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t exon -O --fraction -a {params.ann} -o {output} {input}
+			featureCounts -T {threads} -t exon -O --fraction -a {params.ann} -o {output} -s {params.stranding} {input}
 			"""
 
 
@@ -658,6 +672,7 @@ else:
 		output:
 			SCRATCH + "/featureCounts/intronF2_genecounts.txt"
 		params:
+			stranding=config["stranding"],
 			ann=config["annotation"]["first2introns"]
 		envmodules:
 			"build-env/f2021",
@@ -670,7 +685,7 @@ else:
 		shell:
 			"""
 			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t intron -O --fraction -a {params.ann} -o {output} {input}
+			featureCounts -T {threads} -t intron -O --fraction -a {params.ann} -o {output} -s {params.stranding} {input}
 			"""
 
 
@@ -680,6 +695,7 @@ else:
 			output:
 				SCRATCH + "/featureCounts/exonL2_spliced_genecounts.txt"
 			params:
+				stranding=config["stranding"],
 				ann=config["annotation"]["last2exons"]
 			envmodules:
 				"build-env/f2021",
@@ -690,7 +706,7 @@ else:
 				maxtime=30,
 				mem='4G'
 			shell:
-				"featureCounts -T {threads} -t exon --splitOnly -O --fraction -a {params.ann} -o {output} {input}"
+				"featureCounts -T {threads} -t exon --splitOnly -O --fraction -a {params.ann} -o {output} -s {params.stranding} {input}"
 #
 
 rule fix_names_and_stage_out_featureCounts: # featureCounts uses full input paths as sample names, which would suck for everything downstream.
