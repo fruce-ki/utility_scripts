@@ -44,6 +44,7 @@ FLAVOURS = ["exon_genecounts", "intron_genecounts", "exon_spliced_genecounts", "
 
 
 
+
 ## One chunk to rule them all
 if config["do_DE"]:
 
@@ -103,7 +104,6 @@ else:
 
 # Obtain data from VBCF
 
-
 rule update_alignments_table:
 	output:
 		HOME + "/aux/all_alignments_table.txt"
@@ -148,6 +148,8 @@ rule fetch_alignments:
 ##
 
 
+
+
 ## Prepare
 
 rule stage_in:
@@ -161,21 +163,37 @@ rule stage_in:
 		"cp {input} {output}"
 
 
-rule fix_chr:            # for featureCounts
-	input:
-		SCRATCH + "/data/{comboname}.aligned.bam"
-	output:
-		SCRATCH + "/data_chrfixed/{comboname}.aligned.bam"
-	threads: 1
-	resources:
-		maxtime=30,
-		mem='1G'
-	shell:
-		"samtools view -h {input} | sed 's/chrMT/chrM/g' | samtools view -Sb - > {output}"
+# Chr names, paired-end duplicated
+# Duplicates already marked by facility
+if pairedend:
 
+	rule fix_bam:      
+		input:
+			SCRATCH + "/data/{comboname}.aligned.bam"
+		output:
+			SCRATCH + "/data_fixed/{comboname}.aligned.bam"
+		threads: 1
+		resources:
+			maxtime=30,
+			mem='1G'
+		shell:
+			"samtools view -h -G 1024 {input} | sed 's/chrMT/chrM/g' | samtools view -Sb - > {output}"
+
+else:
+
+	rule fix_bam:      
+		input:
+			SCRATCH + "/data/{comboname}.aligned.bam"
+		output:
+			SCRATCH + "/data_fixed/{comboname}.aligned.bam"
+		threads: 1
+		resources:
+			maxtime=30,
+			mem='1G'
+		shell:
+			"samtools view -h {input} | sed 's/chrMT/chrM/g' | samtools view -Sb - > {output}"
 ##
 
-# Already markdup'ed by facility
 
 
 
@@ -184,7 +202,7 @@ rule fix_chr:            # for featureCounts
 
 rule flagstats:
 	input:
-		SCRATCH + "/data_chrfixed/{comboname}.aligned.bam"
+		SCRATCH + "/data_fixed/{comboname}.aligned.bam"
 	output:
 		SCRATCH + "/qc_pre/{comboname}.flagstats.txt"
 	envmodules:
@@ -200,7 +218,7 @@ rule flagstats:
 
 rule bamstats:
 	input:
-		SCRATCH + "/data_chrfixed/{comboname}.aligned.bam"
+		SCRATCH + "/data_fixed/{comboname}.aligned.bam"
 	output:
 		SCRATCH + "/qc_pre/{comboname}.bamstats.txt"
 	params:
@@ -219,7 +237,7 @@ rule bamstats:
 
 rule fastqc_mapped:
 	input:
-		SCRATCH + "/data_chrfixed/{comboname}.aligned.bam"
+		SCRATCH + "/data_fixed/{comboname}.aligned.bam"
 	output:
 		SCRATCH + "/qc_pre/{comboname}.aligned_fastqc.html",
 		SCRATCH + "/qc_pre/{comboname}.aligned_fastqc.zip"
@@ -236,11 +254,11 @@ rule fastqc_mapped:
 		"fastqc -f bam_mapped -t {threads} -o {params.project}/qc_pre {input}"
 
 
-if config["pairedend"]:
+if pairedend:
 
 	rule dupRadar:
 		input:
-			SCRATCH + "/data_chrfixed/{comboname}.aligned.bam"
+			SCRATCH + "/data/{comboname}.aligned.bam"
 		output:
 			table=SCRATCH + "/duprate/{comboname}.duprate.txt",
 			figure=SCRATCH + "/duprate/{comboname}.duprate.pdf"
@@ -266,7 +284,7 @@ else:
 
 	rule dupRadar:
 		input:
-			SCRATCH + "/data_chrfixed/{comboname}.aligned.bam"
+			SCRATCH + "/data/{comboname}.aligned.bam"
 		output:
 			table=SCRATCH + "/duprate/{comboname}.duprate.txt",
 			figure=SCRATCH + "/duprate/{comboname}.duprate.pdf"
@@ -339,6 +357,7 @@ rule merge_dup:
 
 
 
+
 ## Quantify with featureCounts
 
 
@@ -351,7 +370,7 @@ if pairedend:
 
 	rule quantify_genes_exons_pairedend:
 		input:
-			expand(SCRATCH + "/data_chrfixed/{comboname}.aligned.bam", comboname=COMBONAME)
+			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
 		output:
 			SCRATCH + "/featureCounts/exon_genecounts.txt"
 		params:
@@ -374,7 +393,7 @@ if pairedend:
 
 	rule quantify_genes_introns_pairedend:
 		input:
-			expand(SCRATCH + "/data_chrfixed/{comboname}.aligned.bam", comboname=COMBONAME)
+			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
 		output:
 			SCRATCH + "/featureCounts/intron_genecounts.txt"
 		params:
@@ -397,7 +416,7 @@ if pairedend:
 
 	rule quantify_genes_exon_split_pairedend:
 			input:
-				expand(SCRATCH + "/data_chrfixed/{comboname}.aligned.bam", comboname=COMBONAME)
+				expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
 			output:
 				SCRATCH + "/featureCounts/exon_spliced_genecounts.txt"
 			params:
@@ -417,7 +436,7 @@ if pairedend:
 
 	rule quantify_genes_lastexon_pairedend:
 		input:
-			expand(SCRATCH + "/data_chrfixed/{comboname}.aligned.bam", comboname=COMBONAME)
+			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
 		output:
 			SCRATCH + "/featureCounts/exonL1_genecounts.txt"
 		params:
@@ -442,7 +461,7 @@ if pairedend:
 
 	rule quantify_genes_firstintron_pairedend:
 		input:
-			expand(SCRATCH + "/data_chrfixed/{comboname}.aligned.bam", comboname=COMBONAME)
+			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
 		output:
 			SCRATCH + "/featureCounts/intronF1_genecounts.txt"
 		params:
@@ -467,7 +486,7 @@ if pairedend:
 
 	rule quantify_genes_last2exons_pairedend:
 		input:
-			expand(SCRATCH + "/data_chrfixed/{comboname}.aligned.bam", comboname=COMBONAME)
+			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
 		output:
 			SCRATCH + "/featureCounts/exonL2_genecounts.txt"
 		params:
@@ -490,7 +509,7 @@ if pairedend:
 
 	rule quantify_genes_first2introns_pairedend:
 		input:
-			expand(SCRATCH + "/data_chrfixed/{comboname}.aligned.bam", comboname=COMBONAME)
+			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
 		output:
 			SCRATCH + "/featureCounts/intronF2_genecounts.txt"
 		params:
@@ -513,7 +532,7 @@ if pairedend:
 
 	rule quantify_genes_last2exons_split_pairedend:
 		input:
-			expand(SCRATCH + "/data_chrfixed/{comboname}.aligned.bam", comboname=COMBONAME)
+			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
 		output:
 			SCRATCH + "/featureCounts/exonL2_spliced_genecounts.txt"
 		params:
@@ -534,7 +553,7 @@ else:
 
 	rule quantify_genes_exons_singleend:
 		input:
-			expand(SCRATCH + "/data_chrfixed/{comboname}.aligned.bam", comboname=COMBONAME)
+			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
 		output:
 			SCRATCH + "/featureCounts/exon_genecounts.txt"
 		params:
@@ -557,7 +576,7 @@ else:
 
 	rule quantify_genes_introns_singleend:
 		input:
-			expand(SCRATCH + "/data_chrfixed/{comboname}.aligned.bam", comboname=COMBONAME)
+			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
 		output:
 			SCRATCH + "/featureCounts/intron_genecounts.txt"
 		params:
@@ -580,7 +599,7 @@ else:
 
 	rule quantify_genes_exons_split_singleend:
 			input:
-				expand(SCRATCH + "/data_chrfixed/{comboname}.aligned.bam", comboname=COMBONAME)
+				expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
 			output:
 				SCRATCH + "/featureCounts/exon_spliced_genecounts.txt"
 			params:
@@ -600,7 +619,7 @@ else:
 
 	rule quantify_genes_lastexon_pairedend:
 		input:
-			expand(SCRATCH + "/data_chrfixed/{comboname}.aligned.bam", comboname=COMBONAME)
+			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
 		output:
 			SCRATCH + "/featureCounts/exonL1_genecounts.txt"
 		params:
@@ -622,7 +641,7 @@ else:
 
 	rule quantify_genes_firstintron_pairedend:
 		input:
-			expand(SCRATCH + "/data_chrfixed/{comboname}.aligned.bam", comboname=COMBONAME)
+			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
 		output:
 			SCRATCH + "/featureCounts/intronF1_genecounts.txt"
 		params:
@@ -645,7 +664,7 @@ else:
 
 	rule quantify_genes_last2exons_pairedend:
 		input:
-			expand(SCRATCH + "/data_chrfixed/{comboname}.aligned.bam", comboname=COMBONAME)
+			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
 		output:
 			SCRATCH + "/featureCounts/exonL2_genecounts.txt"
 		params:
@@ -668,7 +687,7 @@ else:
 
 	rule quantify_genes_first2introns_pairedend:
 		input:
-			expand(SCRATCH + "/data_chrfixed/{comboname}.aligned.bam", comboname=COMBONAME)
+			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
 		output:
 			SCRATCH + "/featureCounts/intronF2_genecounts.txt"
 		params:
@@ -691,7 +710,7 @@ else:
 
 	rule quantify_genes_last2exons_split_singleend:
 			input:
-				expand(SCRATCH + "/data_chrfixed/{comboname}.aligned.bam", comboname=COMBONAME)
+				expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
 			output:
 				SCRATCH + "/featureCounts/exonL2_spliced_genecounts.txt"
 			params:
@@ -716,7 +735,7 @@ rule fix_names_and_stage_out_featureCounts: # featureCounts uses full input path
 		tmp=SCRATCH + "/process/featureCounts_fixed/{countsfile}.txt",
 		staged=HOME + "/process/featureCounts/{countsfile}.txt"
 	params:
-		prefix=(SCRATCH + "/data_chrfixed/").replace('/','\/')
+		prefix=(SCRATCH + "/data_fixed/").replace('/','\/')
 	shell:  # Skip the top line comment and strip the paths and file extensions from the sample names.
 		"""
 		mkdir -p $(dirname {output.tmp}) &&
@@ -727,7 +746,6 @@ rule fix_names_and_stage_out_featureCounts: # featureCounts uses full input path
 		cp {input}.summary {output.staged}.summary 
 		"""
 ##
-
 
 
 
@@ -762,6 +780,7 @@ rule PCA:
 		Rscript {params.code}/pca_run.R -b {params.home} -f process/featureCounts/$(basename {input}) -G {params.pattern} -I 6 -i 1 -M {params.minMean} -m {params.minSingle} -n {params.ntop} -o results/PCA -r process/PCA -s {params.covars} -T {params.code}/pca_report_template.Rmd -W 6
 		"""
 ##
+
 
 
 
