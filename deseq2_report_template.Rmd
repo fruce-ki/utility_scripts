@@ -737,11 +737,11 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, ntop = params$ntop, a
   
   hashits <- any(outtab[, meetthresh], na.rm=TRUE)
   
-  setnames(outtab, sub('TPM|RPM', paste0('.', PMtype), names(outtab)))
+  setnames(outtab, sub('TPM|RPM', PMtype, names(outtab)))
   # Drop columns I don't need
   keep <- c("name", "FC", "padj",
               names(outtab)[grepl("refMean", names(outtab))], names(outtab)[grepl("treatMean", names(outtab))],
-              "baseMean", "log2FoldChange", "log2FoldChange.shrink", "mlog10p")
+              "log2FoldChange", "mlog10p", "log2FoldChange.shrink", "baseMean", "maxCount", "maxScaledCount")
   outtab <- outtab[, keep, with=FALSE]
   
   virgin <- NULL
@@ -939,8 +939,7 @@ print(pallexp)
 ```{r csv}
 for (res in resall) {
   # Drop columns I don't need
-  keep <- names(res$outtab)[!grepl("stat|mlog10p.shrink|padj.shrink|lfcSE|pvalue|meetthresh|istop|category|StDev", names(res$outtab))]
-  fwrite(res$outtab[, keep, with=FALSE],
+  fwrite(res$outtab,
          file = file.path(params$baseDir,
                           params$resultsDir,
                           paste(params$prefix, res$contrast, 'deseq2.tsv', sep='.')),

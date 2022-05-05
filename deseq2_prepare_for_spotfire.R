@@ -50,8 +50,8 @@ lfcs <- names(DE)[which(grepl("log2FoldChange.shrink", names(DE)))]
 p <- names(DE)[which(grepl("padj", names(DE)))]
 mlp <- names(DE)[which(grepl("mlog10p", names(DE)))]
 
-# Create multiple-choice style filters
 
+# Create filters
 for (X in fc) {
   # X <- fc[1]
   newcol <- sub("FC", "FC_thresh", X)
@@ -91,21 +91,17 @@ for (X in mlp) {
 ## Simplify column names
 
 if (opt$simplify) {
-  newnames <- sub("[^.]*?counts\\.", "", names(DE))
+  newnames <- sub("[^.]*?counts\\.", "", names(DE))   # counting mode
   if (all(!(duplicated(newnames))))
     setnames(DE, newnames)
-  newnames <- sub("~[^.]*?\\.", "", names(DE))
+  newnames <- sub("~[^.]*?\\.", "", names(DE))        # DE formula
   if (all(!(duplicated(newnames))))
     setnames(DE, newnames)
-  newnames <- sub("\\..*$", "", names(DE))
+  newnames <- sub("\\..*$", "", names(DE))            # Contrast
   if (all(!(duplicated(newnames))))
     setnames(DE, newnames)
 }
 
-## Identify fields that can be dropped, to de-clutter the lists of columns in spotfire
-
-keep <- names(DE)[!grepl("lfcSE|pvalue|meetthresh|istop|category|StDev|meanCount|meanScaled", names(DE))]
-DE <- DE[, keep, with= FALSE]
 
 # DE <- merge(merge(DE, CNT[, c(1, 7:length(CNT)), with=FALSE], by.x='name', by.y='Geneid', all=TRUE), TPM, by.x='name', by.y='id', all=TRUE)
 
