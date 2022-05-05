@@ -4,19 +4,19 @@ library(getopt)
 library(data.table)
 
 spec = matrix(c(
-  'cnt',           'C', 1, "character", "Full path to aggregated featureCount results.",
+  # 'cnt',           'C', 1, "character", "Full path to aggregated featureCount results.",
   'de',            'D', 1, "character", "Full path to aggregated Deseq2 results.",
-  'tpm',           'T', 1, "character", "Full path to aggregated TPM.",
+  # 'tpm',           'T', 1, "character", "Full path to aggregated TPM.",
   'lfcThresh',     'f', 1, "numeric", "log2 Fold change threshold.",
   'pCutoff',       'p', 1, "numeric", "P-value cut-off.",
-  'countThresh',   'c', 1, "integer", "Count threshold.",
-  'tpmThresh',     't', 1, "numeric", "TPM threshold.",
+  # 'countThresh',   'c', 1, "integer", "Count threshold.",
+  # 'tpmThresh',     't', 1, "numeric", "TPM threshold.",
   'simplify',      's', 0, "logical", "Simplify column names, by removing origin, subset and formula, as long as this does not create duplicate names."
 ), byrow=TRUE, ncol=5)
 
 opt <- getopt(spec)
 
-# opt <- list(de='/scratch-cbe/users/kimon.froussios/robyn/R12658_RNAseq/results/DE/intronF2_genecounts/intronF2_genecounts.~Condition.deseq2.txt', lfcThresh=2, pCutoff=0.01, countThresh=50L, tpmThresh=5, simplify=TRUE)
+# opt <- list(de='/scratch-cbe/users/kimon.froussios/tanja/R13065_RNAseq/results/DE/intron_genecounts/intron_genecounts.TF_Ikzf1.~Condition.Condition_Exp_vs_Ctrl.deseq2.tsv', lfcThresh=2, pCutoff=0.01, countThresh=50L, tpmThresh=5, simplify=TRUE)
 
 if (is.null(opt$de))
   stop("No input specified.")
@@ -26,10 +26,10 @@ if (is.null(opt$lfcThresh))
   opt$fcThresh <- 1
 if (is.null(opt$pCutoff))
   opt$pCutoff <- 0.05
-if (is.null(opt$countThresh))
-  opt$countThresh <- 50
-if (is.null(opt$tpmThresh))
-  opt$tpmThresh <- 5
+# if (is.null(opt$countThresh))
+#   opt$countThresh <- 50
+# if (is.null(opt$tpmThresh))
+#   opt$tpmThresh <- 5
 if (is.null(opt$simplify))
   opt$simplify <- FALSE
 
@@ -45,18 +45,24 @@ DE <- fread(opt$de)
 ## Calculate filtering vectors at some preset levels
 
 # Identify columns
-lfc <- names(DE)[which(grepl("log2FoldChange.shrink", names(DE)))]
+fc <- names(DE)[which(grepl("FC", perl=TRUE, names(DE)))]
+lfcs <- names(DE)[which(grepl("log2FoldChange.shrink", names(DE)))]
 p <- names(DE)[which(grepl("padj", names(DE)))]
 mlp <- names(DE)[which(grepl("mlog10p", names(DE)))]
-count <- names(DE)[which(grepl("meanCount", names(DE)))]
-tpm <- names(DE)[which(grepl("meanScaledCount", names(DE)))]
 
 # Create multiple-choice style filters
-for (X in lfc) {
-  # X <- lfc[1]
-  newcol <- sub("log2FoldChange.shrink", "lFC_thresh", X)
+
+for (X in fc) {
+  # X <- fc[1]
+  newcol <- sub("FC", "FC_thresh", X)
+  set(DE, i=NULL, j=newcol, value=abs(DE[[X]]))
+}
+
+for (X in lfcs) {
+  # X <- lfcs[1]
+  newcol <- sub("log2FoldChange.shrink", "slFC_thresh", X)
   set(DE, i=NULL, j=newcol, value="unfiltered")     # default value
-  steps <- unique(c(1, 2, 3, opt$lfcThresh))
+  steps <- as.character(unique(c(1, 2, 3, opt$lfcThresh)))
   steps <- steps[order(steps)]                      # smaller to bigger, order is important
   for (Y in steps)                                  # overwrite
     set(DE, i=which(abs(DE[[X]]) >= Y), j=newcol, value=paste(">=", Y))
@@ -67,27 +73,9 @@ for (X in p) {
   newcol <- sub("padj", "p_cutoff", X)
   set(DE, i=NULL, j=newcol, value="unfiltered")     # default value
   steps <- unique(c(0.05, opt$pCutoff))
-  steps <- steps[order(steps)]                      # smaller to bigger, order is important
+  steps <- steps[order(steps, decreasing=TRUE)]     # high to low, order is important
   for (Y in steps)                                  # overwrite
     set(DE, i=which(abs(DE[[X]]) < Y), j=newcol, value=paste("<", Y))
-}
-
-for (X in count) {
-  newcol <- sub("meanCount", "count_thresh", X)
-  set(DE, i=NULL, j=newcol, value="unfiltered")     # default value
-  steps <- unique(c(50, opt$countThresh, opt$countThresh * 2))
-  steps <- steps[order(steps)]                      # smaller to bigger, order is important
-  for (Y in steps)                                  # overwrite
-    set(DE, i=which(abs(DE[[X]]) >= Y), j=newcol, value=paste(">=", Y))
-}
-
-for (X in tpm) {
-  newcol <- sub("meanScaledCount", "scaledCount_thresh", X)
-  set(DE, i=NULL, j=newcol, value="unfiltered")     # default value
-  steps <- unique(c(1, 5, opt$tpmThresh, opt$tpmThresh * 2))
-  steps <- steps[order(steps)]                      # smaller to bigger, order is important
-  for (Y in steps)                                  # overwrite
-    set(DE, i=which(abs(DE[[X]]) >= Y), j=newcol, value=paste(">=", Y))
 }
 
 ## Spotfire does no recognise Inf values. So replace with something numeric.
@@ -97,7 +85,7 @@ for (X in mlp) {
   set(DE, i=which(is.infinite(DE[[X]])), j=X, 
       value=max(60, max( DE[[X]][is.finite(DE[[X]])] )) )
 }
-# Inf fold-change is already handled by DESeq2 by default by extrapolating a more likely FC from a fitted model and by explicitly capping the FC,
+# Inf fold-change is already handled by DESeq2 by default, by extrapolating a more likely FC from a fitted model and by explicitly capping the FC.
 
 
 ## Simplify column names

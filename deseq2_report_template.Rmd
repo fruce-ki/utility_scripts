@@ -460,6 +460,7 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, ntop = params$ntop, a
   shrink <- cbind(data.table(name=rownames(shrink)), as.data.table(shrink))
   
   # Precompute useful conversions
+  lfc[, FC := 2 ^ log2FoldChange]
   lfc[, mlog10p := -log10(padj)]
   shrink[, mlog10p := -log10(padj)] 
   shrink[, absl2fc := abs(log2FoldChange)]
@@ -660,14 +661,14 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, ntop = params$ntop, a
                            # counts(dds)[outtab$name, c(refs, treats), drop=FALSE],
                            refMean = rowMeans(counts(dds)[outtab$name, refs, drop=FALSE]),
                            treatMean = rowMeans(counts(dds)[outtab$name, treats, drop=FALSE]),
-                           meanCount = rowMeans(counts(dds)[outtab$name, c(refs, treats), drop=FALSE]),
+                           maxCount = rowMaxs(counts(dds)[outtab$name, c(refs, treats), drop=FALSE]),
                            refStDev = sqrt(rowVars(counts(dds)[outtab$name, refs, drop=FALSE])),
                            treatStDev = sqrt(rowVars(counts(dds)[outtab$name, treats, drop=FALSE])) ),
                 data.table(name=rownames(rpms), 
                            # rpms[, c(refs, treats), drop=FALSE],
                            refMeanTPM = rowMeans(rpms[, refs]),
                            treatMeanTPM = rowMeans(rpms[, treats]),
-                           meanScaledCount = rowMeans(rpms[, c(refs, treats )]) ),
+                           maxScaledCount = rowMaxs(rpms[, c(refs, treats )]) ),
                 all=TRUE, by="name" )
   
   outtab <-merge(outtab,
@@ -737,12 +738,16 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, ntop = params$ntop, a
   hashits <- any(outtab[, meetthresh], na.rm=TRUE)
   
   setnames(outtab, sub('TPM|RPM', paste0('.', PMtype), names(outtab)))
+  # Drop columns I don't need
+  keep <- c("name", "FC", "padj",
+              names(outtab)[grepl("refMean", names(outtab))], names(outtab)[grepl("treatMean", names(outtab))],
+              "baseMean", "log2FoldChange", "log2FoldChange.shrink", "mlog10p")
+  outtab <- outtab[, keep, with=FALSE]
   
   virgin <- NULL
   if (addPrefix) {
-    # Pristine copy, without prefixes. Drop columns I don't need
-    keep <- names(outtab)[!grepl("stat|mlog10p.shrink|padj.shrink|lfcSE|pvalue|meetthresh|istop|category|StDev", names(outtab))]
-    virgin <- copy(outtab[, keep, with=FALSE])
+    # Pristine copy, without prefixes.
+    virgin <- copy(outtab)
     
     # Prepare column names for merging the files later
     prefix <- paste(prefix,
