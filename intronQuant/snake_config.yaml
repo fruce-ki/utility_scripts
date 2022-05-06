@@ -48,8 +48,6 @@ DE:
 Spotfire:
   lfc_thresh: 1
   p_cut: 0.05
-  minMean: 50                        # minimum mean count across samples
-  minTPM: 5                     # minimum count in a single sample, IF the minimum mean is not met
 
 stranding: 1                        # Stranding mode for dupRadar and featureCoutns.      UPDATE HERE!
 pairedend: True                                                                         # UPDATE HERE!

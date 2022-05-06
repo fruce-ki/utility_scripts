@@ -45,22 +45,24 @@ DE <- fread(opt$de)
 ## Calculate filtering vectors at some preset levels
 
 # Identify columns
-fc <- names(DE)[which(grepl("FC", perl=TRUE, names(DE)))]
+lfc <- names(DE)[which(grepl("log2FoldChange(?!.shrink)", perl=TRUE, names(DE)))]
 lfcs <- names(DE)[which(grepl("log2FoldChange.shrink", names(DE)))]
 p <- names(DE)[which(grepl("padj", names(DE)))]
 mlp <- names(DE)[which(grepl("mlog10p", names(DE)))]
 
 
 # Create filters
-for (X in fc) {
+setnames(DE, sub('Count', 'Count_thresh', names(DE)))
+
+for (X in lfc) {
   # X <- fc[1]
-  newcol <- sub("FC", "FC_thresh", X)
+  newcol <- sub("log2FoldChange", "absLFC_thresh", X)
   set(DE, i=NULL, j=newcol, value=abs(DE[[X]]))
 }
 
 for (X in lfcs) {
   # X <- lfcs[1]
-  newcol <- sub("log2FoldChange.shrink", "slFC_thresh", X)
+  newcol <- sub("log2FoldChange.shrink", "sLFC_thresh", X)
   set(DE, i=NULL, j=newcol, value="unfiltered")     # default value
   steps <- as.character(unique(c(1, 2, 3, opt$lfcThresh)))
   steps <- steps[order(steps)]                      # smaller to bigger, order is important

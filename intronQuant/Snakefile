@@ -992,9 +992,9 @@ if config["do_DE"]:
 		shell:
 			# A bit of a fuss to predetermine the number and names of all the individual table files that my deseq script will automatically create, so cheat by using my looping script.
 			"""
-			Rscript {params.code}/deseq2_prepare_for_spotfire.R -D {input.de} -f {params.lfc} -p {params.pcut} -c {params.minMean} -t {params.minTPM} -s &&
+			Rscript {params.code}/deseq2_prepare_for_spotfire.R -D {input.de} -f {params.lfc} -p {params.pcut} -s &&
 
-			{params.code}/fileutilities.py T $(dirname {input.de}) --dir deseq2.nolab.tsv | {params.code}/fileutilities.py P --loop Rscript {params.code}/deseq2_prepare_for_spotfire.R ,-D {{abs}} ,-f {params.lfc} ,-p {params.pcut} ,-c {params.minMean} ,-t {params.minTPM} ,-s &&
+			{params.code}/fileutilities.py T $(dirname {input.de}) --dir deseq2.nolab.tsv | {params.code}/fileutilities.py P --loop Rscript {params.code}/deseq2_prepare_for_spotfire.R ,-D {{abs}} ,-f {params.lfc} ,-p {params.pcut} ,-s &&
 			{params.code}/fileutilities.py T $(dirname {input.de}) --dir deseq2.spotfire.tsv | {params.code}/fileutilities.py P --loop cp {{abs}} {params.home}/results/DE/
 			"""
 
