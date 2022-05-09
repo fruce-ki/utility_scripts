@@ -9,14 +9,14 @@ spec = matrix(c(
   # 'tpm',           'T', 1, "character", "Full path to aggregated TPM.",
   'lfcThresh',     'f', 1, "numeric", "log2 Fold change threshold.",
   'pCutoff',       'p', 1, "numeric", "P-value cut-off.",
-  # 'countThresh',   'c', 1, "integer", "Count threshold.",
-  # 'tpmThresh',     't', 1, "numeric", "TPM threshold.",
+  'countThresh',   'c', 1, "integer", "Count threshold upper cap.",
+  'tpmThresh',     't', 1, "numeric", "TPM threshold upper cap.",
   'simplify',      's', 0, "logical", "Simplify column names, by removing origin, subset and formula, as long as this does not create duplicate names."
 ), byrow=TRUE, ncol=5)
 
 opt <- getopt(spec)
 
-# opt <- list(de='/scratch-cbe/users/kimon.froussios/tanja/R13065_RNAseq/results/DE/intron_genecounts/intron_genecounts.TF_Ikzf1.~Condition.Condition_Exp_vs_Ctrl.deseq2.tsv', lfcThresh=2, pCutoff=0.01, countThresh=50L, tpmThresh=5, simplify=TRUE)
+# opt <- list(de='/scratch-cbe/users/kimon.froussios/tanja/R13065_RNAseq/results/DE/intron_genecounts/intron_genecounts.TF_Ikzf1.~Condition.Condition_Exp_vs_Ctrl.deseq2.tsv', lfcThresh=2, pCutoff=0.01, countThresh=100L, tpmThresh=50, simplify=TRUE)
 
 if (is.null(opt$de))
   stop("No input specified.")
@@ -26,10 +26,10 @@ if (is.null(opt$lfcThresh))
   opt$fcThresh <- 1
 if (is.null(opt$pCutoff))
   opt$pCutoff <- 0.05
-# if (is.null(opt$countThresh))
-#   opt$countThresh <- 50
-# if (is.null(opt$tpmThresh))
-#   opt$tpmThresh <- 5
+if (is.null(opt$countThresh))
+  opt$countThresh <- 100
+if (is.null(opt$tpmThresh))
+  opt$tpmThresh <- 50
 if (is.null(opt$simplify))
   opt$simplify <- FALSE
 
@@ -38,26 +38,27 @@ if (is.null(opt$simplify))
 # CNT <- fread(opt$cnt)
 # TPM <- fread(opt$tpm)
 
+
 ### DE
 
 DE <- fread(opt$de)
 
-## Calculate filtering vectors at some preset levels
 
 # Identify columns
 lfc <- names(DE)[which(grepl("log2FoldChange(?!.shrink)", perl=TRUE, names(DE)))]
 lfcs <- names(DE)[which(grepl("log2FoldChange.shrink", names(DE)))]
 p <- names(DE)[which(grepl("padj", names(DE)))]
 mlp <- names(DE)[which(grepl("mlog10p", names(DE)))]
+cnt <- names(DE)[which(grepl("maxCount", names(DE)))]
+scnt <- names(DE)[which(grepl("maxScaledCount", names(DE)))]
 
 
 # Create filters
-setnames(DE, sub('Count', 'Count_thresh', names(DE)))
 
 for (X in lfc) {
   # X <- fc[1]
-  newcol <- sub("log2FoldChange", "absLFC_thresh", X)
-  set(DE, i=NULL, j=newcol, value=abs(DE[[X]]))
+  newcol <- sub("log2FoldChange", "FC_thresh", X)
+  set(DE, i=NULL, j=newcol, value=round(2 ^ abs(DE[[X]]), 1) )  #  cancel direction and lose excess decimals
 }
 
 for (X in lfcs) {
@@ -79,6 +80,21 @@ for (X in p) {
   for (Y in steps)                                  # overwrite
     set(DE, i=which(abs(DE[[X]]) < Y), j=newcol, value=paste("<", Y))
 }
+
+for (X in cnt) {
+  # X <- cnt[1]
+  set(DE, i=which(DE[[X]] > opt$countThresh), j=X, value=opt$countThresh) # Set upper cap
+  set(DE, i=NULL, j=X, value=floor(DE[[X]]) )                             # Decimal precision is not useful for this
+}
+
+for (X in scnt) {
+  # X <- scnt[1]
+  set(DE, i=which(DE[[X]] > opt$tpmThresh), j=X, value=opt$tpmThresh) # Set upper cap
+  set(DE, i=NULL, j=X, value=round(DE[[X]], 1) )                      # One decimal should be enough. Integers may be already too big for deep libraries.
+}
+
+setnames(DE, sub('maxScaledCount', 'scaledCount_thresh', sub('maxCount', 'count_thresh', names(DE))))
+
 
 ## Spotfire does no recognise Inf values. So replace with something numeric.
 # This affects -log(p) because DESeq2 can assign 0 to p.
