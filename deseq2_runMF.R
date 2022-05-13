@@ -208,7 +208,7 @@ for (V in names(subcovars)){
   } else if (is.null(autoname) && !is.null(opt$prefix)) { 
     prefix <- paste(opt$prefix, gsub(' ', '', opt$designFormula), sep='.')
   } else {
-    prefix <- paste(opt$prefix, autoname, gsub(' ', '', opt$designFormula), sep='.')
+    prefix <- paste(opt$prefix, gsub(' ', '', opt$designFormula), autoname, sep='.')
   }
   
   ddsrds <- file.path(opt$baseDir, opt$RDSoutdir, opt$prefix, paste0(prefix, '.deseq2data.RDS'))

@@ -12,6 +12,8 @@ idjoin: "__"
 
 vbcf_alignments_table_url: "https://seqmate-archive.vbc.ac.at/alignments/group/busslinger/text"
 
+ucsc_session: "http://ucsc.vbc.ac.at/cgi-bin/hgTracks?hgS_doOtherUser=submit&hgS_otherUserName=kimon.froussios&hgS_otherUserSessionName=R13065_ribominusRNAseq"
+
 annotation:      # UPDATE HERE maybe?
   introns: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.gtf"
   exons: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.gtf"
@@ -48,8 +50,10 @@ DE:
 Spotfire:
   lfc_thresh: 1
   p_cut: 0.05
+  countCap: 100                  # upper cap for the count filter
+  tpmCap: 10                     # upper cap for the tpm filter
 
-stranding: 1                        # Stranding mode for dupRadar and featureCoutns.      UPDATE HERE!
+stranding: 0                        # Stranding mode for dupRadar and featureCoutns.      UPDATE HERE!
 pairedend: True                                                                         # UPDATE HERE!
 #minFrag: 100      # Fsk3 fragment sizes must mean something different, these values cause abysmal alignment failures
 #maxFrag: 700

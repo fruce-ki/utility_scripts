@@ -7,7 +7,7 @@ localrules: all, update_alignments_table, extract_relevant_alignment_info, stage
 import os
 import re
 import subprocess as sp
-
+from itertools import compress
 
 # I'll have to type these many times, so simplify them.
 # Snakemake recommends not using absolute paths, for portability, but it is causing problems for cluster jobs.
@@ -61,8 +61,8 @@ if config["do_DE"]:
 				HOME + "/process/duprates/duprates.melted.txt",
 				expand(HOME + "/process/featureCounts/{countsfile}.txt", countsfile=FLAVOURS),
 				expand(HOME + "/results/PCA/{countsfile}.pca.html", countsfile=FLAVOURS),
-				expand(HOME + "/results/DE/{countsfile}.{group}." + config["DE"]["formula"] + ".deseq2.html", countsfile=FLAVOURS, group=GROUPS),
-				expand(HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".deseq2.spotfire.txt", countsfile=FLAVOURS, group=GROUPS)
+				expand(HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".{group}.deseq2.html", countsfile=FLAVOURS, group=GROUPS),
+				expand(HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".all.deseq2.spotfire.txt", countsfile=FLAVOURS)
 			# params:
 			# 	scratch=SCRATCH
 			# shell:
@@ -78,7 +78,7 @@ if config["do_DE"]:
 				expand(HOME + "/process/featureCounts/{countsfile}.txt", countsfile=FLAVOURS),
 				expand(HOME + "/results/PCA/{countsfile}.pca.html", countsfile=FLAVOURS),
 				expand(HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".deseq2.html", countsfile=FLAVOURS),
-				expand(HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".deseq2.spotfire.txt", countsfile=FLAVOURS)
+				expand(HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".all.deseq2.spotfire.txt", countsfile=FLAVOURS)
 			# params:
 			# 	scratch=SCRATCH
 			# shell:
@@ -810,8 +810,9 @@ if config["do_DE"]:
 				counts=SCRATCH + "/process/featureCounts_fixed/{countsfile}.txt",
 				samples=os.path.join(SCRATCH, config["DE"]["covars"])
 			output:
-				[SCRATCH + "/results/DE/{countsfile}/{countsfile}." + g + "." + config["DE"]["formula"] + ".deseq2.html" for g in GROUPS],
-				[SCRATCH + "/results/DE/{countsfile}/{countsfile}." + g + "." + config["DE"]["formula"] + ".deseq2.pdf" for g in GROUPS]
+				expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".{group}.deseq2.html", group=GROUPS, allow_missing=True),
+				expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".{group}.deseq2.pdf", group=GROUPS, allow_missing=True)
+				# plus tables per comparison within each group, exact number of which is a pain to pre-determine. HTML is successful, only if the TSVs were successful.
 			envmodules:
 				"build-env/f2021",
 				"r-bundle-bioconductor/3.12-foss-2020b-r-4.0.3",
@@ -832,7 +833,7 @@ if config["do_DE"]:
 			group: "deseq"
 			threads: 1
 			resources:
-				maxtime=10,
+				maxtime=30,
 				mem='4G'
 			shell:
 				"Rscript {params.code}/deseq2_runMF.R -A -b {params.scratch} -c {params.lfc} -d {params.formula} -F {params.forvar} -f /process/featureCounts_fixed/$(basename {input.counts}) -G {params.pattern} -i 1 -I 6 -l -M {params.minMean} -m {params.minSingle} -n {params.ntop} -o results/DE -p {params.pcut} -P $(basename {input.counts} .txt) -r process/DE -s {params.covars} -T {params.code}/deseq2_report_template.Rmd -W 6 -x {params.refs}"
@@ -840,30 +841,28 @@ if config["do_DE"]:
 
 		rule stage_out_DE_reports:
 			input: 
-				html=SCRATCH + "/results/DE/{countsfile}/{countsfile}.{group}." + config["DE"]["formula"] + ".deseq2.html",
-				pdf=SCRATCH + "/results/DE/{countsfile}/{countsfile}.{group}." + config["DE"]["formula"] + ".deseq2.pdf"
+				expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".{group}.deseq2.html", group=GROUPS, allow_missing=True),
+				expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".{group}.deseq2.pdf", group=GROUPS, allow_missing=True)
 			output:
-				html=HOME + "/results/DE/{countsfile}.{group}." + config["DE"]["formula"] + ".deseq2.html",
-				pdf=HOME + "/results/DE/{countsfile}.{group}." + config["DE"]["formula"] + ".deseq2.pdf"
+				expand(HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".{group}.deseq2.html", group=GROUPS, allow_missing=True),
+				expand(HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".{group}.deseq2.pdf", group=GROUPS, allow_missing=True)
 			params:
 				scratch=SCRATCH,
 				home=HOME
 			shell:
 				"""
-				mkdir -p $(dirname {output.html}) &&
-				
-				cp {input.html} {output.html} &&
-				cp {input.pdf} {output.pdf} &&
+				mkdir -p {params.home}/results/DE &&
+				cp {input} {params.home}/results/DE &&
 
 				mkdir -p {params.home}/process/DE &&
 				cp {params.scratch}/process/DE/*/*.RDS {params.home}/process/DE/
 				"""
 
-		rule merge_and_stage_out_DE_table:
+		rule merge_DE_table:
 			input:
-				[SCRATCH + "/results/DE/{countsfile}/{countsfile}." + g + "." + config["DE"]["formula"] + ".deseq2.html" for g in GROUPS]  # proxy for completion of DE
+				expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".{group}.deseq2.html", group=GROUPS, allow_missing=True)  # proxies for completion of DE
 			output:
-				SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".deseq2.txt"
+				SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".all.deseq2.tsv"
 			envmodules:
 				"build-env/f2021",
 				"python/3.8.6-gcccore-10.2.0",
@@ -879,9 +878,10 @@ if config["do_DE"]:
 				maxtime=5,
 				mem='4G'
 			shell:
-				# A bit of a fuss to predetermine the number and names of all the individual table files that my deseq script will automatically create, so cheat by using my looping script.
+				# Difficult to predetermine the number and names of all the individual table files, so cheat by using my looping script.
+				# Also getting dir from output because multiple inputs. So in and out have to stay in same dir.
 				"""
-				{params.code}/fileutilities.py T $(dirname {input}) --dir .deseq2.tsv | sort | uniq | {params.code}/fileutilities.py P -i -r --appnd > {output}
+				{params.code}/fileutilities.py T $(dirname {output}) --dir '(?<!all|lab).deseq2.tsv' | sort | uniq | {params.code}/fileutilities.py P -i -r --appnd > {output}
 				"""
 
 	else:
@@ -892,7 +892,7 @@ if config["do_DE"]:
 				samples=os.path.join(SCRATCH, config["DE"]["covars"])
 			output:
 				SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".deseq2.html",
-				SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".deseq2.pdf"
+				SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".deseq2.pdf",
 			envmodules:
 				"build-env/f2021",
 				"r-bundle-bioconductor/3.12-foss-2020b-r-4.0.3",
@@ -943,7 +943,7 @@ if config["do_DE"]:
 			input:
 				SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".deseq2.html"  # proxy for completion of DE
 			output:
-				SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".deseq2.txt"
+				SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + "all.deseq2.tsv"
 			envmodules:
 				"build-env/f2021",
 				"python/3.8.6-gcccore-10.2.0",
@@ -958,58 +958,67 @@ if config["do_DE"]:
 				maxtime=5,
 				mem='4G'
 			shell:
-				# A bit of a fuss to predetermine the number and names of all the individual table files that my deseq script will automatically create, so cheat by using my looping script.
+				# Difficult to predetermine the number and names of all the individual table files that my deseq script will automatically create, so cheat by using my looping script.
 				"""
-				{params.code}/fileutilities.py T $(dirname {input}) --dir .deseq2.tsv | {params.code}/fileutilities.py P -i -r --appnd > {output}
+				{params.code}/fileutilities.py T $(dirname {input}) --dir '(?<!all|lab).deseq2.tsv' | {params.code}/fileutilities.py P -i -r --appnd > {output}
 				"""
 #
 
 	rule prepare_for_Spotfire:
 		input:
-			de=SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".deseq2.txt",
-			#cnt=HOME + "/process/featureCounts/{countsfile}.txt",
-			#tpm=HOME + "/process/featureCounts/{countsfile}.scaled.txt"
+			de=SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".all.deseq2.tsv",
+			cnt=SCRATCH + "/featureCounts/{countsfile}.txt"
+			# plus individual contrasts whose names are difficult to predict
 		output: 
-			SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".deseq2.spotfire.txt"
-		envmodules:
-			"build-env/f2021",
-			"r-bundle-bioconductor/3.12-foss-2020b-r-4.0.3",
-			"python/3.8.6-gcccore-10.2.0",
-			"scipy-bundle/2020.11-foss-2020b"
+			SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".all.deseq2.spotfire.txt"
+			# plus individual contrasts whose names are difficult to predict
+		#envmodules:
+		#	"build-env/f2021",
+		#	"r-bundle-bioconductor/3.12-foss-2020b-r-4.0.3",
+		#	"python/3.8.6-gcccore-10.2.0",
+		#	"scipy-bundle/2020.11-foss-2020b"
 		params:
 			code=config["codeDir"],
 			scratch=SCRATCH,
 			home=HOME,
-			minMean=config["Spotfire"]["minMean"],
-			minTPM=config["Spotfire"]["minTPM"],
+			countCap=config["Spotfire"]["countCap"],
+			tpmCap=config["Spotfire"]["tpmCap"],
 			lfc=config["Spotfire"]["lfc_thresh"],
-			pcut=config["Spotfire"]["p_cut"]
+			pcut=config["Spotfire"]["p_cut"],
+			urlbase=config["ucsc_session"]
 		group: "spotfire"
 		threads: 1
 		resources:
 			maxtime=10,
 			mem='1G'
-		shell:
-			# A bit of a fuss to predetermine the number and names of all the individual table files that my deseq script will automatically create, so cheat by using my looping script.
-			"""
-			Rscript {params.code}/deseq2_prepare_for_spotfire.R -D {input.de} -f {params.lfc} -p {params.pcut} -s &&
-
-			{params.code}/fileutilities.py T $(dirname {input.de}) --dir deseq2.nolab.tsv | {params.code}/fileutilities.py P --loop Rscript {params.code}/deseq2_prepare_for_spotfire.R ,-D {{abs}} ,-f {params.lfc} ,-p {params.pcut} ,-s &&
-			{params.code}/fileutilities.py T $(dirname {input.de}) --dir deseq2.spotfire.tsv | {params.code}/fileutilities.py P --loop cp {{abs}} {params.home}/results/DE/
-			"""
+		#	A bit of a pain to dynamically predetermine the individual contrasts, so as to request their outputs explicitly through the rule hierarchy.
+		#	So cheat with python.
+		run:
+			files = os.listdir(os.path.join(SCRATCH, "results/DE/", wildcards.countsfile))
+			pat = re.compile('all.deseq2.tsv|deseq2.nolab.tsv')
+			relevant = [os.path.join(SCRATCH, "results/DE/", wildcards.countsfile, y) for y in list(compress(files, [x is not None for x in [pat.search(f) for f in files]]))]
+			for contrast in relevant:
+				cmd = [os.path.join(params.code, "deseq2_prepare_for_spotfire.R"), "-C", input.cnt, "-c", str(params.countCap), "-D", contrast, "-f", str(params.lfc), "-p", str(params.pcut), "-s", "-t", str(params.tpmCap),  "-u", params.urlbase]
+				#sys.stderr.write("\n" + sp.list2cmdline(cmd) + "\n")
+				sp.run(cmd)
+		#shell:
+		#	"""
+		#	{params.code}/fileutilities.py T $(dirname {input.de}) --dir 'all.deseq2.tsv|.deseq2.nolab.tsv' | {params.code}/fileutilities.py P --loop Rscript {params.code}/deseq2_prepare_for_spotfire.R ,-C {input.cnt} ,-c {params.countCap} ,-D {{abs}} ,-f {params.lfc} ,-p {params.pcut} ,-s ,-t {params.tpmCap} ,-u {params.urlbase}
+		#	"""
 
 
 	rule stage_out_DE_table:
 		input:
-			SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".deseq2.spotfire.txt"
+			SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".all.deseq2.spotfire.txt"
+			# plus individual contrasts whose names are difficult to predict
 		output:
-			HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".deseq2.spotfire.txt"
+			HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".all.deseq2.spotfire.txt"
+			# plus individual contrasts whose names are difficult to predict
 		params:
-			scratch=SCRATCH,
 			home=HOME
 		shell:
 			"""
-			cp $(dirname {input})/*spotfire.txt $(dirname {output})/
+			cp $(dirname {input})/*deseq2.spotfire.txt {params.home}/results/DE/
 			"""
 ##
 

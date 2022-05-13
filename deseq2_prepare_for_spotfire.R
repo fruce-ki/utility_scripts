@@ -2,26 +2,27 @@
 
 library(getopt)
 library(data.table)
+library(purrr)
 
 spec = matrix(c(
-  # 'cnt',           'C', 1, "character", "Full path to aggregated featureCount results.",
-  'de',            'D', 1, "character", "Full path to aggregated Deseq2 results.",
-  # 'tpm',           'T', 1, "character", "Full path to aggregated TPM.",
+  'de',            'D', 1, "character", "Full path to Deseq2 results (aggregated or individual).",
+  'cnt',           'C', 1, "character", "Full path to featureCounts table (aggregated or not), for the gene positions.",
   'lfcThresh',     'f', 1, "numeric", "log2 Fold change threshold.",
   'pCutoff',       'p', 1, "numeric", "P-value cut-off.",
   'countThresh',   'c', 1, "integer", "Count threshold upper cap.",
   'tpmThresh',     't', 1, "numeric", "TPM threshold upper cap.",
-  'simplify',      's', 0, "logical", "Simplify column names, by removing origin, subset and formula, as long as this does not create duplicate names."
+  'simplify',      's', 0, "logical", "Simplify column names, by removing origin, subset and formula, as long as this does not create duplicate names.",
+  'url',           'u', 1, "character", "Genome Browser session URL to which the position will be appended for each gene."
 ), byrow=TRUE, ncol=5)
 
 opt <- getopt(spec)
 
-# opt <- list(de='/scratch-cbe/users/kimon.froussios/tanja/R13065_RNAseq/results/DE/intron_genecounts/intron_genecounts.TF_Ikzf1.~Condition.Condition_Exp_vs_Ctrl.deseq2.tsv', lfcThresh=2, pCutoff=0.01, countThresh=100L, tpmThresh=50, simplify=TRUE)
+# opt <- list(de='/scratch-cbe/users/kimon.froussios/tanja/R13065_RNAseq/results/DE/intron_genecounts/intron_genecounts.TF_Ikzf1.~Condition.Condition_Exp_vs_Ctrl.deseq2.tsv', cnt='/groups/busslinger/Kimon/tanja/R13065_RNAseq/process/featureCounts/intron_genecounts.txt', lfcThresh=2, pCutoff=0.01, countThresh=100L, tpmThresh=50, simplify=TRUE, url="http://ucsc.vbc.ac.at/cgi-bin/hgTracks?hgS_doOtherUser=submit&hgS_otherUserName=kimon.froussios&hgS_otherUserSessionName=R13065_ribominusRNAseq")
 
 if (is.null(opt$de))
   stop("No input specified.")
-# if (is.null(opt$cnt) | is.null(opt$tpm))
-# 	stop("No input specified.")
+if (is.null(opt$cnt) & !is.null(opt$url))
+	stop("Need a counts table for gene positions with which to form the URLs.")
 if (is.null(opt$lfcThresh))
   opt$fcThresh <- 1
 if (is.null(opt$pCutoff))
@@ -33,10 +34,24 @@ if (is.null(opt$tpmThresh))
 if (is.null(opt$simplify))
   opt$simplify <- FALSE
 
+
 ### Counts
 
-# CNT <- fread(opt$cnt)
-# TPM <- fread(opt$tpm)
+CNT <- fread(opt$cnt)[, 1:4]  # featureCounts
+
+CNT[, schr := lapply(strsplit(Chr, ';', fixed=TRUE), function(x){which(!grepl('_', x))})]  # drop alternative contigs etc and keep only main assembly
+CNT[, Chr := map2(strsplit(Chr, ';', fixed=TRUE), schr, function(a, b){a[b]})]
+CNT[, Start := map2(strsplit(Start, ';', fixed=TRUE), schr, function(a, b){a[b]})]
+CNT[, End := map2(strsplit(End, ';', fixed=TRUE), schr, function(a, b){a[b]})]
+CNT[, altonly := vapply(Chr, length, integer(1))==0]                            # Genes only present in alternative contigs and not the main assembly.
+CNT[, scattered := vapply(Chr, function(x){length(unique(x))>1}, logical(1))]   # Find genes with transcripts annotated to multiple main chromosmes
+CNT[(!scattered) & !altonly, chr := vapply(Chr, unique, character(1))]
+CNT[!is.na(chr), start := vapply(Start, function(x){min(as.integer(unlist(x)))}, integer(1))]
+CNT[!is.na(chr), end := vapply(End, function(x){max(as.integer(unlist(x)))}, integer(1))]
+CNT[!is.na(chr), URL := paste0(opt$url, '&position=', chr, '%3A', start, '-', end)]               # %3a == :
+CNT[(scattered), URL := "Ambiguous annotation to multiple chromosomes."]
+CNT[(altonly), URL := "Not annotated on the main contigs."]
+CNT <- CNT[, .(Geneid, URL)]
 
 
 ### DE
@@ -121,10 +136,10 @@ if (opt$simplify) {
 }
 
 
-# DE <- merge(merge(DE, CNT[, c(1, 7:length(CNT)), with=FALSE], by.x='name', by.y='Geneid', all=TRUE), TPM, by.x='name', by.y='id', all=TRUE)
+DE <- merge(DE, CNT, by.x='name', by.y='Geneid', all.x=TRUE, all.y=FALSE)
 
 
-fwrite(DE, file=sub("txt$|nolab.tsv$", "spotfire.txt", opt$de), sep="\t", quote=FALSE, col.names=TRUE)
+fwrite(DE, file=sub("(.nolab)?txt$|(.nolab)?.tsv$", ".spotfire.txt", opt$de), sep="\t", quote=FALSE, col.names=TRUE)
 
 
 # ## Long form count maybe useful for some plots
