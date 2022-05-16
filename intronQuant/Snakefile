@@ -943,7 +943,7 @@ if config["do_DE"]:
 			input:
 				SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".deseq2.html"  # proxy for completion of DE
 			output:
-				SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + "all.deseq2.tsv"
+				SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".all.deseq2.tsv"
 			envmodules:
 				"build-env/f2021",
 				"python/3.8.6-gcccore-10.2.0",
