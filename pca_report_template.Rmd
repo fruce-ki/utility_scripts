@@ -21,7 +21,8 @@ params:
   widthsFile: NULL                    # Feature lengths.
   widthsCol: NULL                     # Feature lengths.
   createID: FALSE
-  specnorm: NULL
+  specnorm: NULL                      # Gene name pattern to exclude genes from TPM and PCA calculation. Like IG genes in plasma cells
+  topVars: NULL                       # Number of top dispersed genes to use.
 editor_options:
   chunk_output_type: console
 ---
@@ -39,7 +40,6 @@ library(ggplot2)
 library(htmltools)
 library(patchwork)
 library(matrixStats)
-library(ggExtra)
 library(ggforce)
 library(ggdendro)
 library(ggrepel)
@@ -321,9 +321,8 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   return(out)
 }
 
-# PCA
-# (scaling and centering of genes to one another, NOT samples to one another)
-pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){  ## helper function
+## helper function
+pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){
   # pcx <- 1; pcy <- 2
   mycolours <- c(
     "#dd2200", "#0066ff", "#8800ff", "#ff8833", "#229900", 
@@ -374,19 +373,21 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){  ## helper 
   return(list(pc12, pc12v))
 }
 
+# PCA
+# (scaling and centering of genes to one another, NOT samples to one another)
 do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, topgenes=NULL, exclude=NULL, minMean=0, minSingle=0, ntop=10) {
-  # countsmat <- counts; covars <- covars
+  # countsmat <- tpm; covars <- covars
   
   nvars <- nrow(countsmat)
-  countsmat <- countsmat[rowSums(countsmat) > 0 & ! rownames(countsmat) %in% exclude, ]
+  countsmat <- countsmat[rowSums(countsmat) > 0, ]
   
   # Mean and Standard Deviation, standardized counts, mean and stdev of standardized counts.
   genevar <- data.table(name = rownames(countsmat),
                         Mean = rowMeans(countsmat),
                         StDev = rowSds(countsmat),
                         singles = rowSums(countsmat >= minSingle))
-  normcounts <- (countsmat - genevar$Mean) / genevar$StDev
-  genevar [, zMean := rowMeans(normcounts)]
+  # normcounts <- (countsmat - genevar$Mean) / genevar$StDev
+  # genevar [, zMean := rowMeans(normcounts)]
   # genevar [, zStDev := rowSds(normcounts)]    # always 1 by definition
   
   # Select features
@@ -397,14 +398,12 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
     message("Using the variable features among the manually provided list.")
     topgenes = genevar[name %in% topgenes & StDev > 0, name] # manually provided features, as long as they are variable
   }
-  subcmat <- countsmat[topgenes, ]
-  
-  # Rotate counts so genes are variables and samples are observations
-  subcmat <- t(subcmat)
   message(paste("Number of variable features available:", nrow(genevar[StDev>0,])))
-  message(paste("Number of variable features used:", length(topgenes)))
+  message(paste("Number of variable features used:", length(topgenes[!topgenes %in% exclude])))
   
   # PCA
+  subcmat <- countsmat[topgenes[!topgenes %in% exclude], ]
+  subcmat <- t(subcmat)
   pca <- prcomp(subcmat, center = center, scale = scale)
     
   srn <- sqrt(nrow(pca$x) - 1)
@@ -445,7 +444,7 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
   highinfl <- lapply(infl, function(x){ order(abs(x), decreasing=TRUE) })
   infl[, rowID := rownames(pca$rotation)]
   highinfl <- lapply(highinfl, function(x){ head(unique(infl$rowID[x]), ntop) })
-  highinfl <- highinfl[1:topnpc]
+  # highinfl <- highinfl[1:topnpc]
   setkey(infl, rowID)
   
   # Influence plots
@@ -466,17 +465,19 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
 
   # Means and Variances of the selected genes
   genevar[, selected := name %in% colnames(subcmat)]
-  pvar1 <- ggMarginal(
-    ggplot(genevar, aes(x=Mean, y=StDev, label=name, colour=selected)) +
-      geom_point(shape=16, size=0.8, alpha=0.3) +
+  genevar[, excluded := name %in% exclude]
+  pvar1 <- ggplot() +
+      geom_point(data=genevar[!selected & excluded, ], aes(x=Mean, y=StDev), shape=16, size=0.8, alpha=0.5, colour='grey70') +
+      geom_point(data=genevar[!selected & !excluded, ],aes(x=Mean, y=StDev), shape=16, size=0.8, alpha=1, colour='black') +
+      geom_point(data=genevar[(selected), ], aes(x=Mean, y=StDev), shape=16, size=1, alpha=1, colour='red') +
+      geom_point(aes(x=NA_real_, y=NA_real_, colour=c('Filtered out','Not used','Used'))) +
       scale_x_log10() +
       scale_y_log10() +
-      scale_colour_manual(values=c("black", "red")) +
+      scale_colour_manual(name='Filtering:', breaks=c('Used', 'Not used', 'Filtered out'), values=c('red', 'black', 'grey70')) +
       annotation_logticks(base=10, sides='lb') +
-      labs(x="Mean", y="Standard Deviation", title=paste("Features:", nvars, "total"), 
-           subtitle=paste(nrow(genevar[StDev>0,]), "variable,", length(topgenes), "used")) +
-      theme(panel.grid=element_blank()),
-    type = "histogram")
+      labs(x="Mean (TPM or RPM)", y="Standard Deviation", title=paste(nrow(genevar[StDev>0, ]), "variable features"), 
+           subtitle=paste(nrow(genevar[(!excluded),]), "after filtering,", length(topgenes), "used")) +
+      theme(legend.position='bottom', panel.grid=element_blank())
 
   # Plot higher PCs in 2D pairs. Highlight one variable at a time.
   L <- lapply(seq(1, topnpc, 2), function(pcx){
@@ -511,10 +512,11 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
 message(paste("Counts file:", params$cts))
 message(paste("Covariates table:", params$covars))
 message(paste("Minimum mean count across samples:", params$minMean))
-message(paste("Minimum count in a single count, if the minimum mean is not met:", params$minSingle))
+message(paste("Minimum count in a single sample, if the minimum mean is not met:", params$minSingle))
 message(paste("Number of features to report per Principle Component:", params$ntop))
-message(paste("Feature lengths provided for count normalization:", !is.null(params$widths)))
+message(paste("Feature lengths provided for count normalization:", !is.null(params$widthsFile) | !is.null(params$widthsCol)))
 message(paste("Genes to exclude from library size calculations and PCA:", params$specnorm))
+message(paste("Number of top dispersed genes to use for correlation and PCA:", ifelse(is.null(params$topVars),'all that meet the count thresholds', params$topVars)))
 ```
 
 ```{r sample_info}
@@ -570,6 +572,12 @@ if (widths) {
 
 setnames(TPM, c('id', paste0(colnames(tpm), ifelse(is.null(widths), '.RPM', '.TPM')) ))
 fwrite(TPM, file=sub(".txt|.tsv", ".scaled.txt", params$cts), quote=FALSE, sep="\t")
+
+
+# fwrite(data.table(id=rownames(counts), 
+#                   mean=rowMeans(counts), max=rowMaxs(counts), signles=rowSums(counts>=params$minSingle), sd=rowSds(counts),
+#                   sdt=rowSds(tpm), cvt=rowSds(tpm)/rowMeans(tpm)),
+#        file="/Volumes/groups/busslinger/Kimon/test.txt", sep="\t", quote=FALSE)
 ```
 
 
@@ -578,16 +586,24 @@ fwrite(TPM, file=sub(".txt|.tsv", ".scaled.txt", params$cts), quote=FALSE, sep="
 Genes with mean raw count across all samples below `r params$minMean` are excluded, unless any of the samples has raw count of at least `r params$minSingle`. Fr PCA all genes are given equal weight, but low expression genes are proportionally more variable, so filtering them in advance reduces noise.
 
 ```{r filter}
-message(paste("Using variable features that exceed either", params$minMean, "mean count across samples or", params$minSingle, "count in any single sample."))
+# All genes above the count thresholds
+message(paste("Using features that exceed either", params$minMean, "mean count across samples or", params$minSingle, "count in any single sample."))
 n <- nrow(tpm)
-topgenes <- rownames(tpm)[(rowMeans(counts) >= params$minMean) | (rowSums(counts >= params$minSingle) > 0)]
+topgenes <- rownames(counts)[(rowMeans(counts) >= params$minMean) | (rowSums(counts >= params$minSingle) > 0)]
 message(paste(n - length(topgenes), "features eliminated, out of", n))
 
 if (!is.null(params$specnorm)) {
   n <- length(topgenes)
   topgenes <- topgenes[! topgenes %in% rownames(tpm)[grepl(params$specnorm, rownames(tpm), ignore.case=TRUE, perl=TRUE)] ]
-  message(paste("Additionally excluding", n - length(topgenes), "genes by name pattern."))
+  message(paste("Additionally excluding", n - length(topgenes), "genes by name criteria."))
 }
+
+# Further reduce the above genes to the top most dispersed, as in DESeq2
+cv <- sort(rowSds(tpm[topgenes, ]) / rowMeans(tpm[topgenes, ]), decreasing=TRUE)
+topgenes2 <- names(head(cv, n=params$topVars))
+
+# Make it obvious which genes in the TPM-StDev plot where excluded due to raw count.
+exclude <- rownames(counts)[(rowMeans(counts) < params$minMean) & (rowSums(counts >= params$minSingle) == 0)]
 ```
 
 
@@ -598,6 +614,10 @@ The *Pearson* correlation coefficient between samples X and Y measures how much 
 The *Spearman* correlation coefficient does the same for the rank of the observations instead of their values. Perfect SCC is any monotonic line between X and Y values (straight, curved, or zigzag).
 
 The coefficients may disagree to some considerable extent, as a result of how observation density is distributed along the axes. SCC is more sensitive to value changes in the centre of the bell distribution where there are more measurements near one another, and less sensitive in the tails of the bell where there are fewer measurements and they are farther apart from one another.
+
+## Count thresholds
+
+Correlations based on all genes that meet the count thresholds.
 
 ```{r corr1, fig.height=6, fig.width=9}
 corels1 <- my_pairwise_internal_corels(tpm[topgenes,], covars$Sample, method="pearson",
@@ -613,25 +633,50 @@ print( (corels1[['frnc']] + theme(legend.position="none")) |
          (corels2[['frnc']] + theme(axis.text.y=element_blank())) )
 ```
 
-```{r corr2, fig.height=9, fig.width=7}
-print( (corels1[['drc']]) / (corels2[['drc']] + theme(axis.text.x=element_blank())) )
+```{r corr2, fig.height=6, fig.width=9}
+print( corels1[['drc']] )
+print( corels2[['drc']] )
 ```
 
+## Top dispersed
+
+Correlations using the top `r params$topVars` dispersed genes (out of those that already meet the count thresholds).
+
+```{r corr1b, fig.height=6, fig.width=9}
+corels1b <- my_pairwise_internal_corels(tpm[topgenes2, ], covars$Sample, method="pearson",
+                                      minMean = 0, minSingle = 0,
+                                      rds = file.path(params$RDSdir,
+                                                      sub(".txt|.tsv", "_corrPtop.RDS", basename(params$cts))))
+corels2b <- my_pairwise_internal_corels(tpm[topgenes2, ], covars$Sample, method="spearman",
+                                      minMean = 0, minSingle = 0,
+                                      rds = file.path(params$RDSdir,
+                                                      sub(".txt|.tsv", "_corrStop.RDS", basename(params$cts))))
+
+print( (corels1b[['frnc']] + theme(legend.position="none")) | 
+         (corels2b[['frnc']] + theme(axis.text.y=element_blank())) )
+```
+
+```{r corr2b, fig.height=6, fig.width=9}
+print( corels1b[['drc']] )
+print( corels2b[['drc']] )
+```
 
 
 # PCA
 
-For this, the expression of the features has been standardized. This compensates for large differences in magnitude range and gives every feature equal weight. Otherwise the variance from high expression features would dominate in the determination of principal components. Features with exactly `0` variability have to be excluded for PCA, they are typically features that are not detected in any of the samples.
+For this, the library-normalized expression (TPM or RPM) of the features is further standardized. This compensates for large differences in magnitude range and gives every feature equal weight. Features with exactly `0` variability have to be excluded for PCA, they are typically features that are not detected in any of the samples.
+
+## Count thresholds
+
+PCA based on all genes that meet the count thresholds.
 
 ```{r pca}
 all_pca <- do_pca(tpm, covars, ntop = params$ntop,
-                  topgenes= topgenes,
+                  topgenes= topgenes, exclude=exclude,
                   minMean = 0, minSingle = 0, 
                   rds = file.path(params$RDSdir,
                                   sub(".txt|.tsv", "_pca.RDS", basename(params$cts))))
 ```
-
-## Plots
 
 ### Selected features
 
@@ -661,29 +706,80 @@ print( all_pca$pc2d )
 ```
 
 
-## Associated features
+<!-- ## Associated features -->
 
-Only the top `r params$ntop` genes are listed here, in order of decreasing association.
+<!-- Only the top `r params$ntop` genes are listed here, in order of decreasing association. -->
 
-If a PC aligns well with an experimental variable of interest, the associated genes for that PC could merit follow-up.
+<!-- If a PC aligns well with an experimental variable of interest, the associated genes for that PC could merit follow-up. -->
 
-```{r highload}
-TL <- as.data.frame(lapply (names(all_pca$highloads), function(pc) {
-  head(all_pca$highloads[[pc]], params$ntop) }) )
-names(TL) <- names(all_pca$highloads)
+<!-- ```{r highload} -->
+<!-- TL <- as.data.frame(lapply (names(all_pca$highloads), function(pc) { -->
+<!--   head(all_pca$highloads[[pc]], params$ntop) }) ) -->
+<!-- names(TL) <- names(all_pca$highloads) -->
 
-datatable(TL)
+<!-- datatable(TL) -->
+<!-- ``` -->
+
+
+## Top dispersed
+
+PCA using the top `r params$topVars` dispersed genes (out of those that already meet the count thresholds).
+
+```{r pcab}
+all_pcab <- do_pca(tpm, covars, ntop = params$ntop,
+                  topgenes= topgenes2, exclude=exclude,
+                  minMean = 0, minSingle = 0, 
+                  rds = file.path(params$RDSdir,
+                                  sub(".txt|.tsv", "_pcatop.RDS", basename(params$cts))))
+```
+
+### Selected features
+
+This shows the mean TPM (or RPM) value and standard deviation for the variable features that were selected for the correlation and PCA, against the total of variable features. Non-variable features are not shown, due to log-scaled axes.
+
+```{r varmeanb}
+# Selected features
+print( all_pcab$pvar1 )
+```
+
+### Variance explained by PCs
+
+There are different ways to decide which components to consider important. One is based on the idea of diminishing returns and selects components before the "elbow" in the cumulative variance. The second considers all components that explain at least 1%. The third simply aims for a target cumulative variance explained, like 80%.
+
+```{r screeb}
+# Scree
+print(all_pcab$pimp)
 ```
 
 
-<!-- ## Filtered correlation -->
+### Known variables
 
-<!-- Calculated using only the selected variable features. -->
+Highlighting the defined experimental variables against the principal components helps make sense of what the components are.
 
-<!-- ```{r fig.width=16, fig.height=16} -->
-<!-- print( all_pca[["pcor1"]] ) -->
-<!-- print( all_pca[["pcor2"]] ) -->
+```{r pcsb, fig.width=8, fig.height=12}
+print( all_pcab$pc2d )
+```
+
+
+<!-- ## Associated features -->
+
+<!-- Only the top `r params$ntop` genes are listed here, in order of decreasing association. -->
+
+<!-- If a PC aligns well with an experimental variable of interest, the associated genes for that PC could merit follow-up. -->
+
+<!-- ```{r highloadb} -->
+<!-- TL <- as.data.frame(lapply (names(all_pcab$highloads), function(pc) { -->
+<!--   head(all_pcab$highloads[[pc]], params$ntop) }) ) -->
+<!-- names(TL) <- names(all_pcab$highloads) -->
+
+<!-- datatable(TL) -->
 <!-- ``` -->
+
+
+
+
+
+
 
 
 # Write plots to PDF
@@ -699,16 +795,23 @@ print(corels1[['frnc']])
 print(corels1[['drc']])
 print(corels2[['frnc']])
 print(corels2[['drc']])
+print(corels1b[['frnc']])
+print(corels1b[['drc']])
+print(corels2b[['frnc']])
+print(corels2b[['drc']])
 
 # PCA plots
 print(all_pca$pimp)
 print(all_pca$pcv2d)
 # print(all_pca[["pcor1"]])
 # print(all_pca[["pcor2"]])
-
-print( ggplot() + geom_point() + theme_void()) # The ggmargin plot in pvar1 doesn't create its own page
 print( all_pca$pvar1 )
 
+print(all_pcab$pimp)
+print(all_pcab$pcv2d)
+# print(all_pcab[["pcor1"]])
+# print(all_pcab[["pcor2"]])
+print( all_pcab$pvar1 )
 
 dev.off()
 ```
