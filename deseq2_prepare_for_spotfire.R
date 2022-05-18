@@ -7,7 +7,7 @@ library(purrr)
 spec = matrix(c(
   'de',            'D', 1, "character", "Full path to Deseq2 results (aggregated or individual).",
   'cnt',           'C', 1, "character", "Full path to featureCounts table (aggregated or not), for the gene positions.",
-  'lfcThresh',     'f', 1, "numeric", "log2 Fold change threshold.",
+  'fcThresh',      'f', 1, "numeric", "Fold change threshold.",
   'pCutoff',       'p', 1, "numeric", "P-value cut-off.",
   'countThresh',   'c', 1, "integer", "Count threshold upper cap.",
   'tpmThresh',     't', 1, "numeric", "TPM threshold upper cap.",
@@ -17,25 +17,20 @@ spec = matrix(c(
 
 opt <- getopt(spec)
 
-# opt <- list(de='/scratch-cbe/users/kimon.froussios/tanja/R13065_RNAseq/results/DE/intron_genecounts/intron_genecounts.TF_Ikzf1.~Condition.Condition_Exp_vs_Ctrl.deseq2.tsv', cnt='/groups/busslinger/Kimon/tanja/R13065_RNAseq/process/featureCounts/intron_genecounts.txt', lfcThresh=2, pCutoff=0.01, countThresh=100L, tpmThresh=50, simplify=TRUE, url="http://ucsc.vbc.ac.at/cgi-bin/hgTracks?hgS_doOtherUser=submit&hgS_otherUserName=kimon.froussios&hgS_otherUserSessionName=R13065_ribominusRNAseq")
+# opt <- list(de='/scratch-cbe/users/kimon.froussios/robyn/R12658_RNAseq/results/DE/intron_genecounts/intron_genecounts.~Condition.Condition_Tcf3_Tir1_Auxin_2_5_vs_Tcf3_Tir1_noAux_0.deseq2.tsv', cnt='/groups/busslinger/Kimon/robyn/R12658_RNAseq/process/featureCounts/intron_genecounts.txt', fcThresh=2, pCutoff=0.01, countThresh=100L, tpmThresh=50, simplify=TRUE, url="http://ucsc.vbc.ac.at/cgi-bin/hgTracks?hgS_doOtherUser=submit&hgS_otherUserName=kimon.froussios&hgS_otherUserSessionName=R13065_ribominusRNAseq")
 
-if (is.null(opt$de))
-  stop("No input specified.")
-if (is.null(opt$cnt) & !is.null(opt$url))
-	stop("Need a counts table for gene positions with which to form the URLs.")
-if (is.null(opt$lfcThresh))
-  opt$fcThresh <- 1
-if (is.null(opt$pCutoff))
-  opt$pCutoff <- 0.05
-if (is.null(opt$countThresh))
-  opt$countThresh <- 100
-if (is.null(opt$tpmThresh))
-  opt$tpmThresh <- 50
-if (is.null(opt$simplify))
-  opt$simplify <- FALSE
+if (is.null(opt$de)) stop("No input specified.")
+if (is.null(opt$cnt) & !is.null(opt$url)) stop("Need a counts table for gene positions with which to form the URLs.")
+if (is.null(opt$fcThresh)) { opt$lfcThresh <- 2 } else {  opt$lfcThresh <- as.numeric(opt$lfcThresh)  }
+if (is.null(opt$pCutoff)) { opt$pCutoff <- 0.05 } else { opt$pCutoff <- as.numeric(opt$pCutoff) }
+if (is.null(opt$countThresh)) { opt$countThresh <- 100 } else { opt$countThresh <- as.numeric(opt$countThresh) }
+if (is.null(opt$tpmThresh)) { opt$tpmThresh <- 50 } else { opt$tpmThresh <- as.numeric(opt$tpmThresh) }
+if (is.null(opt$simplify)) opt$simplify <- FALSE
 
 
 ### Counts
+
+# only used to extract the gene coordinates
 
 CNT <- fread(opt$cnt)[, 1:4]  # featureCounts
 
@@ -70,26 +65,26 @@ scnt <- names(DE)[which(grepl("maxScaledCount", names(DE)))]
 
 # Create filters
 
-for (X in lfc) {
-  # X <- fc[1]
-  newcol <- sub("log2FoldChange", "FC_thresh", X)
-  set(DE, i=NULL, j=newcol, value=round(2 ^ abs(DE[[X]]), 1) )  #  cancel direction and lose excess decimals
-}
+# for (X in lfc) {
+#   # X <- lfc[1]
+#   newcol <- sub("log2FoldChange", "FC_thresh", X)
+#   set(DE, i=NULL, j=newcol, value=round(2 ^ abs(DE[[X]]), 1) )  #  cancel direction and lose excess decimals
+# }
 
 for (X in lfcs) {
   # X <- lfcs[1]
-  newcol <- sub("log2FoldChange.shrink", "sLFC_thresh", X)
-  set(DE, i=NULL, j=newcol, value="unfiltered")     # default value
-  steps <- as.character(unique(c(1, 2, 3, opt$lfcThresh)))
+  newcol <- sub("log2FoldChange.shrink", "sFC_thresh", X)
+  set(DE, i=NULL, j=newcol, value="low")     # default value
+  steps <- unique(c(2, 3, as.numeric(opt$lfcThresh)))
   steps <- steps[order(steps)]                      # smaller to bigger, order is important
   for (Y in steps)                                  # overwrite
-    set(DE, i=which(abs(DE[[X]]) >= Y), j=newcol, value=paste(">=", Y))
+    set(DE, i=which(2 ^ abs(DE[[X]]) >= Y), j=newcol, value=paste(">=", Y))
 }
 
 for (X in p) {
   # X <- p[1]
   newcol <- sub("padj", "p_cutoff", X)
-  set(DE, i=NULL, j=newcol, value="unfiltered")     # default value
+  set(DE, i=NULL, j=newcol, value="non-sig.")     # default value
   steps <- unique(c(0.05, opt$pCutoff))
   steps <- steps[order(steps, decreasing=TRUE)]     # high to low, order is important
   for (Y in steps)                                  # overwrite
@@ -110,6 +105,14 @@ for (X in scnt) {
 
 setnames(DE, sub('maxScaledCount', 'scaledCount_thresh', sub('maxCount', 'count_thresh', names(DE))))
 
+for (X in lfc) {
+  # X <- lfc[1]
+  newcol <- sub("log2FoldChange", "Regulation", X)
+  padj <- sub("log2FoldChange", "padj", X)
+  set(DE, i=NULL, j=newcol, value="neutral")
+  set(DE, i=which(DE[[X]] > 0 & DE[[padj]] < opt$pCutoff), j=newcol, value="Up")
+  set(DE, i=which(DE[[X]] < 0 & DE[[padj]] < opt$pCutoff), j=newcol, value="Down")
+}
 
 ## Spotfire does no recognise Inf values. So replace with something numeric.
 # This affects -log(p) because DESeq2 can assign 0 to p.
@@ -130,7 +133,7 @@ if (opt$simplify) {
   newnames <- sub("~[^.]*?\\.", "", names(DE))        # DE formula
   if (all(!(duplicated(newnames))))
     setnames(DE, newnames)
-  newnames <- sub("\\..*$", "", names(DE))            # Contrast
+  newnames <- sub("\\.[^.]+$", "", names(DE))            # Contrast
   if (all(!(duplicated(newnames))))
     setnames(DE, newnames)
 }
