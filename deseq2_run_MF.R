@@ -37,7 +37,7 @@ spec = matrix(c(
 ), byrow=TRUE, ncol=5)
 
 opt = getopt(spec)
-# opt <- list(createID=FALSE, baseDir='/Volumes/groups/busslinger/Kimon/tanja/R12593_RNAseq', countsFile='process/featureCounts/intron_genecounts.txt', resultsDir='results/DE', RDSoutdir='process/DE', samplesFile='description/covars.txt', control='noTir1,0h,20210924,Tir1_end,2_5h', designFormula='~Condition', forvar="Group", selvar=NULL, sellev=NULL, minMean=50, minSingle=100, lfcthreshold=1, nidcols=6, idcol=1, ntop=50, bmF=FALSE, pcutoff=0.05, all=TRUE, prescaled=FALSE, prefix='intron_genecounts', label=TRUE, widthsCol=6, reportTemplate="/Volumes/groups/busslinger/Kimon/tanja/R12593_RNAseq/code/deseq2_report_template.Rmd")
+# opt <- list(createID=FALSE, baseDir='/scratch-cbe/users/kimon.froussios/sarah/R13546_RNAseq', countsFile='process/featureCounts_fixed/exon_spliced_genecounts.txt', resultsDir='results/DE_mf', RDSoutdir='process/DE_mf', samplesFile='description/covars_de.txt', control="ctrl,Tcf3,proB,proB_Tcf3,ctrl,ctrl_Tcf3_proB", designFormula='~type', forvar="tf_cell", selvar=NULL, sellev=NULL, minMean=0, minSingle=0, lfcthreshold=1, nidcols=6, idcol=1, ntop=50, bmF=FALSE, pcutoff=0.05, all=FALSE, prescaled=FALSE, prefix='exon_spliced_genecounts', label=TRUE, widthsCol=6, reportTemplate="/groups/busslinger/Kimon/sarah/R13546_RNAseq/code/deseq2_report_template_MF.Rmd")
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))

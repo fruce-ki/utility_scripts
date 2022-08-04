@@ -30,7 +30,7 @@ params:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message=FALSE)
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, bitmapType='cairo-png')
 ```
 
 
@@ -40,7 +40,7 @@ knitr::opts_chunk$set(echo = TRUE, message=FALSE)
 library(DESeq2)
 library(data.table)
 library(ggplot2)
-library(plotly)
+# library(plotly)
 library(htmltools)
 library(patchwork)
 library(ggrepel)
@@ -766,9 +766,9 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, ntop = params$ntop, a
   }
   
   return(list(contrast=contrast, 
-              pv1=pv1, pv2=pv2, pvly=ggplotly(pvly, dynamicTicks = TRUE),
-              pma1=pma1, pma2=pma2, pmaly=ggplotly(pmaly, dynamicTicks = TRUE),
-              pe1=pe1, pe2=pe2, pe3=pe3, pe1ly=ggplotly(pe1ly, dynamicTicks = TRUE),
+              pv1=pv1, pv2=pv2, #pvly=ggplotly(pvly, dynamicTicks = TRUE),
+              pma1=pma1, pma2=pma2, #pmaly=ggplotly(pmaly, dynamicTicks = TRUE),
+              pe1=pe1, pe2=pe2, pe3=pe3, #pe1ly=ggplotly(pe1ly, dynamicTicks = TRUE),
               ph1=ph1, ph2=ph2, 
               tophits=rn, hashits=hashits,
               outtab=outtab, virgin=virgin))
@@ -862,20 +862,20 @@ for (res in resall) {
 ```
 
 
-## Interactive filtered Volcanos and Expressions
+<!-- ## Interactive filtered Volcanos and Expressions -->
 
-All genes that do not meet both the fold-change threshold and the significance cutoff are removed completely from these plots to reduce visual clutter and to keep the report file lighteight.
+<!-- All genes that do not meet both the fold-change threshold and the significance cutoff are removed completely from these plots to reduce visual clutter and to keep the report file lighteight. -->
 
-```{r mas, fig.height=6, fig.width=7, warning=FALSE}
-# These plots are not faceted, so need less width.
+<!-- ```{r mas, fig.height=6, fig.width=7, warning=FALSE} -->
+<!-- # These plots are not faceted, so need less width. -->
 
-ly <- lapply(resall, function(res) {
-  # res <- resall[[1]]
-  list(res[["pvly"]], res[["pe1ly"]])
-})
+<!-- ly <- lapply(resall, function(res) { -->
+<!--   # res <- resall[[1]] -->
+<!--   list(res[["pvly"]], res[["pe1ly"]]) -->
+<!-- }) -->
 
-htmltools::tagList(ly)
-```
+<!-- htmltools::tagList(ly) -->
+<!-- ``` -->
 
 ## Expression heatmap
 
