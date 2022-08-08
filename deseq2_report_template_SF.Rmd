@@ -123,20 +123,6 @@ cat(paste("Genes excluded from library size calculations (only affects TPM/RPM, 
 print( datatable(params$covars) )
 ```
 
-# Overall expression
-
-```{r exhist, fig.height=12, fig.width=12}
-TPM <- melt(data.table(name=rownames(tpm), tpm), id.vars='name', variable.name='Sample', value.name='TPM')
-ptpm <- ggplot(TPM, aes(x=TPM)) +
-  facet_wrap(~ Sample) +
-  geom_histogram(bins=25) +
-  scale_x_log10() +
-  annotation_logticks(sides='b') +
-  theme(axis.text.x=element_text(angle=45, vjust=1, hjust=1))
-
-print(ptpm)
-```
-
 # PCA
 
 ```{r pca, fig.width=8, fig.width=8}
@@ -484,7 +470,8 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
   shrink[, absl2fc := abs(log2FoldChange)]
   
   # Combine shrunken and non-shrunken LFC tables for output, minus identical columns
-  outtab <- merge(lfc, shrink[, ! names(shrink) %in% c('baseMean', 'pvalue'), with=FALSE], by="name", all=TRUE, suffixes=c('', '.shrink'))
+  outtab <- merge(lfc, 
+                  shrink[, ! names(shrink) %in% c('baseMean', 'pvalue'), with=FALSE], by="name", all=TRUE, suffixes=c('', '.shrink') )
   
   
   ## Home-brewed selection of top hits to highlight, by eucledian distance from origin.
@@ -750,12 +737,12 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
   ## Table pt2
   
   hashits <- any(outtab[, meetthresh], na.rm=TRUE)
-  
   setnames(outtab, sub('TPM|RPM', PMtype, names(outtab)))
+  
   # Drop columns I don't need
-  keep <- c("name", "FC", "padj",
-              names(outtab)[grepl("refMean", names(outtab))], names(outtab)[grepl("treatMean", names(outtab))],
-              "log2FoldChange", "mlog10p", "log2FoldChange.shrink", "baseMean", "maxCount", "maxScaledCount")
+  keep <- c("name", "baseMean", "FC", "pvalue", "padj",
+              names(outtab)[grepl("refMean", names(outtab))], names(outtab)[grepl("treatMean", names(outtab))], # avoid explicitly handling TPM vs RPM
+              "log2FoldChange", "mlog10p", "log2FoldChange.shrink", "maxCount", "maxScaledCount")
   outtab <- outtab[, keep, with=FALSE]
   
   virgin <- NULL
@@ -937,9 +924,6 @@ pdf(file.path(params$baseDir,
               paste(params$prefix, 'deseq2.pdf', sep='.')),
     title=paste(params$prefix, paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(deobj), perl=TRUE), collapse=''), 'deseq2', sep='.'),
     width=15, height=15)
-
-
-print(ptpm)
 
 # PCA plots
 for (x in names(cD)) {
