@@ -107,7 +107,7 @@ setnames(DE, sub('maxScaledCount', 'scaledCount_thresh', sub('maxCount', 'count_
 
 for (X in lfc) {
   # X <- lfc[1]
-  newcol <- sub("log2FoldChange", "Regulation", X)
+  newcol <- sub("log2FoldChange", "Deregulation", X)
   padj <- sub("log2FoldChange", "padj", X)
   set(DE, i=NULL, j=newcol, value="neutral")
   set(DE, i=which(DE[[X]] > 0 & DE[[padj]] < opt$pCutoff), j=newcol, value="Up")
