@@ -6,6 +6,7 @@ spec = matrix(c(
   'baseDir',        'b', 1, "character", "Full path to base directory of the project. All other paths relative from here.",
   'createID',       'C', 0, "logical",   "Non-summarized intron or exon counts by featureCounts. The first column is not unique IDs because genes are repeated. (FALSE)",
   'countsFile',     'f', 1, "character", "Tab-separated table of counts with `row_ID` and all the samples.",
+  'forvar',         'F', 1, "character", "Looping variable (ie. carry out the analysis separately for each level of this var).",
   'specnorm',       'G', 1, "character", "Special normalisation. Gene ids that match this pattern will not be included for calculation of library sizes for TPM/RPM normalisation.",
   'help',           'h', 0, "logical",   "Help",
   'idcol',          'i', 1, "integer",   "ID column to use (1). The others will be removed. See also -I and -F.",
@@ -24,13 +25,13 @@ spec = matrix(c(
 
 opt <- getopt(spec)
 
-# opt <- list(baseDir="/Volumes/groups/busslinger/Kimon/tanja/R13065_RNAseq", countsFile="process/featureCounts/exon_genecounts.txt", createID=FALSE, samplesFile="description/covars.txt", resultsDir="results/PCA", RDSoutdir="process/PCA", idcol=1, nidcols=6, minMean=50, minSingle=100, nhit=25, reportTemplate="/Volumes/groups/busslinger/Kimon/tanja/R13065_RNAseq/code/pca_report_template.Rmd", widthsCol=6, specnorm='NULL', topVars=500)
+# opt <- list(baseDir="/Volumes/groups/busslinger/Kimon/anna/R13870_RNAseq", countsFile="process/featureCounts/introns_genecounts.txt", createID=FALSE, samplesFile="description/covars.txt", resultsDir="results/PCA", RDSoutdir="process/PCA", idcol=1, nidcols=6, minMean=50, minSingle=100, nhit=15, reportTemplate="/Volumes/groups/busslinger/Kimon/anna/R13870_RNAseq/code/pca_report_template.Rmd", widthsCol=6, specnorm='^ENSMUSG|^TCR|^IGH', topVars=500, forvar='NULL')
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
   q(status=1)
 }
- 
+
 if ( is.null(opt$reportTemplate) ) {
   opt$reportFile <- '~/utility_scripts/pca_report_template.Rmd'
 }
@@ -49,27 +50,59 @@ if (is.null(opt$minMean)) opt$minMean <- 10L
 if (is.null(opt$minSingle)) opt$minSingle <- 100L
 if (is.null(opt$nhit))  opt$nhit <- 10L
 if (is.null(opt$topVars))  opt$topVars <- 500L
+if ((!is.null(opt$forVar)) && opt$forvar == "NULL") opt$forVar <- NULL
+
 
 
 dir.create(file.path(opt$baseDir, opt$resultsDir), recursive=TRUE)
 dir.create(file.path(opt$baseDir, opt$RDSoutdir), recursive=TRUE)
 
 
-# Fire up the Rmd report
-rmarkdown::render(opt$reportTemplate,
-                  output_file = sub('.txt|.tsv', '.pca.html', basename(opt$countsFile)),
-                  output_dir = file.path(opt$baseDir, opt$resultsDir),
-                  params=list(cts = file.path(opt$baseDir, opt$countsFile),
-                              covars = file.path(opt$baseDir, opt$samplesFile),
-                              RDSdir = file.path(opt$baseDir, opt$RDSoutdir),
-                              nidcols = opt$nidcols,
-                              idcol = opt$idcol,
-                              minMean = opt$minMean,
-                              minSingle = opt$minSingle,
-                              ntop = opt$nhit,
-                              widthsFile = opt$widthsFile,
-                              widthsCol=opt$widthsCol,
-                              createID=opt$createID,
-                              specnorm=opt$specnorm,
-                              topVars=opt$topVars)
-)
+# Covariates
+covars <- read.csv(file.path(opt$baseDir, opt$samplesFile), sep="\t", header=TRUE, check.names = FALSE, colClasses="character")
+
+# Repeat analysis for every level of the looping variable.
+subcovars <- list()
+if (!is.null(opt$forar)) {
+  # in case not all combinations of variables exist
+  covars[[opt$forvar]] <- droplevels(as.factor(covars[[opt$forvar]]))  # sometimes it is a factor sometimes it isn,t
+  
+  subcovars <- lapply(levels(covars[[opt$forvar]]), function(V) {
+    # V <- levels(covars[[opt$forvar]])[1]
+    
+    # Select relevant rows and drop the column
+    coldata <- covars[covars[[opt$forvar]] == V, ]
+    coldata[opt$forvar] <- NULL
+    return(coldata)
+  })
+  names(subcovars) <- levels(covars[[opt$forvar]])
+}
+# Always also do the full data
+subcovars <- c(subcovars, list(covars))
+names(subcovars)[length(subcovars)] <- 'default'
+
+for (V in names(subcovars)){
+  # V <- names(subcovars)[1]
+  coldata <- subcovars[[V]]
+  
+  # Fire up the Rmd report
+  rmarkdown::render(opt$reportTemplate,
+                    output_file = sub('.txt|.tsv', paste0('.', gsub('[^A-Za-z0-9]+', '_', V), '.pca.html'), basename(opt$countsFile)),
+                    output_dir = file.path(opt$baseDir, opt$resultsDir),
+                    params=list(cts = file.path(opt$baseDir, opt$countsFile),
+                                # covars = file.path(opt$baseDir, opt$samplesFile),
+                                covars = coldata,
+                                RDSdir = file.path(opt$baseDir, opt$RDSoutdir),
+                                nidcols = opt$nidcols,
+                                idcol = opt$idcol,
+                                minMean = opt$minMean,
+                                minSingle = opt$minSingle,
+                                ntop = opt$nhit,
+                                widthsFile = opt$widthsFile,
+                                widthsCol=opt$widthsCol,
+                                createID=opt$createID,
+                                specnorm=opt$specnorm,
+                                topVars=opt$topVars,
+                                loopVal=V)
+  )
+}
