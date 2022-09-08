@@ -10,7 +10,7 @@ output:
       collapsed: false
 params:
   selfname: ""
-  derds: "null.RDS"     # MUST be specified, DESeq2 Dataset object file (before model creation)
+  dds: NULL     # MUST be specified, DESeq2 object
   prefix: ""
   resultsDir: "."
   baseDir: "."
@@ -63,7 +63,7 @@ if (!is.null(params$reducedFormula)){
 
 ```{r preprocess}
 # DESeq2 object set up with he relevant materials for this comparison formula
-deobj <- readRDS(params$derds)
+deobj <- params$dds
 
 # Variance-regularized counts
 if (params$rlog) {
@@ -781,14 +781,14 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
 # Contrast against the assigned reference
 resall <- lapply(params$comparisons, function(contrast) {
   # contrast <-  params$comparisons[[1]]
-  message('CONTRAST:', paste(contrast, collapse=' '))
+  message('CONTRAST:', paste0(contrast[1], ' : ', contrast[2], ' vs. ', contrast[3]))
   do_de_plots(contrast) 
 })
 
 names(resall) <- vapply(resall, function(x) { x$contrast }, character(1))
 ```
 
-## Results by comparison
+## Results
 
 IMPORTANT: In the name of each comparison, the condition used as **"reference" is always shown to the right** of the `vs` in the name, whereas the condition used as **"treatment" is always shown on the left** of the `vs`.
 
@@ -921,7 +921,7 @@ for (res in resall) {
 ```{r pdf}
 pdf(file.path(params$baseDir, 
               params$resultsDir, 
-              paste(params$prefix, 'deseq2.pdf', sep='.')),
+              sub('html$', 'pdf', params$selfname)),
     title=paste(params$prefix, paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(deobj), perl=TRUE), collapse=''), 'deseq2', sep='.'),
     width=15, height=15)
 
