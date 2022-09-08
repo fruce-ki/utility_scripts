@@ -19,6 +19,8 @@ opt <- getopt(spec)
 
 # opt <- list(de='/scratch-cbe/users/kimon.froussios/robyn/R12658_RNAseq/results/DE/intron_genecounts/intron_genecounts.~Condition.Condition_Tcf3_Tir1_Auxin_2_5_vs_Tcf3_Tir1_noAux_0.deseq2.tsv', cnt='/groups/busslinger/Kimon/robyn/R12658_RNAseq/process/featureCounts/intron_genecounts.txt', fcThresh=2, pCutoff=0.01, countThresh=100L, tpmThresh=50, simplify=TRUE, url="http://ucsc.vbc.ac.at/cgi-bin/hgTracks?hgS_doOtherUser=submit&hgS_otherUserName=kimon.froussios&hgS_otherUserSessionName=R13065_ribominusRNAseq")
 
+# opt <- list(de='/Volumes/groups/busslinger/Kimon/sarah/R13546_RNAseq/results/DE/cell_proB.~Condition.Condition_exp_Ikzf1_proB_vs_ctrl_Ikzf1_proB.deseq2.tsv', cnt='/Volumes/groups/busslinger/Kimon/sarah/R13546_RNAseq/process/featureCounts/intron_genecounts.txt', fcThresh=2, pCutoff=0.05, countThresh=100L, tpmThresh=50, simplify=TRUE, url="https://foobar")
+
 if (is.null(opt$de)) stop("No input specified.")
 if (is.null(opt$cnt) & !is.null(opt$url)) stop("Need a counts table for gene positions with which to form the URLs.")
 if (is.null(opt$fcThresh)) { opt$lfcThresh <- 2 } else {  opt$lfcThresh <- as.numeric(opt$lfcThresh)  }
@@ -142,7 +144,7 @@ if (opt$simplify) {
 DE <- merge(DE, CNT, by.x='name', by.y='Geneid', all.x=TRUE, all.y=FALSE)
 
 
-fwrite(DE, file=sub("(.nolab)?txt$|(.nolab)?.tsv$", ".spotfire.txt", opt$de), sep="\t", quote=FALSE, col.names=TRUE)
+fwrite(DE, file=sub("txt$|tsv$", "spotfire.txt", opt$de), sep="\t", quote=FALSE, col.names=TRUE)
 
 
 # ## Long form count maybe useful for some plots
