@@ -1,21 +1,36 @@
-## snakemake --local-cores 1 --jobs 50 --use-envmodules --latency-wait 30 --restart-times 10 --cluster "sbatch -c {threads} --time={resources.maxtime} --mem={resources.mem} -e ./logs/slurm-%j.err -o ./logs/slurm-%j.out" 
+ ### snakemake --local-cores 1 --jobs 50 --use-envmodules --latency-wait 30 --restart-times 10 --cluster "sbatch -c {threads} --time={resources.maxtime} --mem={resources.mem} -e ./logdump/slurm-%j.err -o ./logdump/slurm-%j.out" 
 
 configfile: "snake_config.yaml"
-localrules: all, update_alignments_table, extract_relevant_alignment_info, stage_in, multiqc_pre, fix_names_and_stage_out_featureCounts, setup_DE, stage_out_DE_reports, stage_out_DE_table
-			#, kallisto_rehead, kallisto_stage_out
+localrules: all, update_alignments_table, extract_relevant_alignment_info, stage_in, multiqc_pre, fix_names_and_stage_out_featureCounts, setup_DE, stage_out_DE_reports, stage_out_DE_table#, kallisto_rehead, kallisto_stage_out
 
 import os
 import re
+import pandas as pd
 import subprocess as sp
 from itertools import compress
+
+
+# System modules
+sysenv22 = "build-env/f2022"
+py = "python/3.9.6-gcccore-11.2.0"
+scipy = "scipy-bundle/2021.10-foss-2021b"
+rbase = "r/4.1.2-foss-2021b"
+rlibs = "r-bundle-bioconductor/3.14-foss-2021b-r-4.1.2"
+pdoc = "pandoc/2.18"
+samt = "samtools/1.15-gcc-11.2.0"
+kal = "kallisto/0.48.0-foss-2021b"
+
+sysenv21 = "build-env/f2021"
+featc = "subread/2.0.2-gcc-10.2.0"
+fqc="fastqc/0.11.9-java-11"
+mqc= "multiqc/1.11-foss-2020b-python-3.8.6"
 
 # I'll have to type these many times, so simplify them.
 # Snakemake recommends not using absolute paths, for portability, but it is causing problems for cluster jobs.
 HOME = config["projectHome"]
 SCRATCH = config["projectScratch"]
 pairedend = config["pairedend"]
-
-sys.path.append(HOME + '/code')
+sys.path.append(config["codeDir"])
 
 THREADS=8
 
@@ -40,49 +55,49 @@ samples = Convert(samples_raw, samples_temp)
 uscore = config["idjoin"]
 COMBONAME = [uscore.join([samples[x], x]) for x in samples.keys()]
 
-FLAVOURS = ["exon_genecounts", "intron_genecounts", "exon_spliced_genecounts", "exonL1_genecounts", "intronF1_genecounts", "exonL2_genecounts", "intronF2_genecounts", "exonL2_spliced_genecounts"]
+FLAVOURS = ["exon_genecounts", "intron_genecounts", "exon_spliced_genecounts"]
+#, "exonL1_genecounts", "intronF1_genecounts", "exonL2_genecounts", "intronF2_genecounts", "exonL2_spliced_genecounts"]
 
+
+## Parse contrasts and covariates, to work out what output file names to expect.
+contexts = config['DE']['contexts'].split(',')
+context_names = [x.split('-')[0] for x in contexts]
+context_levs = [int(x.split('-')[1]) for x in contexts]
+contexts = [x for x in zip(context_names, context_levs)]
+comparisons = config['DE']['comparisons'].split(',')
+comparison_names = [x.split('-')[0] for x in comparisons]
+comparison_vs = [x.split('-')[1] for x in comparisons]
+comparison_treat = [int(x.split('v')[0]) for x in comparison_vs]
+comparison_ref = [int(x.split('v')[1]) for x in comparison_vs]
+comparisons = [x for x in zip(comparison_names, comparison_treat, comparison_ref)]
+
+covars = pd.read_table(config['DE']['covars'], header=0, index_col=None, dtype=str)
+
+def unique(x):     # R style set of unique values, preserving order of occurence.
+	return(list(dict.fromkeys(x)))
+contexts = [x + '_' + unique(covars.loc[:, x])[y - 1] for x,y in contexts]
+comparisons = [x + '_' + unique(covars.loc[:, x])[y - 1] + '_vs_' + unique(covars.loc[:, x])[z - 1] for x,y,z in comparisons]
+
+EXPECTED_DE = [x + '.' + y for x,y in zip(contexts, comparisons)]
 
 
 
 ## One chunk to rule them all
 if config["do_DE"]:
 
-	if config["DE"]["loopgroup"] != "None":
-
-		import pandas as pd
-		DT = pd.read_csv(os.path.join(HOME, config["DE"]["covars"]), sep="\t")
-		GROUPS = [ config["DE"]["loopgroup"] + "_" + x  for x in list(DT.loc[:, config["DE"]["loopgroup"]].unique()) ]
-
-		rule all:
-			input:
-				HOME + "/process/multiqc_pre/multiqc_report.html",
-				HOME + "/process/duprates/duprates.txt",
-				HOME + "/process/duprates/duprates.melted.txt",
-				expand(HOME + "/process/featureCounts/{countsfile}.txt", countsfile=FLAVOURS),
-				expand(HOME + "/results/PCA/{countsfile}.pca.html", countsfile=FLAVOURS),
-				expand(HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".{group}.deseq2.html", countsfile=FLAVOURS, group=GROUPS),
-				expand(HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".all.deseq2.spotfire.txt", countsfile=FLAVOURS)
-			# params:
-			# 	scratch=SCRATCH
-			# shell:
-			# 	"rm -r {params.scratch}"   # Clean up temporary/intermediate files
-	
-	else:
-
-		rule all:
-			input:
-				HOME + "/process/multiqc_pre/multiqc_report.html",
-				HOME + "/process/duprates/duprates.txt",
-				HOME + "/process/duprates/duprates.melted.txt",
-				expand(HOME + "/process/featureCounts/{countsfile}.txt", countsfile=FLAVOURS),
-				expand(HOME + "/results/PCA/{countsfile}.pca.html", countsfile=FLAVOURS),
-				expand(HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".deseq2.html", countsfile=FLAVOURS),
-				expand(HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".all.deseq2.spotfire.txt", countsfile=FLAVOURS)
-			# params:
-			# 	scratch=SCRATCH
-			# shell:
-			# 	"rm -r {params.scratch}"   # Clean up temporary/intermediate files
+	rule all:
+		input:
+			HOME + "/process/multiqc_pre/multiqc_report.html",
+			HOME + "/process/duprates/duprates.txt",
+			HOME + "/process/duprates/duprates.melted.txt",
+			expand(HOME + "/process/featureCounts/{countsfile}.txt", countsfile=FLAVOURS),
+			expand(HOME + "/results/PCA/{countsfile}.default.pca.html", countsfile=FLAVOURS),
+			expand(HOME + "/results/DE/{countsfile}.{dename}.deseq2.html", countsfile=FLAVOURS, dename=EXPECTED_DE),
+			expand(HOME + "/results/DE/{countsfile}.{dename}.deseq2.nolab.spotfire.txt", countsfile=FLAVOURS, dename=EXPECTED_DE)
+		# params:
+		# 	scratch=SCRATCH
+		# shell:
+		# 	"rm -r {params.scratch}"   # Clean up temporary/intermediate files
 
 else:
 
@@ -92,7 +107,7 @@ else:
 			HOME + "/process/duprates/duprates.txt",
 			HOME + "/process/duprates/duprates.melted.txt",
 			expand(HOME + "/process/featureCounts/{countsfile}.txt", countsfile=FLAVOURS),
-			expand(HOME + "/results/PCA/{countsfile}.pca.html", countsfile=FLAVOURS)
+			expand(HOME + "/results/PCA/{countsfile}.default.pca.html", countsfile=FLAVOURS)
 		params:
 			scratch=SCRATCH
 		# shell:
@@ -172,12 +187,32 @@ if pairedend:
 			SCRATCH + "/data/{comboname}.aligned.bam"
 		output:
 			SCRATCH + "/data_fixed/{comboname}.aligned.bam"
+		envmodules:
+			sysenv22,
+			samt
 		threads: 1
 		resources:
 			maxtime=30,
 			mem='1G'
 		shell:
 			"samtools view -h -G 1024 {input} | sed 's/chrMT/chrM/g' | samtools view -Sb - > {output}"
+
+
+	rule split_pair_bam:     # for Kallisto
+		input:
+			SCRATCH + "/data/{comboname}.aligned.bam"
+		output:
+			r1=SCRATCH + "/data_fastq/{comboname}.1.fastq",
+			r2=SCRATCH + "/data_fastq/{comboname}.2.fastq"
+		envmodules:
+			sysenv22,
+			samt
+		threads: THREADS - 1
+		resources:
+			maxtime=5,
+			mem='4G'
+		shell:
+			"samtools collate -@ $(({threads} - 1)) -O -u {input} | samtools fastq -s /dev/null -0 /dev/null -1 {output.r1} -2 {output.r2} -n"
 
 else:
 
@@ -186,12 +221,31 @@ else:
 			SCRATCH + "/data/{comboname}.aligned.bam"
 		output:
 			SCRATCH + "/data_fixed/{comboname}.aligned.bam"
+		envmodules:
+			sysenv22,
+			samt
 		threads: 1
 		resources:
 			maxtime=30,
 			mem='1G'
 		shell:
 			"samtools view -h {input} | sed 's/chrMT/chrM/g' | samtools view -Sb - > {output}"
+
+
+	rule split_pair_bam:     # for Kallisto
+		input:
+			SCRATCH + "/data/{comboname}.aligned.bam"
+		output:
+			SCRATCH + "/data_fastq/{comboname}.fastq"
+		envmodules:
+			sysenv22,
+			samt
+		threads: THREADS - 1
+		resources:
+			maxtime=5,
+			mem='4G'
+		shell:
+			"samtools collate -@ $(({threads} - 1)) -O -u {input} | samtools fastq -s /dev/null -0 /dev/null -o {output} -n"
 ##
 
 
@@ -206,8 +260,8 @@ rule flagstats:
 	output:
 		SCRATCH + "/qc_pre/{comboname}.flagstats.txt"
 	envmodules:
-		"build-env/f2021",
-		"samtools/1.12-gcc-10.2.0"
+		sysenv22,
+		samt
 	threads: 1
 	resources:
 		maxtime=5,
@@ -224,8 +278,8 @@ rule bamstats:
 	params:
 		ref=config["reference"]
 	envmodules:
-		"build-env/f2021",
-		"samtools/1.12-gcc-10.2.0"
+		sysenv22,
+		samt
 	threads: 1
 	resources:
 		maxtime=5,
@@ -248,8 +302,8 @@ rule fastqc_mapped:
 		maxtime=10,
 		mem='1G'
 	envmodules:
-		"build-env/f2021",
-		"fastqc/0.11.9-java-11"
+		sysenv21,
+		fqc
 	shell:
 		"fastqc -f bam_mapped -t {threads} -o {params.project}/qc_pre {input}"
 
@@ -272,8 +326,8 @@ if pairedend:
 			maxtime=30,
 			mem='4G'
 		envmodules:
-			"build-env/f2021",
-			"r-bundle-bioconductor/3.12-foss-2020b-r-4.0.3"
+			sysenv22,
+			rlibs
 		shell:
 			"""
 			mkdir -p $(dirname {output.table}) &&
@@ -298,14 +352,14 @@ else:
 			maxtime=30,
 			mem='4G'
 		envmodules:
-			"build-env/f2021",
-			"r-bundle-bioconductor/3.12-foss-2020b-r-4.0.3"
+			sysenv22,
+			rlibs
 		shell:
 			"""
 			mkdir -p $(dirname {output.table}) &&
 			Rscript {params.code}/dupRadar_run.R -b {input} -g {params.ann} -o {output.table} -s {params.stranding} -t {threads}
 			"""
-
+#
 
 rule multiqc_pre:
 	input:						# don't os.path.dirname here, because it won't check for folder contents
@@ -317,8 +371,8 @@ rule multiqc_pre:
 	params:
 		project=HOME
 	envmodules:
-		"build-env/f2021",
-		"multiqc/1.11-foss-2020b-python-3.8.6"
+		sysenv21,
+		mqc
 	shell:
 		"multiqc -f -o {params.project}/process/multiqc_pre $(dirname {input.fastqc[0]}) $(dirname {input.flagstats[0]}) $(dirname {input.bamstats[0]})"
 
@@ -336,10 +390,11 @@ rule merge_dup:
 		scratch=SCRATCH,
 		home=HOME
 	envmodules:
-		"build-env/f2021",
-		"python/3.8.6-gcccore-10.2.0",
-		"scipy-bundle/2020.11-foss-2020b",
-		"r-bundle-bioconductor/3.12-foss-2020b-r-4.0.3"
+		sysenv22,
+		py,
+		scipy,
+		rbase,
+		rlibs
 	resources:
 		maxtime=5,
 		mem='1G'
@@ -358,11 +413,14 @@ rule merge_dup:
 
 
 
-## Quantify with featureCounts
+## Quantify
 
+stranding = ''    # Kallisto stranding flags
+if config["stranding"] == 1:
+	stranding = "--fr-stranded "
+elif config["stranding"] == 2:
+	stranding = "--rf-stranded "
 
-# --nonOverlap 0 should prevent intron-exon boundary-crossing reads.
-# Intron counts are a proxy for pre-mRNA counts. Therefore we count reads spanning exon-intron boundaries as intronic instead of exonic.
 
 if pairedend:
 	# Omitting -P -d -D because the VBCF reported fragment size range seems unreliable, nothing gets counted if I use it.
@@ -377,8 +435,8 @@ if pairedend:
 			stranding=config["stranding"],
 			ann=config["annotation"]["exons"]
 		envmodules:
-			"build-env/f2021",
-			"subread/2.0.2-gcc-10.2.0"
+			sysenv21,
+			featc
 		group: "featureCounts"
 		threads: THREADS
 		resources:
@@ -400,8 +458,8 @@ if pairedend:
 			stranding=config["stranding"],
 			ann=config["annotation"]["introns"]
 		envmodules:
-			"build-env/f2021",
-			"subread/2.0.2-gcc-10.2.0"
+			sysenv21,
+			featc
 		group: "featureCounts"
 		threads: THREADS
 		resources:
@@ -423,8 +481,8 @@ if pairedend:
 				stranding=config["stranding"],
 				ann=config["annotation"]["exons"]
 			envmodules:
-				"build-env/f2021",
-				"subread/2.0.2-gcc-10.2.0"
+				sysenv21,
+				featc
 			group: "featureCounts"
 			threads: THREADS
 			resources:
@@ -434,120 +492,25 @@ if pairedend:
 				"featureCounts -T {threads} -t exon --splitOnly -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} -s {params.stranding} {input}"
 
 
-	rule quantify_genes_lastexon_pairedend:
-		input:
-			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
-		output:
-			SCRATCH + "/featureCounts/exonL1_genecounts.txt"
-		params:
-			stranding=config["stranding"],
-			ann=config["annotation"]["lastexon"]
-			#minL=config["minFrag"],
-			#maxL=config["minFrag"]
-		envmodules:
-			"build-env/f2021",
-			"subread/2.0.2-gcc-10.2.0"
-		group: "featureCounts"
-		threads: THREADS
-		resources:
-			maxtime=30,
-			mem='4G'
-		shell:
-			"""
-			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t exon -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} -s {params.stranding} {input}
-			"""
-
-
-	rule quantify_genes_firstintron_pairedend:
-		input:
-			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
-		output:
-			SCRATCH + "/featureCounts/intronF1_genecounts.txt"
-		params:
-			stranding=config["stranding"],
-			ann=config["annotation"]["firstintron"]
-			#minL=config["minFrag"],
-			#maxL=config["minFrag"]
-		envmodules:
-			"build-env/f2021",
-			"subread/2.0.2-gcc-10.2.0"
-		group: "featureCounts"
-		threads: THREADS
-		resources:
-			maxtime=30,
-			mem='4G'
-		shell:
-			"""
-			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t intron -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} -s {params.stranding} {input}
-			"""
-
-
-	rule quantify_genes_last2exons_pairedend:
-		input:
-			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
-		output:
-			SCRATCH + "/featureCounts/exonL2_genecounts.txt"
-		params:
-			stranding=config["stranding"],
-			ann=config["annotation"]["last2exons"]
-		envmodules:
-			"build-env/f2021",
-			"subread/2.0.2-gcc-10.2.0"
-		group: "featureCounts"
-		threads: THREADS
-		resources:
-			maxtime=30,
-			mem='4G'
-		shell:
-			"""
-			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t exon -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} -s {params.stranding} {input}
-			"""
-
-
-	rule quantify_genes_first2introns_pairedend:
-		input:
-			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
-		output:
-			SCRATCH + "/featureCounts/intronF2_genecounts.txt"
-		params:
-			stranding=config["stranding"],
-			ann=config["annotation"]["first2introns"]
-		envmodules:
-			"build-env/f2021",
-			"subread/2.0.2-gcc-10.2.0"
-		group: "featureCounts"
-		threads: THREADS
-		resources:
-			maxtime=30,
-			mem='4G'
-		shell:
-			"""
-			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t intron -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} -s {params.stranding} {input}
-			"""
-
-
-	rule quantify_genes_last2exons_split_pairedend:
-		input:
-			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
-		output:
-			SCRATCH + "/featureCounts/exonL2_spliced_genecounts.txt"
-		params:
-			stranding=config["stranding"],
-			ann=config["annotation"]["last2exons"]
-		envmodules:
-			"build-env/f2021",
-			"subread/2.0.2-gcc-10.2.0"
-		group: "featureCounts"
-		threads: THREADS
-		resources:
-			maxtime=30,
-			mem='4G'
-		shell:
-			"featureCounts -T {threads} -t exon --splitOnly -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} -s {params.stranding} {input}"
+	#rule kallisto_pairedend:
+	#	input:
+	#		r1=SCRATCH + "/data_fastq/{comboname}.1.fastq",
+	#		r2=SCRATCH + "/data_fastq/{comboname}.2.fastq"
+	#	output:
+	#		txt=SCRATCH + "/kallisto/{comboname}/abundance.tsv",
+	#		boot=SCRATCH + "/kallisto/{comboname}/abundance.h5"
+	#	params:
+	#		idx=config["kallisto_index"]
+	#	envmodules:
+	#		sysenv22,
+	#		kal
+	#	group: "kallisto"
+	#	threads: THREADS
+	#	resources:
+	#		maxtime=120,
+	#		mem="48G"
+	#	shell:
+	#		"kallisto quant -t {threads} -i {params.idx} -o $(dirname {output.txt}) --bias -b 100 " + stranding + "{input.r1} {input.r2}"
 
 else:
 
@@ -560,8 +523,8 @@ else:
 			stranding=config["stranding"],
 			ann=config["annotation"]["exons"]
 		envmodules:
-			"build-env/f2021",
-			"subread/2.0.2-gcc-10.2.0"
+			sysenv21,
+			featc
 		group: "featureCounts"
 		threads: THREADS
 		resources:
@@ -583,8 +546,8 @@ else:
 			stranding=config["stranding"],
 			ann=config["annotation"]["introns"]
 		envmodules:
-			"build-env/f2021",
-			"subread/2.0.2-gcc-10.2.0"
+			sysenv21,
+			featc
 		group: "featureCounts"
 		threads: THREADS
 		resources:
@@ -606,8 +569,8 @@ else:
 				stranding=config["stranding"],
 				ann=config["annotation"]["exons"]
 			envmodules:
-				"build-env/f2021",
-				"subread/2.0.2-gcc-10.2.0"
+				sysenv21,
+				featc
 			group: "featureCounts"
 			threads: THREADS
 			resources:
@@ -617,116 +580,29 @@ else:
 				"featureCounts -T {threads} -t exon --splitOnly -O --fraction -a {params.ann} -o {output} -s {params.stranding} {input}"
 
 
-	rule quantify_genes_lastexon_pairedend:
-		input:
-			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
-		output:
-			SCRATCH + "/featureCounts/exonL1_genecounts.txt"
-		params:
-			stranding=config["stranding"],
-			ann=config["annotation"]["lastexon"]
-		envmodules:
-			"build-env/f2021",
-			"subread/2.0.2-gcc-10.2.0"
-		group: "featureCounts"
-		threads: THREADS
-		resources:
-			maxtime=30,
-			mem='4G'
-		shell:
-			"""
-			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t exon -O --fraction -a {params.ann} -o {output} -s {params.stranding} {input}
-			"""
-
-	rule quantify_genes_firstintron_pairedend:
-		input:
-			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
-		output:
-			SCRATCH + "/featureCounts/intronF1_genecounts.txt"
-		params:
-			stranding=config["stranding"],
-			ann=config["annotation"]["firstintron"]
-		envmodules:
-			"build-env/f2021",
-			"subread/2.0.2-gcc-10.2.0"
-		group: "featureCounts"
-		threads: THREADS
-		resources:
-			maxtime=30,
-			mem='4G'
-		shell:
-			"""
-			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t intron -O --fraction -a {params.ann} -o {output} -s {params.stranding} {input}
-			"""
-
-
-	rule quantify_genes_last2exons_pairedend:
-		input:
-			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
-		output:
-			SCRATCH + "/featureCounts/exonL2_genecounts.txt"
-		params:
-			stranding=config["stranding"],
-			ann=config["annotation"]["last2exons"]
-		envmodules:
-			"build-env/f2021",
-			"subread/2.0.2-gcc-10.2.0"
-		group: "featureCounts"
-		threads: THREADS
-		resources:
-			maxtime=30,
-			mem='4G'
-		shell:
-			"""
-			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t exon -O --fraction -a {params.ann} -o {output} -s {params.stranding} {input}
-			"""
-
-
-	rule quantify_genes_first2introns_pairedend:
-		input:
-			expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
-		output:
-			SCRATCH + "/featureCounts/intronF2_genecounts.txt"
-		params:
-			stranding=config["stranding"],
-			ann=config["annotation"]["first2introns"]
-		envmodules:
-			"build-env/f2021",
-			"subread/2.0.2-gcc-10.2.0"
-		group: "featureCounts"
-		threads: THREADS
-		resources:
-			maxtime=30,
-			mem='4G'
-		shell:
-			"""
-			mkdir -p $(dirname {output})
-			featureCounts -T {threads} -t intron -O --fraction -a {params.ann} -o {output} -s {params.stranding} {input}
-			"""
-
-
-	rule quantify_genes_last2exons_split_singleend:
-			input:
-				expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
-			output:
-				SCRATCH + "/featureCounts/exonL2_spliced_genecounts.txt"
-			params:
-				stranding=config["stranding"],
-				ann=config["annotation"]["last2exons"]
-			envmodules:
-				"build-env/f2021",
-				"subread/2.0.2-gcc-10.2.0"
-			group: "featureCounts"
-			threads: THREADS
-			resources:
-				maxtime=30,
-				mem='4G'
-			shell:
-				"featureCounts -T {threads} -t exon --splitOnly -O --fraction -a {params.ann} -o {output} -s {params.stranding} {input}"
+	#rule kallisto_singleend:
+	#		input:
+	#			SCRATCH + "/data_fastq/{comboname}.fastq"
+	#		output:
+	#			txt=SCRATCH + "/kallisto/{comboname}/abundance.tsv",
+	#			boot=SCRATCH + "/kallisto/{comboname}/abundance.h5"
+	#		params:
+	#			idx=config["kallisto_index"],
+	#			fragLen=config["fragLen"],
+	#			fragLenSD=config["fragLenSD"],
+	#			stranding=
+	#		envmodules:
+	#			sysenv21,
+	#			kal
+	#		group: "kallisto"
+	#		threads: THREADS
+	#		resources:
+	#			maxtime=120,
+	#			mem="48G"
+	#		shell:
+	#			"kallisto quant -t {threads} -i {params.idx} -o $(dirname {output.txt}) --bias -b 100 " + stranding + "--single -l {params.fragLen} -s {fragLenSD} {input}"
 #
+
 
 rule fix_names_and_stage_out_featureCounts: # featureCounts uses full input paths as sample names, which would suck for everything downstream.
 	input:
@@ -745,327 +621,6 @@ rule fix_names_and_stage_out_featureCounts: # featureCounts uses full input path
 		cp {output.tmp} {output.staged}  &&
 		cp {input}.summary {output.staged}.summary 
 		"""
-##
-
-
-
-
-## PCA
-
-rule PCA:
-	input:
-		HOME + "/process/featureCounts/{countsfile}.txt"
-	output:
-		HOME + "/results/PCA/{countsfile}.pca.html",
-		HOME + "/process/featureCounts/{countsfile}.scaled.txt"
-	envmodules:
-		"build-env/f2021",
-		"r-bundle-bioconductor/3.12-foss-2020b-r-4.0.3",
-		"pandoc/2.13"
-	params:
-		home=HOME,
-		minMean=config["PCA"]["minMean"],
-		minSingle=config["PCA"]["minSingle"],
-		ntop=config["PCA"]["ntop"],
-		covars=config["PCA"]["covars"],
-		code=config["codeDir"],
-		pattern=config["PCA"]["specialnorm"]
-	group: "pca"
-	threads: 1
-	resources:
-		maxtime=5,
-		mem='4G'
-	shell:
-		"""
-		Rscript {params.code}/pca_run.R -b {params.home} -f process/featureCounts/$(basename {input}) -G {params.pattern} -I 6 -i 1 -M {params.minMean} -m {params.minSingle} -n {params.ntop} -o results/PCA -r process/PCA -s {params.covars} -T {params.code}/pca_report_template.Rmd -W 6
-		"""
-##
-
-
-
-
-## DE
-
-if config["do_DE"]:
-
-	rule setup_DE:
-		input:
-			covars=os.path.join(HOME, config["DE"]["covars"])
-		output:
-			covars=os.path.join(SCRATCH, config["DE"]["covars"])
-		params:
-			home=HOME,
-			scratch=SCRATCH
-		shell:
-			"""
-			mkdir -p $(dirname {output.covars})
-			cp {input.covars} {output.covars}
-			"""
-
-
-	if config["DE"]["loopgroup"] != "None":
-
-		rule DE:
-			input:
-				counts=SCRATCH + "/process/featureCounts_fixed/{countsfile}.txt",
-				samples=os.path.join(SCRATCH, config["DE"]["covars"])
-			output:
-				expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".{group}.deseq2.html", group=GROUPS, allow_missing=True),
-				expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".{group}.deseq2.pdf", group=GROUPS, allow_missing=True)
-				# plus tables per comparison within each group, exact number of which is a pain to pre-determine. HTML is successful, only if the TSVs were successful.
-			envmodules:
-				"build-env/f2021",
-				"r-bundle-bioconductor/3.12-foss-2020b-r-4.0.3",
-				"pandoc/2.13"
-			params:
-				scratch=SCRATCH,
-				minMean=config["DE"]["minMean"],
-				minSingle=config["DE"]["minSingle"],
-				ntop=config["DE"]["ntop"],
-				covars=config["DE"]["covars"],
-				formula=config["DE"]["formula"],
-				refs=config["DE"]["references"],
-				lfc=config["DE"]["lfc_thresh"],
-				pcut=config["DE"]["p_cut"],
-				forvar=config["DE"]["loopgroup"],
-				code=config["codeDir"],
-				pattern=config["DE"]["specialnorm"]
-			group: "deseq"
-			threads: 1
-			resources:
-				maxtime=30,
-				mem='4G'
-			shell:
-				"Rscript {params.code}/deseq2_runMF.R -A -b {params.scratch} -c {params.lfc} -d {params.formula} -F {params.forvar} -f /process/featureCounts_fixed/$(basename {input.counts}) -G {params.pattern} -i 1 -I 6 -l -M {params.minMean} -m {params.minSingle} -n {params.ntop} -o results/DE -p {params.pcut} -P $(basename {input.counts} .txt) -r process/DE -s {params.covars} -T {params.code}/deseq2_report_template.Rmd -W 6 -x {params.refs}"
-
-
-		rule stage_out_DE_reports:
-			input: 
-				expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".{group}.deseq2.html", group=GROUPS, allow_missing=True),
-				expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".{group}.deseq2.pdf", group=GROUPS, allow_missing=True)
-			output:
-				expand(HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".{group}.deseq2.html", group=GROUPS, allow_missing=True),
-				expand(HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".{group}.deseq2.pdf", group=GROUPS, allow_missing=True)
-			params:
-				scratch=SCRATCH,
-				home=HOME
-			shell:
-				"""
-				mkdir -p {params.home}/results/DE &&
-				cp {input} {params.home}/results/DE &&
-
-				mkdir -p {params.home}/process/DE &&
-				cp {params.scratch}/process/DE/*/*.RDS {params.home}/process/DE/
-				"""
-
-		rule merge_DE_table:
-			input:
-				expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".{group}.deseq2.html", group=GROUPS, allow_missing=True)  # proxies for completion of DE
-			output:
-				SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".all.deseq2.tsv"
-			envmodules:
-				"build-env/f2021",
-				"python/3.8.6-gcccore-10.2.0",
-				"scipy-bundle/2020.11-foss-2020b"
-			params:
-				code=config["codeDir"],
-				formula=config["DE"]["formula"],
-				scratch=SCRATCH,
-				home=HOME
-			group: "stage_out"
-			threads: 1
-			resources:
-				maxtime=5,
-				mem='4G'
-			shell:
-				# Difficult to predetermine the number and names of all the individual table files, so cheat by using my looping script.
-				# Also getting dir from output because multiple inputs. So in and out have to stay in same dir.
-				"""
-				{params.code}/fileutilities.py T $(dirname {output}) --dir '(?<!all|lab).deseq2.tsv' | sort | uniq | {params.code}/fileutilities.py P -i -r --appnd > {output}
-				"""
-
-	else:
-
-		rule DE:
-			input:
-				counts=SCRATCH + "/process/featureCounts_fixed/{countsfile}.txt",
-				samples=os.path.join(SCRATCH, config["DE"]["covars"])
-			output:
-				SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".deseq2.html",
-				SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".deseq2.pdf",
-			envmodules:
-				"build-env/f2021",
-				"r-bundle-bioconductor/3.12-foss-2020b-r-4.0.3",
-				"pandoc/2.13"
-			params:
-				scratch=SCRATCH,
-				minMean=config["DE"]["minMean"],
-				minSingle=config["DE"]["minSingle"],
-				ntop=config["DE"]["ntop"],
-				covars=config["DE"]["covars"],
-				formula=config["DE"]["formula"],
-				refs=config["DE"]["references"],
-				lfc=config["DE"]["lfc_thresh"],
-				pcut=config["DE"]["p_cut"],
-				code=config["codeDir"],
-				pattern=config["DE"]["specialnorm"]
-			group: "deseq"
-			threads: 1
-			resources:
-				maxtime=10,
-				mem='4G'
-			shell:
-				"Rscript {params.code}/deseq2_runMF.R -A -b {params.scratch} -c {params.lfc} -d {params.formula} -f /process/featureCounts_fixed/$(basename {input.counts}) -G {params.pattern} -i 1 -I 6 -l -M {params.minMean} -m {params.minSingle} -n {params.ntop} -o results/DE -p {params.pcut} -P $(basename {input.counts} .txt) -r process/DE -s {params.covars} -T {params.code}/deseq2_report_template.Rmd -W 6 -x {params.refs}"
-
-
-		rule stage_out_DE_reports:
-			input: 
-				html=SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".deseq2.html",
-				pdf=SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".deseq2.pdf"
-			output:
-				html=HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".deseq2.html",
-				pdf=HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".deseq2.pdf"
-			params:
-				scratch=SCRATCH,
-				home=HOME
-			shell:
-				"""
-				mkdir -p $(dirname {output.html}) &&
-				
-				cp {input.html} {output.html} &&
-				cp {input.pdf} {output.pdf} &&
-
-				mkdir -p {params.home}/process/DE &&
-				cp {params.scratch}/process/DE/*/*.RDS {params.home}/process/DE/
-				"""
-
-		rule merge_DE_table:
-			input:
-				SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".deseq2.html"  # proxy for completion of DE
-			output:
-				SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".all.deseq2.tsv"
-			envmodules:
-				"build-env/f2021",
-				"python/3.8.6-gcccore-10.2.0",
-				"scipy-bundle/2020.11-foss-2020b"
-			params:
-				code=config["codeDir"],
-				scratch=SCRATCH,
-				home=HOME
-			group: "stage_out"
-			threads: 1
-			resources:
-				maxtime=5,
-				mem='4G'
-			shell:
-				# Difficult to predetermine the number and names of all the individual table files that my deseq script will automatically create, so cheat by using my looping script.
-				"""
-				{params.code}/fileutilities.py T $(dirname {input}) --dir '(?<!all|lab).deseq2.tsv' | {params.code}/fileutilities.py P -i -r --appnd > {output}
-				"""
-#
-
-	rule prepare_for_Spotfire:
-		input:
-			de=SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".all.deseq2.tsv",
-			cnt=SCRATCH + "/featureCounts/{countsfile}.txt"
-			# plus individual contrasts whose names are difficult to predict
-		output: 
-			SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".all.deseq2.spotfire.txt"
-			# plus individual contrasts whose names are difficult to predict
-		#envmodules:
-		#	"build-env/f2021",
-		#	"r-bundle-bioconductor/3.12-foss-2020b-r-4.0.3",
-		#	"python/3.8.6-gcccore-10.2.0",
-		#	"scipy-bundle/2020.11-foss-2020b"
-		params:
-			code=config["codeDir"],
-			scratch=SCRATCH,
-			home=HOME,
-			countCap=config["Spotfire"]["countCap"],
-			tpmCap=config["Spotfire"]["tpmCap"],
-			lfc=config["Spotfire"]["lfc_thresh"],
-			pcut=config["Spotfire"]["p_cut"],
-			urlbase=config["ucsc_session"]
-		group: "spotfire"
-		threads: 1
-		resources:
-			maxtime=10,
-			mem='1G'
-		#	A bit of a pain to dynamically predetermine the individual contrasts, so as to request their outputs explicitly through the rule hierarchy.
-		#	So cheat with python.
-		run:
-			files = os.listdir(os.path.join(SCRATCH, "results/DE/", wildcards.countsfile))
-			pat = re.compile('all.deseq2.tsv|deseq2.nolab.tsv')
-			relevant = [os.path.join(SCRATCH, "results/DE/", wildcards.countsfile, y) for y in list(compress(files, [x is not None for x in [pat.search(f) for f in files]]))]
-			for contrast in relevant:
-				cmd = [os.path.join(params.code, "deseq2_prepare_for_spotfire.R"), "-C", input.cnt, "-c", str(params.countCap), "-D", contrast, "-f", str(params.lfc), "-p", str(params.pcut), "-s", "-t", str(params.tpmCap),  "-u", params.urlbase]
-				#sys.stderr.write("\n" + sp.list2cmdline(cmd) + "\n")
-				sp.run(cmd)
-		#shell:
-		#	"""
-		#	{params.code}/fileutilities.py T $(dirname {input.de}) --dir 'all.deseq2.tsv|.deseq2.nolab.tsv' | {params.code}/fileutilities.py P --loop Rscript {params.code}/deseq2_prepare_for_spotfire.R ,-C {input.cnt} ,-c {params.countCap} ,-D {{abs}} ,-f {params.lfc} ,-p {params.pcut} ,-s ,-t {params.tpmCap} ,-u {params.urlbase}
-		#	"""
-
-
-	rule stage_out_DE_table:
-		input:
-			SCRATCH + "/results/DE/{countsfile}/{countsfile}." + config["DE"]["formula"] + ".all.deseq2.spotfire.txt"
-			# plus individual contrasts whose names are difficult to predict
-		output:
-			HOME + "/results/DE/{countsfile}." + config["DE"]["formula"] + ".all.deseq2.spotfire.txt"
-			# plus individual contrasts whose names are difficult to predict
-		params:
-			home=HOME
-		shell:
-			"""
-			cp $(dirname {input})/*deseq2.spotfire.txt {params.home}/results/DE/
-			"""
-##
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#################
-## Retired Rules
-#################
-
-
-
-## Quantify with Kallisto
-
-
-#rule kallisto_pairedend:
-#	input:
-#		r1=SCRATCH + "/data_fastq/{comboname}.1.fastq",
-#		r2=SCRATCH + "/data_fastq/{comboname}.2.fastq"
-#	output:
-#		txt=SCRATCH + "/kallisto/{comboname}/abundance.tsv",
-#		boot=SCRATCH + "/kallisto/{comboname}/abundance.h5"
-#	params:
-#		idx=config["kallisto_index"]
-#	envmodules:
-#		"build-env/f2021",
-#		"kallisto/0.46.2-foss-2020b"
-#	group: "kallisto"
-#	threads: THREADS
-#	resources:
-#		maxtime=120,
-#		mem="48G"
-#	shell:
-#		"kallisto quant -t {threads} -i {params.idx} -o $(dirname {output.txt}) --bias -b 100 --fr-stranded {input.r1} {input.r2}"
 
 
 #rule kallisto_rehead:
@@ -1078,7 +633,6 @@ if config["do_DE"]:
 #			head -n 1 {input} | perl -e 'foreach $a (<STDIN>){{$a=~s/tpm/$ARGV[0]/;$a=~s/est_counts/$ARGV[0]/;print $a}}' $(basename $(dirname {input})) > {output} &&
 #			tail -n +2 {input} >> {output}
 #		"""
-	
 
 
 #rule kallisto_collate_separate:
@@ -1092,9 +646,9 @@ if config["do_DE"]:
 #		counts_exon=SCRATCH + "/process/kallisto/est_counts.only_tx.txt",
 #		tpms_exon=SCRATCH + "/process/kallisto/tpm.only_tx.txt"
 #	envmodules:
-#		"build-env/f2021",
-#		"python/3.8.6-gcccore-10.2.0",
-#		"scipy-bundle/2020.11-foss-2020b"
+#		sysenv22,
+#		py,
+#		scipy
 #	resources:
 #		maxtime=5,
 #		mem="4G"
@@ -1115,7 +669,6 @@ if config["do_DE"]:
 #		grep _no_pre {output.tpms} | perl -ne 's/_no_pre[+-]//;print' >> {output.tpms_exon} &&
 #		grep -E -v _pre {output.tpms} >> {output.tpms_exon}
 #		"""
-
 
 
 #rule kallisto_stage_out:
@@ -1140,4 +693,186 @@ if config["do_DE"]:
 ##
 
 
+
+
+## PCA
+rule PCA:
+	input:
+		HOME + "/process/featureCounts/{countsfile}.txt"
+	output:
+		HOME + "/results/PCA/{countsfile}.default.pca.html",
+		HOME + "/process/featureCounts/{countsfile}.scaled.txt"
+	envmodules:
+		sysenv22,
+		rbase,
+		rlibs,
+		pdoc
+	params:
+		home=HOME,
+		minMean=config["PCA"]["minMean"],
+		minSingle=config["PCA"]["minSingle"],
+		ntop=config["PCA"]["ntop"],
+		covars=config["PCA"]["covars"],
+		code=config["codeDir"],
+		pattern=config["PCA"]["specialnorm"],
+		forvar=config["PCA"]["loopgroup"]
+	group: "pca"
+	threads: 1
+	resources:
+		maxtime=10,
+		mem='4G'
+	shell:
+		"""
+		Rscript {params.code}/pca_run.R -F {params.forvar} -b {params.home} -f process/featureCounts/$(basename {input}) -G {params.pattern} -I 6 -i 1 -M {params.minMean} -m {params.minSingle} -n {params.ntop} -o results/PCA -r process/PCA -s {params.covars} -T {params.code}/pca_report_template.Rmd -W 6
+		"""
+##
+
+
+
+
+## DE
+
+if config["do_DE"]:
+
+	rule setup_DE:
+		input:
+			covars=os.path.join(HOME, config["DE"]["covars"])
+		output:
+			covars=os.path.join(SCRATCH, config["DE"]["covars"])
+		params:
+			home=HOME,
+			scratch=SCRATCH
+		shell:
+			"""
+			mkdir -p $(dirname {output.covars}) &&
+			cp {input.covars} {output.covars} &&
+
+			mkdir -p {params.home}/results/DE
+			"""
+
+
+	rule DE:
+		input:
+			counts=SCRATCH + "/process/featureCounts_fixed/{countsfile}.txt",
+			samples=os.path.join(SCRATCH, config["DE"]["covars"])       # trigger the rule to copy the file into working dir
+		output:
+			SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.html",
+			SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.pdf",
+			SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.tsv",
+			SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.nolab.tsv"
+		wildcard_constraints:
+			countsfile="[^.]+",
+			dename=".+_vs_.+"
+		envmodules:
+			sysenv22,
+			rbase,
+			rlibs,
+			pdoc
+		params:
+			scratch=SCRATCH,
+			samples=config["DE"]["covars"],     # because I don't want the full path as parameter and this is the easier way
+			minMean=config["DE"]["minMean"],
+			minSingle=config["DE"]["minSingle"],
+			ntop=config["DE"]["ntop"],
+			comps=config["DE"]["comparisons"],
+			bgr=config["DE"]["contexts"],
+			lfc=config["DE"]["lfc_thresh"],
+			pcut=config["DE"]["p_cut"],
+			code=config["codeDir"],
+			pattern=config["DE"]["specialnorm"]
+		group: "deseq"
+		threads: 1
+		resources:
+			maxtime=10,
+			mem='4G'
+		shell:
+			"""
+			Rscript {params.code}/deseq2_run_SF.R -b {params.scratch} -c {params.lfc} -f process/featureCounts_fixed/$(basename {input.counts}) -G {params.pattern} -i 1 -I 6 -l -M {params.minMean} -m {params.minSingle} -n {params.ntop} -o results/DE -p {params.pcut} -P $(basename {input.counts} .txt) -r process/DE -s {params.samples} -T {params.code}/deseq2_report_template_SF.Rmd -W 6 -x {params.comps} -X {params.bgr}
+#			"""
+
+
+	rule merge_DE_table:
+			input:
+				expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.tsv", dename=EXPECTED_DE, allow_missing=True)
+			output:
+				SCRATCH + "/results/DE/{countsfile}/{countsfile}.all.deseq2.tsv"
+			wildcard_constraints:
+				countsfile="[^.]+"
+			envmodules:
+				sysenv22,
+				py,
+				scipy
+			params:
+				code=config["codeDir"],
+				scratch=SCRATCH,
+				home=HOME
+			group: "stage_out"
+			threads: 1
+			resources:
+				maxtime=5,
+				mem='4G'
+			shell:
+				"""
+				{params.code}/fileutilities.py T {input} -i -r --appnd > {output}
+				"""
+
+
+	rule prepare_for_Spotfire:
+		input:
+			de=SCRATCH + "/results/DE/{countsfile}/{countsfile}.{denamenl}.tsv",
+			cnt=SCRATCH + "/featureCounts/{countsfile}.txt"
+		output:
+			SCRATCH + "/results/DE/{countsfile}/{countsfile}.{denamenl}.spotfire.txt"
+		wildcard_constraints:
+				countsfile="[^.]+",
+				denamenl="all\.deseq2|.+\.deseq2\.nolab"
+		envmodules:
+			sysenv22,
+			rbase,
+			rlibs
+		params:
+			code=config["codeDir"],
+			scratch=SCRATCH,
+			home=HOME,
+			countCap=config["Spotfire"]["countCap"],
+			tpmCap=config["Spotfire"]["tpmCap"],
+			lfc=config["Spotfire"]["lfc_thresh"],
+			pcut=config["Spotfire"]["p_cut"],
+			urlbase=config["ucsc_session"]
+		group: "spotfire"
+		threads: 1
+		resources:
+			maxtime=10,
+			mem='1G'
+		shell:
+			"""
+			Rscript {params.code}/deseq2_prepare_for_spotfire.R -C {input.cnt} -c {params.countCap} -D {input.de} -f {params.lfc} -p {params.pcut} -s -t {params.tpmCap} -u {params.urlbase}
+			"""
+
+
+	rule stage_out_DE_table:
+		input:
+			expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{denamenl}.spotfire.txt", countsfile=FLAVOURS, denamenl=["all.deseq2", *[x + ".deseq2.nolab" for x in EXPECTED_DE]])
+		output:
+			expand(HOME + "/results/DE/{countsfile}.{denamenl}.spotfire.txt", countsfile=FLAVOURS, denamenl=["all.deseq2", *[x + ".deseq2.nolab" for x in EXPECTED_DE]])
+		params:
+			outdir=HOME + "/results/DE/"
+		shell:
+			"""
+			cp {input} {params.outdir}
+			"""
+
+
+	rule stage_out_DE_reports:
+		input: 
+			expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.html", countsfile=FLAVOURS, dename=EXPECTED_DE),
+		output:
+			expand(HOME + "/results/DE/{countsfile}.{dename}.deseq2.html", countsfile=FLAVOURS, dename=EXPECTED_DE),
+		params:
+			outdir=HOME + "/results/DE/"
+		shell:
+			"""
+			cp {input} {params.outdir}
+			"""
+##
 
