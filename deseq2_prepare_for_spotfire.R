@@ -17,9 +17,7 @@ spec = matrix(c(
 
 opt <- getopt(spec)
 
-# opt <- list(de='/scratch-cbe/users/kimon.froussios/robyn/R12658_RNAseq/results/DE/intron_genecounts/intron_genecounts.~Condition.Condition_Tcf3_Tir1_Auxin_2_5_vs_Tcf3_Tir1_noAux_0.deseq2.tsv', cnt='/groups/busslinger/Kimon/robyn/R12658_RNAseq/process/featureCounts/intron_genecounts.txt', fcThresh=2, pCutoff=0.01, countThresh=100L, tpmThresh=50, simplify=TRUE, url="http://ucsc.vbc.ac.at/cgi-bin/hgTracks?hgS_doOtherUser=submit&hgS_otherUserName=kimon.froussios&hgS_otherUserSessionName=R13065_ribominusRNAseq")
-
-# opt <- list(de='/Volumes/groups/busslinger/Kimon/sarah/R13546_RNAseq/results/DE/cell_proB.~Condition.Condition_exp_Ikzf1_proB_vs_ctrl_Ikzf1_proB.deseq2.tsv', cnt='/Volumes/groups/busslinger/Kimon/sarah/R13546_RNAseq/process/featureCounts/intron_genecounts.txt', fcThresh=2, pCutoff=0.05, countThresh=100L, tpmThresh=50, simplify=TRUE, url="https://foobar")
+# opt <- list(de='/scratch-cbe/users/kimon.froussios/tanja/R13870_RNAseq_timecourse/results/DE/intron_genecounts/intron_genecounts.all.deseq2.tsv', cnt='/scratch-cbe/users/kimon.froussios/tanja/R13870_RNAseq_timecourse/process/featureCounts_fixed/intron_genecounts.txt', fcThresh=3, pCutoff=0.01, countThresh=500L, tpmThresh=50, simplify=TRUE, url="http://foobar")
 
 if (is.null(opt$de)) stop("No input specified.")
 if (is.null(opt$cnt) & !is.null(opt$url)) stop("Need a counts table for gene positions with which to form the URLs.")
@@ -60,12 +58,14 @@ DE <- fread(opt$de)
 lfc <- names(DE)[which(grepl("log2FoldChange(?!.shrink)", perl=TRUE, names(DE)))]
 lfcs <- names(DE)[which(grepl("log2FoldChange.shrink", names(DE)))]
 p <- names(DE)[which(grepl("padj", names(DE)))]
+pv <- names(DE)[which(grepl('pvalue', names(DE)))]
 mlp <- names(DE)[which(grepl("mlog10p", names(DE)))]
 cnt <- names(DE)[which(grepl("maxCount", names(DE)))]
 scnt <- names(DE)[which(grepl("maxScaledCount", names(DE)))]
 
 
-# Create filters
+## Create filters
+#################
 
 # for (X in lfc) {
 #   # X <- lfc[1]
@@ -73,6 +73,7 @@ scnt <- names(DE)[which(grepl("maxScaledCount", names(DE)))]
 #   set(DE, i=NULL, j=newcol, value=round(2 ^ abs(DE[[X]]), 1) )  #  cancel direction and lose excess decimals
 # }
 
+# FC threshold
 for (X in lfcs) {
   # X <- lfcs[1]
   newcol <- sub("log2FoldChange.shrink", "sFC_thresh", X)
@@ -83,6 +84,17 @@ for (X in lfcs) {
     set(DE, i=which(2 ^ abs(DE[[X]]) >= Y), j=newcol, value=paste(">=", Y))
 }
 
+# FC direction
+for (X in lfc) {
+  # X <- lfc[1]
+  newcol <- sub("log2FoldChange", "Deregulation", X)
+  padj <- sub("log2FoldChange", "padj", X)    # global_padj fields not created yet, so no clash
+  set(DE, i=NULL, j=newcol, value="neutral")
+  set(DE, i=which(DE[[X]] > 0 & DE[[padj]] < opt$pCutoff), j=newcol, value="Up")
+  set(DE, i=which(DE[[X]] < 0 & DE[[padj]] < opt$pCutoff), j=newcol, value="Down")
+}
+
+# Significance cutoff
 for (X in p) {
   # X <- p[1]
   newcol <- sub("padj", "p_cutoff", X)
@@ -93,28 +105,41 @@ for (X in p) {
     set(DE, i=which(abs(DE[[X]]) < Y), j=newcol, value=paste("<", Y))
 }
 
+# Global correction
+P <- DE[, c('name', pv), with=FALSE]
+P <- melt(P, id.vars='name', value.name='pval', variable.name='headline')
+P[, gpadj := p.adjust(pval, 'BH')]
+P[, headline := sub('pvalue', 'global_padj', headline)]
+P <- dcast(P, name ~ headline, value.var='gpadj')
+DE <- merge(DE, P, by='name', all.x=TRUE)
+
+# Global significance, cutoff
+p <- names(DE)[which(grepl("global_padj", names(DE)))]
+for (X in p) {
+  # X <- p[1]
+  newcol <- sub("padj", "p_cutoff", X)
+  set(DE, i=NULL, j=newcol, value="non-sig.")     # default value
+  steps <- unique(c(0.05, opt$pCutoff))
+  steps <- steps[order(steps, decreasing=TRUE)]     # high to low, order is important
+  for (Y in steps)                                  # overwrite
+    set(DE, i=which(abs(DE[[X]]) < Y), j=newcol, value=paste("<", Y))
+}
+
+# Count threshold cap
 for (X in cnt) {
   # X <- cnt[1]
   set(DE, i=which(DE[[X]] > opt$countThresh), j=X, value=opt$countThresh) # Set upper cap
   set(DE, i=NULL, j=X, value=floor(DE[[X]]) )                             # Decimal precision is not useful for this
 }
+setnames(DE, sub('maxCount', 'count_thresh', names(DE)))
 
+# TPM threshold cap
 for (X in scnt) {
   # X <- scnt[1]
   set(DE, i=which(DE[[X]] > opt$tpmThresh), j=X, value=opt$tpmThresh) # Set upper cap
   set(DE, i=NULL, j=X, value=round(DE[[X]], 1) )                      # One decimal should be enough. Integers may be already too big for deep libraries.
 }
-
-setnames(DE, sub('maxScaledCount', 'scaledCount_thresh', sub('maxCount', 'count_thresh', names(DE))))
-
-for (X in lfc) {
-  # X <- lfc[1]
-  newcol <- sub("log2FoldChange", "Deregulation", X)
-  padj <- sub("log2FoldChange", "padj", X)
-  set(DE, i=NULL, j=newcol, value="neutral")
-  set(DE, i=which(DE[[X]] > 0 & DE[[padj]] < opt$pCutoff), j=newcol, value="Up")
-  set(DE, i=which(DE[[X]] < 0 & DE[[padj]] < opt$pCutoff), j=newcol, value="Down")
-}
+setnames(DE, sub('maxScaledCount', 'scaledCount_thresh', names(DE)))
 
 ## Spotfire does no recognise Inf values. So replace with something numeric.
 # This affects -log(p) because DESeq2 can assign 0 to p.
@@ -126,8 +151,7 @@ for (X in mlp) {
 # Inf fold-change is already handled by DESeq2 by default, by extrapolating a more likely FC from a fitted model and by explicitly capping the FC.
 
 
-## Simplify column names
-
+# Simplify column names
 if (opt$simplify) {
   newnames <- sub("[^.]*?counts\\.", "", names(DE))   # counting mode
   if (all(!(duplicated(newnames))))
@@ -140,7 +164,7 @@ if (opt$simplify) {
     setnames(DE, newnames)
 }
 
-
+# Add URL
 DE <- merge(DE, CNT, by.x='name', by.y='Geneid', all.x=TRUE, all.y=FALSE)
 
 
