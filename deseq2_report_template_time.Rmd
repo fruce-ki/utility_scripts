@@ -437,6 +437,8 @@ If a contrast does not have any hits that meet the thresholds defined at the beg
 
 Using the Likelihood Ratio test to compare a DE model against a null model, across all provided samples. This analysis highlights features that show changes that are likely not attributable to the null model. It does not pinpoint those changes to a particular condition or particular pairwise comparison. This type of analysis is used either to find targets among any of multiple conditions or to isolate the influence of variables of interest from that of other variables.
 
+### Significance
+
 ```{r DEg_p, fig.height=8, fig.width=12}
 if (is.null(params$reducedFormula)) {
   cat("No formula provided. Skipping this analysis...\n")
@@ -463,7 +465,8 @@ if (is.null(params$reducedFormula)) {
   plr <- ggplot(NULL, aes(x=baseMean, y=mlog10p, colour=(padj < params$pcutoff), label=name)) +
     geom_point(data=reslr[(!istop) & !is.na(padj), ], shape=16, alpha=0.6) +
     geom_point(data=reslr[(istop), ], colour='red', shape=16, alpha=0.6) +
-    geom_label_repel(data=reslr[(istop), ], colour='red', min.segment.length=0, max.overlaps=100) +
+    geom_text_repel(data=reslr[(istop), ], size=rel(2.5),  colour="red",
+                            segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=1, force_pull=1) +
     scale_x_log10() +
     scale_colour_manual(values=c('black', 'blue')) +
     annotation_logticks(sides='b') +
@@ -472,6 +475,8 @@ if (is.null(params$reducedFormula)) {
   print(plr)
 }
 ```
+
+### Expressions
 
 Below are the per-condition expressions of the `r params$ntop` most significant features.
 
@@ -903,6 +908,7 @@ if (!is.null(params$comparisons)) {
 }
 ```
 
+### Results
 
 IMPORTANT: In the name of each comparison, the condition used as **"reference" is always shown to the right** of the `vs` in the name, whereas the condition used as **"treatment" is always shown on the left** of the `vs`.
 
