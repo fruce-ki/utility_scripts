@@ -389,7 +389,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
 
 ## TPM (or RPM)
 
-```{r correlations1, fig.height=15, fig.width=15}
+```{r correlations1, fig.height=8, fig.width=8}
 # corels1p <- my_pairwise_internal_corels(log2(tpm), colnames(tpm), method="pearson",
 #                                        minMean=0, minSingle=0)   # pre-filtered when making the DESeq object
 corels1s <- my_pairwise_internal_corels(tpm, colnames(tpm), method="spearman",
@@ -400,14 +400,14 @@ corels1s <- my_pairwise_internal_corels(tpm, colnames(tpm), method="spearman",
 print( corels1s[['sfrnc']] )
 ```
 
-```{r correlations2, fig.height=15, fig.width=18}
+```{r correlations2, fig.height=8, fig.width=10}
 # print( (corels1p[['sdrc']]) / (corels1s[['sdrc']] + theme(axis.text.x=element_blank())) )
 print( corels1s[['sdrc']] )
 ```
 
 ## rlog (or VST)
 
-```{r correlations3, fig.height=15, fig.width=15}
+```{r correlations3, fig.height=8, fig.width=8}
 corels2p <- my_pairwise_internal_corels(vstmat, colnames(tpm), method="pearson", 
                                        minMean=0, minSingle=0)
 # corels2s <- my_pairwise_internal_corels(vstmat, colnames(tpm), method="spearman", 
@@ -419,7 +419,7 @@ print( corels2p[['sfrnc']] )
 # The axes and fill range are deterministic and fixed, so I can drop the redundant details.
 ```
 
-```{r correlations4, fig.height=15, fig.width=18}
+```{r correlations4, fig.height=8, fig.width=10}
 # print( (corels2p[['sdrc']]) / (corels2s[['sdrc']] + theme(axis.text.x=element_blank())) )
 print( corels2p[['sdrc']] )
 # print( corels2s[['sdrc']] )
