@@ -25,11 +25,10 @@ subF2 <- subF2[fst != snd, ] # double letters do not create awkward movements
 subF2[, rev := paste0(snd, ' ', fst, ' ')]
 subF2 <- merge(subF2, subF2[, .(rev, freq)], by.x='ngrams', by.y='rev', all.x=TRUE, suffixes=c('', '.y'))
 subF2[, total := rowSums(subF2[, .(freq, freq.y)], na.rm=TRUE)]
-setorder(subF2, fst, -freq)
 
 # Proportion per letter
 subF2[, frac := total/sum(.SD$total), by=fst]
-
+setorder(subF2, fst, -total)
 
 
 
