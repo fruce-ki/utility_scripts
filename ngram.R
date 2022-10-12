@@ -3,38 +3,40 @@ library(data.table)
 library(stringi)
 
 
-txt <- multiread('C:/Users/jack_/Downloads/utility_scripts-master/utility_scripts-master' , extension ="*")
+txt <- multiread('/Users/kimon.froussios/Desktop/ngram' , extension ="*")
 
 # Count characters
-ng1 <- ngram(tolower(unlist(txt)), n=1, sep='')
+ng1 <- ngram(toupper(unlist(txt)), n=1, sep='')
 F1 <- as.data.table(get.phrasetable(ng1))
 
 # Count bigrams
-ng2 <- ngram(tolower(unlist(txt)), n=2, sep='')
+ng2 <- ngram(toupper(unlist(txt)), n=2, sep='')
 F2 <- as.data.table(get.phrasetable(ng2))
 
 # Focus on letters
-subF1 <- F1[grepl('[a-z]', ngrams)]
-subF2 <- F2[grepl('[a-z] [a-z]', ngrams)]
-subF2[, fst := substr(ngrams, 1, 2)]
-subF2[, snd := substr(ngrams, 3, 4)]
+subF1 <- F1[grepl('[A-Z]', ngrams)]
+subF2 <- F2[grepl('[A-Z] [A-Z] ', ngrams)]
+subF2[, fst := substr(ngrams, 1, 1)]
+subF2[, snd := substr(ngrams, 3, 3)]
 setorder(subF2, fst, -freq)
 
 # Sum the mirror-pair bigrams
-revF2 <- copy(subF2)
-revF2[, fst := substr(ngrams, 3, 4)]
-revF2[, snd := substr(ngrams, 1, 2)]
-revF2[, ngrams := paste0(fst, snd)]
+subF2 <- subF2[fst != snd, ] # double letters do not create awkward movements 
+subF2[, rev := paste0(snd, ' ', fst, ' ')]
+subF2 <- merge(subF2, subF2[, .(rev, freq)], by.x='ngrams', by.y='rev', all.x=TRUE, suffixes=c('', '.y'))
+subF2[, total := rowSums(subF2[, .(freq, freq.y)], na.rm=TRUE)]
+setorder(subF2, fst, -freq)
 
-subF2 <- merge(subF2, revF2, by='ngrams', all.x=TRUE)
-subF2[, freq := freq.x]
-subF2[fst.x != snd.x, freq := rowSums(subF2[fst.x != snd.x, .(freq.x, freq.y)], na.rm=TRUE)]
-subF2 <- subF2[, .(ngrams, freq, fst.x, snd.x)]
+# Proportion per letter
+subF2[, frac := total/sum(.SD$total), by=fst]
 
-topF2 <- subF2[, head(.SD, 6), by=fst.x]
+
+
+
+
 
 # View(subF1)
 # View(subF2)
 # View(topF2)
 
-fwrite(subF2, file="C:/Users/jack_/Downloads/utility_scripts-master/ngrams.txt")
+fwrite(subF2, file="/Users/kimon.froussios/Desktop/ngrams.txt", sep="\t", quote=FALSE)
