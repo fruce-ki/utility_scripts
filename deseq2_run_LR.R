@@ -12,6 +12,8 @@ spec = matrix(c(
   'countsFile',    'f', 1, "character", "Tab-separated table of raw counts with `row_ID` and all the samples.",
   'fullFormula',   'F', 1, "character", "Full model formula for LR or Wald test",
   'specnorm',      'G', 1, "character", "Special normalisation. Gene ids that match this pattern will not be included for calculation of library sizes for TPM/RPM normalisation.",
+  'help',          'h', 0, "logical",   "This help.",
+  'altHypo',       'H', 1, "character", "Alternative hypothesis type (greaterAbs).",
   'idcol',         'i', 1, "numeric",   "ID column to use (1). The others will be removed. See also -I.",
   'nidcols',       'I', 1, "numeric",   "Number of ID columns at the start of the table (1). See also -i.",
   'prescaled',     'k', 0, "logical",   "Don't let Deseq2 rescale the libraries. (False)",
@@ -34,11 +36,7 @@ spec = matrix(c(
 ), byrow=TRUE, ncol=5)
 
 opt = getopt(spec)
-# opt <- list(createID=FALSE, baseDir='/Volumes/groups/busslinger/Kimon/tanja/R13870_RNAseq_timecourse', countsFile='process/featureCounts/intron_genecounts.txt', resultsDir='results/DE_time', samplesFile='description/covars.txt', minMean=0, minSingle=0, lfcthreshold=1, nidcols=6, idcol=1, ntop=50, bmF=FALSE, pcutoff=0.05, prescaled=FALSE, prefix='intron_genecounts', label=FALSE, widthsCol=6, reportTemplate="/Volumes/groups/busslinger/Kimon/tanja/R13870_RNAseq_timecourse/code/deseq2_report_template_time.Rmd", comparisons="CollectionTimeH-2v1,CollectionTimeH-3v1,CollectionTimeH-3v2,CollectionTimeH-2v1,CollectionTimeH-4v1,CollectionTimeH-4v2,CollectionTimeH-3v1,CollectionTimeH-3v2,CollectionTimeH-3v4", contexts="TF-1,TF-1,TF-1,TF-2,TF-2,TF-2,TF-2,TF-2,TF-2", fullFormula="~ CollectionTimeH", reducedFormula="~ 1")
-
-# opt <- list(createID=FALSE, baseDir='/Volumes/groups/busslinger/Kimon/tanja/R13870_RNAseq_timecourse', countsFile='process/featureCounts/intron_genecounts.txt', resultsDir='results/DE_time', samplesFile='description/covars.txt', minMean=0, minSingle=0, lfcthreshold=1, nidcols=6, idcol=1, ntop=50, bmF=FALSE, pcutoff=0.05, prescaled=FALSE, prefix='intron_genecounts', label=FALSE, widthsCol=6, reportTemplate="/Volumes/groups/busslinger/Kimon/tanja/R13870_RNAseq_timecourse/code/deseq2_report_template_time.Rmd", comparisons="Condition-4v1,Condition-5v2,Condition-7v3", contexts="CellType-1,CellType-1,CellType-1", fullFormula="~ Condition", reducedFormula="~ 1")
-
-# opt <- list(createID=FALSE, baseDir='/Volumes/groups/busslinger/Kimon/tanja/R13870_RNAseq_timecourse', countsFile='process/featureCounts/intron_genecounts.txt', resultsDir='results/DE_time', samplesFile='description/covars.txt', minMean=0, minSingle=0, lfcthreshold=1, nidcols=6, idcol=1, ntop=10, bmF=FALSE, pcutoff=0.05, prescaled=FALSE, prefix='intron_genecounts', label=FALSE, widthsCol=6, reportTemplate="/Volumes/groups/busslinger/Kimon/tanja/R13870_RNAseq_timecourse/code/deseq2_report_template_time.Rmd", comparisons="NULL", fullFormula="NULL", reducedFormula="NULL", contexts="TF-1")
+# opt <- list(createID=FALSE, baseDir='/Volumes/groups/busslinger/Kimon/sarah/R13546_RNAseq', countsFile='process/featureCounts/intron_genecounts.txt', resultsDir='results/DE_time', samplesFile='description/covars_de.txt', minMean=0, minSingle=0, lfcthreshold=1, nidcols=6, idcol=1, ntop=50, bmF=FALSE, pcutoff=0.05, prescaled=FALSE, prefix='intron_genecounts', label=FALSE, widthsCol=6, reportTemplate="/Volumes/groups/busslinger/Kimon/tanja/R13870_RNAseq_timecourse/code/deseq2_report_template_time.Rmd", comparisons="cell-2v1,cell-3v2,cell-4v3", contexts="type-1,type-1,type-1", fullFormula="~cell", reducedFormula="~ 1")
 
 
 if ( !is.null(opt$help) ) {
@@ -61,6 +59,7 @@ if (is.null(opt$minSingle)) opt$minSingle <- 100
 if (is.null(opt$ntop))  opt$ntop <- 50
 if (is.null(opt$pcutoff)) opt$pcutoff <- 0.05
 if (is.null(opt$lfcthreshold))  opt$lfcthreshold <- 1
+if (is.null(opt$altHypo)) opt$altHypo <- 'greaterAbs'
 if (is.null(opt$nidcols)) opt$nidcols <- 1
 if (is.null(opt$idcol)) opt$idcol <- 1
 if (is.null(opt$bmF)) opt$bmF <- FALSE
@@ -82,7 +81,9 @@ contexts <- strsplit(opt$contexts, ',')[[1]]
 contexts <- strsplit(contexts , '-')
 if (!is.null(opt$comparisons)) {
   comparisons <- strsplit(opt$comparisons, ',')[[1]]
+  
   stopifnot(length(contexts) == length(comparisons))
+  
   comparisons <- strsplit(strsplit(opt$comparisons, ',')[[1]], '-')
   comparisons <- lapply(comparisons, function(x){
     # x <- comparisons[[1]]
@@ -123,14 +124,16 @@ if (!is.null(opt$widthsCol)) {
 } else {
   featLens <- NULL
 }
+
 stopifnot(all(rownames(cts) == featLens[[1]]))
 
 
 #######################
-# y <- unique(contexts)[[2]]
 #######################
 ###  Split up data as instructed
 for(y in unique(contexts)) {
+  # y <- unique(contexts)[[1]]
+  
   contvar <- y[1]
   contlev <- unique(covars[[contvar]])[as.integer(y[2])]
   
@@ -142,7 +145,9 @@ for(y in unique(contexts)) {
   if (!is.null(opt$comparisons)) {
     selcomps <- comparisons[sel]
     condvars <- vapply(selcomps, function(x){ x[[1]] }, character(1)) 
+    
     stopifnot(length(unique(condvars)) == 1)
+    
     treatlevs <- vapply(selcomps, function(x){ as.character(unique(covars[[x[[1]]]])[x[[2]][1]]) }, character(1))
     reflevs <- vapply(selcomps, function(x){ as.character(unique(covars[[x[[1]]]])[x[[2]][2]]) }, character(1))
     
@@ -226,7 +231,8 @@ for(y in unique(contexts)) {
                                 widths = featLens,
                                 specnorm=opt$specnorm,
                                 rlog=!opt$vst,
-                                comparisons=subcomps)
+                                comparisons=subcomps,
+                                althyp=opt$altHypo)
   )
 }
 

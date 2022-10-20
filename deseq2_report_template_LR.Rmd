@@ -15,7 +15,7 @@ params:
   resultsDir: "."
   baseDir: "."
   pcutoff: 0.05
-  lfcthreshold: 1
+  lfcthreshold: 1      
   ntop: 50             # maximum number of hits to list
   minMean: 10          # Minimum sum of counts across samples per gene (already applied, just here for parameter documentation in the report)
   minSingle: 100
@@ -27,6 +27,7 @@ params:
   specnorm: NULL
   rlog: TRUE          # FALSE for VST instead
   comparisons: NULL        # List of 3-element character vectors for DESeq results(contrast=)
+  althyp: 'greaterAbs'   # Alternative hypothesis type
 ---
 
 ```{r setup, include=FALSE}
@@ -451,7 +452,7 @@ if (is.null(params$reducedFormula)) {
   grp <- as.character(deobj@design)[length(as.character(deobj@design))]
   set(cD, i=NULL, j=grp, factor(cD[[grp]], ordered=TRUE, levels=unique(as.character(cD[[grp]]))))
   
-  reslr <- results(deobj, independentFiltering = params$filterBaseMean, alpha=params$pcutoff)[, c('baseMean', 'pvalue', 'padj')] 
+  reslr <- results(deobj, independentFiltering = params$filterBaseMean, alpha=params$pcutoff, lfcThreshold=params$lfcthreshold, altHypothesis=params$althyp)[, c('baseMean', 'pvalue', 'padj')] 
   ## FC is taken from just one of the pairwise coefficients, just to maintain output format. It is not interpretable with a global p-value...
   
   reslr <- data.table(name = rownames(reslr), as.data.frame(reslr))
@@ -462,7 +463,7 @@ if (is.null(params$reducedFormula)) {
   top <- head(reslr[, name], params$ntop)
   reslr[, istop := name %in% top]
   
-  plr <- ggplot(NULL, aes(x=baseMean, y=mlog10p, colour=(padj < params$pcutoff), label=name)) +
+  plr <- ggplot(NULL, aes(x=baseMean, y=mlog10p, colour=(padj < params$pcutoff), label=name)) + 
     geom_point(data=reslr[(!istop) & !is.na(padj), ], shape=16, alpha=0.6) +
     geom_point(data=reslr[(istop), ], colour='red', shape=16, alpha=0.6) +
     geom_text_repel(data=reslr[(istop), ], size=rel(2.5),  colour="red",
@@ -529,31 +530,35 @@ if (!is.null(params$reducedFormula)) {
 Heatmap of the top hits from the LR test.
 
 ```{r dexplr, fig.height=22, fig.width=10}
-# Counts
-matlr <- tpm[topreslr, ]
-
-# Custer row and columns
-cfitlr <- hclust(dist(scale(t(matlr), center=TRUE))) # cluster columns
-rfitlr <- hclust(dist(scale(matlr, center=FALSE)))    # cluster rows
-cnlr <- colnames(matlr)[cfitlr$order]
-rnlr <- rownames(matlr)[rfitlr$order]
-
-# Custer row and columns
-lrhitdf <- as.data.table(matlr)
-lrhitdf[, Feature := rownames(matlr)]
-lrhitdf <- melt(lrhitdf, value.name = "RPM", variable.name = "Sample", id.vars = "Feature")
-lrhitdf[, Feature := ordered(Feature, levels=rnlr)]
-lrhitdf[, Sample := ordered(Sample, levels=cnlr)]
-
-plrexp <- ggplot(lrhitdf, aes(y=Feature, x=Sample, fill=log10(RPM))) +
-  geom_tile() +
-  scale_fill_gradient(high="gold", low="black", na.value='gray50', paste('log10', colsuffix)) +
-  labs(y='', x='') +
-  theme(axis.text.x = element_text(angle=90, hjust = 1, vjust = 0.5, size=rel(1)),
-        axis.text.y = element_text(size=rel(0.6)),
-        panel.grid = element_blank())
-
-print(plrexp)
+if (!is.null(params$reducedFormula)) {
+  # Counts
+  matlr <- tpm[topreslr, ]
+  
+  # Custer row and columns
+  cfitlr <- hclust(dist(scale(t(matlr), center=TRUE))) # cluster columns
+  rfitlr <- hclust(dist(scale(matlr, center=FALSE)))    # cluster rows
+  cnlr <- colnames(matlr)[cfitlr$order]
+  rnlr <- rownames(matlr)[rfitlr$order]
+  
+  # Custer row and columns
+  lrhitdf <- as.data.table(matlr)
+  lrhitdf[, Feature := rownames(matlr)]
+  lrhitdf <- melt(lrhitdf, value.name = "RPM", variable.name = "Sample", id.vars = "Feature")
+  lrhitdf[, Feature := ordered(Feature, levels=rnlr)]
+  lrhitdf[, Sample := ordered(Sample, levels=cnlr)]
+  
+  plrexp <- ggplot(lrhitdf, aes(y=Feature, x=Sample, fill=log10(RPM))) +
+    geom_tile() +
+    scale_fill_gradient(high="gold", low="black", na.value='gray50', paste('log10', colsuffix)) +
+    labs(y='', x='') +
+    theme(axis.text.x = element_text(angle=90, hjust = 1, vjust = 0.5, size=rel(1)),
+          axis.text.y = element_text(size=rel(0.6)),
+          panel.grid = element_blank())
+  
+  print(plrexp)
+} else {
+  cat("Skipped.\n")
+}
 ```
 
 ## Pairwise
