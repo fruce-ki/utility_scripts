@@ -17,7 +17,7 @@ spec = matrix(c(
 
 opt <- getopt(spec)
 
-# opt <- list(de='/scratch-cbe/users/kimon.froussios/tanja/R13870_RNAseq_timecourse/results/DE/intron_genecounts/intron_genecounts.all.deseq2.tsv', cnt='/scratch-cbe/users/kimon.froussios/tanja/R13870_RNAseq_timecourse/process/featureCounts_fixed/intron_genecounts.txt', fcThresh=3, pCutoff=0.01, countThresh=500L, tpmThresh=50, simplify=TRUE, url="http://foobar")
+# opt <- list(de='/groups/busslinger/Kimon/tanja/R13870_RNAseq_timecourse/spotfire/tmp/intron_genecounts.TF_Ikaros.LRT_CollectionTimeH.deseq2.txt', cnt='/groups/busslinger/Kimon/tanja/R13870_RNAseq_timecourse/spotfire/tmp/intron_genecounts.txt', fcThresh=3, pCutoff=0.05, countThresh=500L, tpmThresh=50, simplify=TRUE, url="http://ucsc.vbc.ac.at/cgi-bin/hgTracks?hgS_doOtherUser=submit&hgS_otherUserName=kimon.froussios&hgS_otherUserSessionName=R13870_ribominusRNAseq_Tanja")
 
 if (is.null(opt$de)) stop("No input specified.")
 if (is.null(opt$cnt) & !is.null(opt$url)) stop("Need a counts table for gene positions with which to form the URLs.")
@@ -55,14 +55,29 @@ DE <- fread(opt$de)
 
 
 # Identify columns
-lfc <- names(DE)[which(grepl("log2FoldChange(?!.shrink)", perl=TRUE, names(DE)))]
-lfcs <- names(DE)[which(grepl("log2FoldChange.shrink", names(DE)))]
-p <- names(DE)[which(grepl("padj", names(DE)))]
-pv <- names(DE)[which(grepl('pvalue', names(DE)))]
-mlp <- names(DE)[which(grepl("mlog10p", names(DE)))]
-cnt <- names(DE)[which(grepl("maxCount", names(DE)))]
-scnt <- names(DE)[which(grepl("maxScaledCount", names(DE)))]
-
+if (grepl('_vs_', opt$de)) {
+  # pairwise Wald test
+  lfc <- names(DE)[which(grepl("log2FoldChange(?!.shrink)", perl=TRUE, names(DE)))]
+  lfcs <- names(DE)[which(grepl("log2FoldChange.shrink", names(DE)))]
+  fc <- NULL
+  p <- names(DE)[which(grepl("padj", names(DE)))]
+  pv <- names(DE)[which(grepl('pvalue', names(DE)))]
+  mlp <- names(DE)[which(grepl("mlog10p", names(DE)))]
+  cnt <- names(DE)[which(grepl("maxCount", names(DE)))]
+  scnt <- names(DE)[which(grepl("maxScaledCount", names(DE)))]
+} else if (grepl('\\.LRT_', opt$de)) {
+  # Likelihood Ratio test, probably not be pairwise
+  lfc <- NULL
+  lfcs <- NULL
+  fc <- names(DE)[which(grepl("FC", names(DE)))]
+  p <- names(DE)[which(grepl("padj", names(DE)))]
+  pv <- names(DE)[which(grepl('pvalue', names(DE)))]
+  mlp <- names(DE)[which(grepl("mlog10p", names(DE)))]
+  cnt <- names(DE)[which(grepl("baseMean", names(DE)))]
+  scnt <- names(DE)[which(grepl("baseScaled", names(DE)))]
+} else {
+  stop()
+}
 
 ## Create filters
 #################
@@ -82,6 +97,16 @@ for (X in lfcs) {
   steps <- steps[order(steps)]                      # smaller to bigger, order is important
   for (Y in steps)                                  # overwrite
     set(DE, i=which(2 ^ abs(DE[[X]]) >= Y), j=newcol, value=paste(">=", Y))
+}
+
+for (X in fc) {
+  # X <- fc[1]
+  newcol <- sub("FC", "FC_thresh", X)
+  set(DE, i=NULL, j=newcol, value="low")     # default value
+  steps <- unique(c(2, 3, as.numeric(opt$lfcThresh)))
+  steps <- steps[order(steps)]                      # smaller to bigger, order is important
+  for (Y in steps)                                  # overwrite
+    set(DE, i=which(DE[[X]] >= Y | DE[[X]] < (1 / Y)), j=newcol, value=paste(">=", Y))
 }
 
 # FC direction
@@ -106,7 +131,7 @@ for (X in p) {
 }
 
 # Global correction
-P <- DE[, c('name', pv), with=FALSE]
+P <- unique(DE[, c('name', pv), with=FALSE])
 P <- melt(P, id.vars='name', value.name='pval', variable.name='headline')
 P[, gpadj := p.adjust(pval, 'BH')]
 P[, headline := sub('pvalue', 'global_padj', headline)]
@@ -128,26 +153,41 @@ for (X in p) {
 # Count threshold cap
 for (X in cnt) {
   # X <- cnt[1]
-  set(DE, i=which(DE[[X]] > opt$countThresh), j=X, value=opt$countThresh) # Set upper cap
-  set(DE, i=NULL, j=X, value=floor(DE[[X]]) )                             # Decimal precision is not useful for this
+  newcol <- sub('maxCount|baseMean', 'count_thresh', X)
+  set(DE, i=NULL, j=newcol, value=DE[[X]])
+  set(DE, i=which(DE[[X]] > opt$countThresh), j=newcol, value=opt$countThresh) # Set upper cap
+  set(DE, i=NULL, j=newcol, value=floor(DE[[X]]) )                             # Decimal precision is not useful for this
+  if (grepl('maxCount', X))
+    set(DE, j=X, value=NULL)
 }
-setnames(DE, sub('maxCount', 'count_thresh', names(DE)))
 
 # TPM threshold cap
 for (X in scnt) {
   # X <- scnt[1]
+  newcol <- sub('maxScaledCount|baseScaled', 'scaledCount_thresh', X)
+  set(DE, i=NULL, j=newcol, value=DE[[X]])
   set(DE, i=which(DE[[X]] > opt$tpmThresh), j=X, value=opt$tpmThresh) # Set upper cap
   set(DE, i=NULL, j=X, value=round(DE[[X]], 1) )                      # One decimal should be enough. Integers may be already too big for deep libraries.
 }
-setnames(DE, sub('maxScaledCount', 'scaledCount_thresh', names(DE)))
 
-## Spotfire does no recognise Inf values. So replace with something numeric.
+## Spotfire does no recognise Inf values. So replace with suitable finite values.
 # This affects -log(p) because DESeq2 can assign 0 to p.
 for (X in mlp) {
   # X <- mlp[1]
-  set(DE, i=which(is.infinite(DE[[X]])), j=X, 
-      value=max(60, max( DE[[X]][is.finite(DE[[X]])] )) )
+  set(DE, i=which(is.infinite(DE[[X]])), j=X, value=max(60, max( DE[[X]][is.finite(DE[[X]])] )) )
 }
+for (X in fc) {
+  # X <- fc[1]
+  if (grepl('_vs_', opt$de)) {
+    set(DE, i=which(is.infinite(DE[[X]]) & DE[[X]] > 0), j=X, value=max(10, max( DE[[X]][is.finite(DE[[X]])] )) )
+    set(DE, i=which(is.infinite(DE[[X]]) & DE[[X]] < 0), j=X, value=min(10, min( DE[[X]][is.finite(DE[[X]])] )) )
+  } else {
+    set(DE, i=which(is.infinite(DE[[X]]) & DE[[X]] > 1), j=X, value=max(1000, max( DE[[X]][is.finite(DE[[X]])] )) )
+    set(DE, i=which(DE[[X]] == 0), j=X, value=min(0.001, min( DE[[X]][DE[[X]] > 0] )) )
+  }
+}
+
+
 # Inf fold-change is already handled by DESeq2 by default, by extrapolating a more likely FC from a fitted model and by explicitly capping the FC.
 
 

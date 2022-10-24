@@ -28,6 +28,7 @@ params:
   rlog: TRUE          # FALSE for VST instead
   comparisons: NULL        # List of 3-element character vectors for DESeq results(contrast=)
   althyp: 'greaterAbs'   # Alternative hypothesis type
+  fc4p: FALSE           # Include FC threshold in Ho.
 ---
 
 ```{r setup, include=FALSE}
@@ -452,7 +453,7 @@ if (is.null(params$reducedFormula)) {
   grp <- as.character(deobj@design)[length(as.character(deobj@design))]
   set(cD, i=NULL, j=grp, factor(cD[[grp]], ordered=TRUE, levels=unique(as.character(cD[[grp]]))))
   
-  reslr <- results(deobj, independentFiltering = params$filterBaseMean, alpha=params$pcutoff, lfcThreshold=params$lfcthreshold, altHypothesis=params$althyp)[, c('baseMean', 'pvalue', 'padj')] 
+  reslr <- results(deobj, independentFiltering = params$filterBaseMean, alpha=params$pcutoff)[, c('baseMean', 'pvalue', 'padj')] 
   ## FC is taken from just one of the pairwise coefficients, just to maintain output format. It is not interpretable with a global p-value...
   
   reslr <- data.table(name = rownames(reslr), as.data.frame(reslr))
@@ -512,13 +513,21 @@ if (!is.null(params$reducedFormula)) {
   setorderv(subres, c('name', grp))
   subres[, lagMX := data.table::shift(MeanXPR, type='lag', n=1), by='name']
   subres[, FC := MeanXPR / lagMX, by='name']
+  subres[, log2FoldChange := log2(FC)]
+  #
+  subres[log2FoldChange >= params$lfcthreshold, FCtext := '+']
+  subres[log2FoldChange <= -params$lfcthreshold, FCtext := '-']
+  subres[log2FoldChange < params$lfcthreshold & log2(FC) > -params$lfcthreshold, FCtext := '='] # unlikely
+  subres[is.na(log2FoldChange), FCtext := '.']  # start time
+  subres[, timecourse := paste(FCtext, collapse=''), by='name']
+  #
   subres[FC > 1, FCtext := '+']
   subres[FC < 1, FCtext := '-']
   subres[FC == 1, FCtext := '='] # unlikely
   subres[is.na(FC), FCtext := '.']  # start time
-  subres[, timecourse := paste(FCtext, collapse=''), by='name']
+  subres[, timecourse_raw := paste(FCtext, collapse=''), by='name']
   
-  reslr <- merge(reslr, subres[, c('name', grp, 'FC', 'timecourse'), with=FALSE], by=c('name', grp), all.x=TRUE)
+  reslr <- merge(reslr, subres[, c('name', grp, 'FC', 'timecourse', 'timecourse_raw',  'FCtext'), with=FALSE], by=c('name', grp), all.x=TRUE)
 
 } else {
   cat("Skipped.\n")
@@ -574,7 +583,7 @@ deobj <- DESeq(params$dds, test='Wald')
 ## Function
 do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop = params$ntop, addPrefix = params$longlabel,
                         pcutoff = params$pcutoff, lfcthreshold = params$lfcthreshold, filterBM=params$filterBaseMean, 
-                        prefix=params$prefix, PMtype=colsuffix, rlog=params$rlog){
+                        prefix=params$prefix, PMtype=colsuffix, rlog=params$rlog, fc4p=params$fc4p){
   # contrast <-  params$comparisons[[1]]
   # dds = deobj; rpms = tpm; ntop = params$ntop; addPrefix = params$longlabel; pcutoff = params$pcutoff; lfcthreshold = params$lfcthreshold; filterBM=params$filterBaseMean; prefix=params$prefix; PMtype=colsuffix; rlog=params$rlog; regcnt=vstmat
   highlight <- c("non-significant", "significant, FC low", "significant", paste("significant, top", params$ntop))
@@ -583,7 +592,7 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
   ctrname <- paste0(contrast[1], '_', contrast[2], '_vs_', contrast[3])
   
   # Get DE for given contrast
-  lfc <- results(dds, contrast=contrast, independentFiltering = filterBM, alpha=pcutoff)
+  lfc <- results(dds, test="Wald", contrast=contrast, independentFiltering = filterBM, alpha=pcutoff, lfcThreshold=ifelse(is.null(params$fc4p) || !params$fc4p, 0, params$lfcthreshold))
   shrink <- lfcShrink(dds, contrast=contrast, type='ashr')
   lfc <- cbind(data.table(name=rownames(lfc)), as.data.table(lfc))
   shrink <- cbind(data.table(name=rownames(shrink)), as.data.table(shrink))

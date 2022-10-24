@@ -8,7 +8,8 @@ spec = matrix(c(
   'bmF',           'B', 0, "logical",   "Disable baseMean filtering. (False)",
   'baseDir',       'b', 1, "character", "Base directory for everything (.)",
   'lfcthreshold',  'c', 1, "numeric",   "Log2 fold-change threshold (1)",
-  'createID',      'C', 0, "logical",   "Non-summarized intron or exon counts by featureCounts. The first column is not unique IDs because genes are repeated.",
+  'fc4p',          'C', 0, "logical",   "Incorporate the LFC threshold in the Null Hypothesis.",
+  'createID',      'D', 0, "logical",   "Non-summarized intron or exon counts by featureCounts. The first column is not unique IDs because genes are repeated.",
   'countsFile',    'f', 1, "character", "Tab-separated table of raw counts with `row_ID` and all the samples.",
   'fullFormula',   'F', 1, "character", "Full model formula for LR or Wald test",
   'specnorm',      'G', 1, "character", "Special normalisation. Gene ids that match this pattern will not be included for calculation of library sizes for TPM/RPM normalisation.",
@@ -232,7 +233,8 @@ for(y in unique(contexts)) {
                                 specnorm=opt$specnorm,
                                 rlog=!opt$vst,
                                 comparisons=subcomps,
-                                althyp=opt$altHypo)
+                                althyp=opt$altHypo,
+                                fc4p=opt$fc4p)
   )
 }
 
