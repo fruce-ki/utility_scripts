@@ -15,10 +15,10 @@ params:
   resultsDir: "."
   baseDir: "."
   pcutoff: 0.05
-  lfcthreshold: 1      
-  ntop: 50             # maximum number of hits to list
-  minMean: 10          # Minimum sum of counts across samples per gene (already applied, just here for parameter documentation in the report)
-  minSingle: 100
+  lfcthreshold: 1
+  ntop: 50                 # maximum number of hits to list
+  minCount: 100           # Minimum mean read count between the two conditions
+  minTPM: 5              # Minimum mean TPM between the two conditions
   filterBaseMean: TRUE  # DESeq2 independent filtering
   reducedFormula: NULL
   longlabel: FALSE     # Prepend comparison info to standard column names.
@@ -43,7 +43,7 @@ library(DESeq2)
 library(data.table)
 library(ggplot2)
 # library(plotly)
-library(htmltools)
+# library(htmltools)
 library(patchwork)
 library(ggrepel)
 library(ggdendro)
@@ -112,8 +112,8 @@ if (is.null(params$widths)){
 # Covariates
 cD <- colData(params$dds)[, 1:length(colData(params$dds)), drop=FALSE]  # before model building there in no size factor as last column
 
-cat(paste("Min required mean raw counts across relevant samples:", params$minMean))
-cat(paste("Min required raw count in a single sample when the min mean is not met:", params$minSingle))
+cat(paste("Min required mean raw counts in either condition to accept a significant candidate:", params$minCount))
+cat(paste("Min required mean TPM in either condition to accept a significant candidate:", params$minTPM))
 cat(paste("DESeq2 independent filtering:", params$filterBaseMean))
 cat(paste("Significance level:", params$pcutoff))
 cat(paste0("log2FC threshold: ", params$lfcthreshold, " , (i.e. ", round(2 ^ params$lfcthreshold, 2), "-fold change)"))
@@ -138,54 +138,54 @@ for (x in names(cD)) {
 # Correlations
 my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NULL, txs=3, minMean=0, minSingle=0) {
   # mat <- vstmat; samples <- colnames(rpm)
-  
+
   # Filter
   if (minMean != 0 | minSingle != 0) {
     mat <- mat[rowSums(mat >= minSingle) >= 1 | rowMeans(mat) >= minMean, ]
   } else {
     mat <- mat[rowSums(mat) > 0, ]
   }
-  
+
   # Correlations
   cormat <- cor(mat, method=method)
-  
+
   # Cluster
   hcfit <- hclust(dist(scale(cormat, center=TRUE)))
   rn <- rownames(cormat)
-  
+
   # Make dendrogram. https://stackoverflow.com/questions/42047896/joining-a-dendrogram-and-a-heatmap
   dend <- as.dendrogram(hcfit)
   dend_data <- dendro_data(dend)
   # Setup the data, so that the axes are exchanged, instead of using coord_flip()
   segment_data <- with(
-      segment(dend_data), 
+      segment(dend_data),
       data.frame(x = y, y = x, xend = yend, yend = xend))
   # Use the dendrogram label data to position the sample labels
   sample_pos_table <- with(
-      dend_data$labels, 
+      dend_data$labels,
       data.frame(y_center = x, Sample = as.character(label), height = 1))
   # Limits for the vertical axes
   sample_axis_limits <- with(
-      sample_pos_table, 
+      sample_pos_table,
       c(min(y_center - 0.5 * height), max(y_center + 0.5 * height))
   ) + 0.1 * c(-1, 1) # extra spacing: 0.1
   # Dendrogram plot
-  pd <- ggplot(segment_data) + 
-    geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) + 
+  pd <- ggplot(segment_data) +
+    geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) +
     scale_x_reverse(expand = c(0, 0.5),
-                    position = "top") + 
+                    position = "top") +
     scale_y_continuous(position = "right",
-                       breaks = sample_pos_table$y_center, 
-                       labels = sample_pos_table$Sample, 
-                       limits = sample_axis_limits, 
-                       expand = c(0, 0)) + 
+                       breaks = sample_pos_table$y_center,
+                       labels = sample_pos_table$Sample,
+                       limits = sample_axis_limits,
+                       expand = c(0, 0)) +
     labs(x = NULL, y = NULL) +
-    theme_minimal() + 
+    theme_minimal() +
     theme(panel.grid = element_blank(),
           axis.text.y = element_blank(),
           axis.ticks.y = element_blank())
 
-  
+
   # Create duplicates for different plot styles
   cormat <- cormat[samples, samples]                    # Supplied order
   cormat2 <- cormat                                     # Duplicate in which to delete below the diagonal.
@@ -206,7 +206,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
       }
     }
   }
-  
+
   # Restructure for plotting.
   rn <- rownames(cormat)
   cormat <- as.data.table(cormat)
@@ -214,7 +214,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   cormat <- melt(cormat, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
   cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rn)]
   # cormat <- merge(cormat, sample_pos_table, by.x="observation2", by.y="Sample", all.x=TRUE)
-  
+
   rn2 <- rownames(cormat2)
   cormat2 <- as.data.table(cormat2)
   cormat2[, observation1 := factor(rn2, ordered=TRUE, levels=rn2)]
@@ -222,14 +222,14 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   cormat2[, observation2 := factor(observation2, ordered=TRUE, levels=rn2)]
   cormat2 <- cormat2[!is.na(Correlation)]
   # cormat2 <- merge(cormat2, sample_pos_table, by.x="observation2", by.y="Sample", all.x=TRUE)
-  
+
   rn3 <- rownames(cormat3)
   cormat3 <- as.data.table(cormat3)
   cormat3[, observation1 := factor(rn3, ordered=TRUE, levels=rn3)]
   cormat3 <- melt(cormat3, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
   cormat3[, observation2 := factor(observation2, ordered=TRUE, levels=rn3)]
   # cormat3 <- merge(cormat3, sample_pos_table, by.x="observation2", by.y="Sample", all.x=TRUE)
-  
+
   rn4 <- rownames(cormat4)
   cormat4 <- as.data.table(cormat4)
   cormat4[, observation1 := factor(rn3, ordered=TRUE, levels=rn4)]
@@ -237,20 +237,20 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   cormat4[, observation2 := factor(observation2, ordered=TRUE, levels=rn4)]
   cormat4 <- cormat4[!is.na(Correlation)]
   # cormat4 <- merge(cormat4, sample_pos_table, by.x="observation2", by.y="Sample", all.x=TRUE)
-  
+
   # Text colour switch for the dynamic range
   m <- min(cormat4$Correlation, na.rm=TRUE)
   M <- max(cormat4$Correlation, na.rm=TRUE)
   colourswitch <- c( m + 0.49 * (M-m),  m + 0.51 * (M-m) )
-  
-  
+
+
   # Square. Custom order. No values. Full range.
   p1 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
     scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
     scale_x_discrete(position = "top") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+    theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
 
   # Square. Custom order. No values. Dynamic range.
@@ -259,7 +259,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
     scale_x_discrete(position = "top") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+    theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
 
   # Triangle. Custom order. With values. Full range.
@@ -270,7 +270,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
     scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+    theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
 
   # Triangle. Custom order. With values. Dynamic range.
@@ -281,7 +281,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
     scale_x_discrete(position = "top") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+    theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
 
   # Square. Custom order. With values. Full range.
@@ -292,7 +292,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
     scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+    theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
 
   # Square. Custom order. With values. Dyhamic range.
@@ -303,17 +303,17 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
     scale_x_discrete(position = "top") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+    theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
 
-  
+
   # Square. Clustered order. No values. Full range.
   p3 <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
     scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
     scale_x_discrete(position = "top") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+    theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
 
   # Square. Clustered order. No values. Dyhamic range.
@@ -322,7 +322,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
     scale_x_discrete(position = "top") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+    theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
 
   # Triangle. Clustered order. with values. Full range.
@@ -333,7 +333,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
     scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+    theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
 
   # Triangle. Clustered order. with values. Dyhamic range.
@@ -344,9 +344,9 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "transparent" ) +
     scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+    theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-  
+
   # Square. Clustered order. With values. Full range.
   p34 <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -355,7 +355,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
     scale_x_discrete(position = "top") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+    theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
 
   # Square. Clustered order. With values. Dyhamic range.
@@ -366,24 +366,24 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
     scale_x_discrete(position = "top") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+    theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
 
   out <- list(corr=dcast(cormat2, observation1 ~ observation2, value.var = "Correlation"),
-              sfrnc=p1, sdrnc=p1a, 
+              sfrnc=p1, sdrnc=p1a,
               # tfrnc=p2, tdrnc=p2a,
               frnc=p12, drnc=p12a,
-              sfrc=p3 + plot_layout(ncol=2, widths=c(1,4)), 
+              sfrc=p3 + plot_layout(ncol=2, widths=c(1,4)),
               sdrc=pd + p3a + plot_layout(ncol=2, widths=c(1,4)),
               # tfrc=p4, tdrc=p4a,
               frc=pd + p34 + plot_layout(ncol=2, widths=c(1,4)),
               drc=pd + p34a + plot_layout(ncol=2, widths=c(1,4))
               )
-  
+
   if (!is.null(rds)) {
     saveRDS(out, file = rds)
   }
-  
+
   return(out)
 }
 ```
@@ -409,9 +409,9 @@ print( corels1s[['sdrc']] )
 ## rlog (or VST)
 
 ```{r correlations3, fig.height=8, fig.width=8}
-corels2p <- my_pairwise_internal_corels(vstmat, colnames(tpm), method="pearson", 
+corels2p <- my_pairwise_internal_corels(vstmat, colnames(tpm), method="pearson",
                                        minMean=0, minSingle=0)
-# corels2s <- my_pairwise_internal_corels(vstmat, colnames(tpm), method="spearman", 
+# corels2s <- my_pairwise_internal_corels(vstmat, colnames(tpm), method="spearman",
 #                                        minMean=0, minSingle=0)
 
 # print( (corels2p[['sfrnc']] + theme(legend.position="none")) | (corels2s[['sfrnc']] + theme(axis.text.y=element_blank())) )
@@ -559,6 +559,7 @@ if (!is.null(params$reducedFormula)) {
   plrexp <- ggplot(lrhitdf, aes(y=Feature, x=Sample, fill=log10(RPM))) +
     geom_tile() +
     scale_fill_gradient(high="gold", low="black", na.value='gray50', paste('log10', colsuffix)) +
+    coord_equal(ratio=1) +
     labs(y='', x='') +
     theme(axis.text.x = element_text(angle=90, hjust = 1, vjust = 0.5, size=rel(1)),
           axis.text.y = element_text(size=rel(0.6)),
@@ -582,11 +583,11 @@ deobj <- DESeq(params$dds, test='Wald')
 
 ## Function
 do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop = params$ntop, addPrefix = params$longlabel,
-                        pcutoff = params$pcutoff, lfcthreshold = params$lfcthreshold, filterBM=params$filterBaseMean, 
-                        prefix=params$prefix, PMtype=colsuffix, rlog=params$rlog, fc4p=params$fc4p){
+                        pcutoff = params$pcutoff, lfcthreshold = params$lfcthreshold, minC=params$minCount, minT=params$minTPM, 
+                        filterBM=params$filterBaseMean, prefix=params$prefix, PMtype=colsuffix, rlog=params$rlog, fc4p=params$fc4p){
   # contrast <-  params$comparisons[[1]]
-  # dds = deobj; rpms = tpm; ntop = params$ntop; addPrefix = params$longlabel; pcutoff = params$pcutoff; lfcthreshold = params$lfcthreshold; filterBM=params$filterBaseMean; prefix=params$prefix; PMtype=colsuffix; rlog=params$rlog; regcnt=vstmat
-  highlight <- c("non-significant", "significant, FC low", "significant", paste("significant, top", params$ntop))
+  # dds = deobj; rpms = tpm; ntop = params$ntop; addPrefix = params$longlabel; pcutoff = params$pcutoff; lfcthreshold = params$lfcthreshold; filterBM=params$filterBaseMean; prefix=params$prefix; PMtype=colsuffix; rlog=params$rlog; regcnt=vstmat; minC=params$minCount; minT=params$minTPM
+  highlight <- c("non-significant", "significant, unmet thresh", "significant", paste("significant, top", params$ntop))
   hlcol <- c("grey50", "black", "blue", "red")
   names(hlcol) <- highlight
   ctrname <- paste0(contrast[1], '_', contrast[2], '_vs_', contrast[3])
@@ -603,35 +604,65 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
   shrink[, mlog10p := -log10(padj)] 
   shrink[, absl2fc := abs(log2FoldChange)]
   
+  # Get the counts for the relevant samples only
+  cD <- colData(dds)
+  refs <- rownames(cD)[cD[, contrast[1]] == contrast[3]]
+  treats <- rownames(cD)[cD[, contrast[1]] == contrast[2]]
+  # Add expression
+  cnt <- merge( data.table(name = rownames(counts(dds)),
+                           # counts(dds)[outtab$name, c(refs, treats), drop=FALSE],
+                           refMean = rowMeans(counts(dds)[, refs, drop=FALSE]),
+                           treatMean = rowMeans(counts(dds)[, treats, drop=FALSE]),
+                           maxCount = rowMaxs(counts(dds)[, c(refs, treats), drop=FALSE]),
+                           refStDev = sqrt(rowVars(counts(dds)[, refs, drop=FALSE])),
+                           treatStDev = sqrt(rowVars(counts(dds)[, treats, drop=FALSE])) ),
+                data.table(name=rownames(rpms), 
+                           # rpms[, c(refs, treats), drop=FALSE],
+                           refMeanTPM = rowMeans(rpms[, refs]),
+                           treatMeanTPM = rowMeans(rpms[, treats]),
+                           maxScaledCount = rowMaxs(rpms[, c(refs, treats )]) ),
+                all=TRUE, by="name" )
+  
   # Combine shrunken and non-shrunken LFC tables for output, minus identical columns
   outtab <- merge(lfc, 
-                  shrink[, ! names(shrink) %in% c('baseMean', 'pvalue'), with=FALSE], by="name", all=TRUE, suffixes=c('', '.shrink') )
-  
-  
-  ## Home-brewed selection of top hits to highlight, by eucledian distance from origin.
-  # It mostly works sensibly enough, but the selection should not be taken as gospel.
+                  shrink[, ! names(shrink) %in% c('baseMean', 'pvalue'), with=FALSE], 
+                  by="name", all=TRUE, suffixes=c('', '.shrink') )
+
+  outtab <- merge(outtab,
+                 cnt,
+                 all=TRUE, by="name")
   
   # Thresholds.
-  outtab[, meetthresh := !is.na(padj) & absl2fc >= lfcthreshold & padj < pcutoff]
+  outtab[, meetthresh := !is.na(padj) & 
+                        padj < pcutoff &
+                        absl2fc >= lfcthreshold &
+                        (refMean >= minC | treatMean >= minC) &
+                        (refMeanTPM >= minT | treatMeanTPM >= minT)]
   
+  ## Home-brewed selection of top hits to highlight, by euclidean distance from origin.
+  # It mostly works sensibly enough, but the selection should not be taken as gospel.
   # Down-weight mlog10p for a more balanced selection not dominated by p value.
-  ppen <- max(outtab$mlog10p, na.rm=TRUE) / max(outtab$absl2fc, na.rm=TRUE)  # "penalty" factor determined by axes ranges
+  ppen <- max(outtab$mlog10p[is.finite(outtab$mlog10p)]) / max(outtab$absl2fc[is.finite(outtab$absl2fc)])  # scaling factor determined by axes ranges
   outtab[, dist := sqrt((mlog10p / ppen) ^ 2 + log2FoldChange.shrink ^ 2)]
+  
   setorder(outtab, -dist, -absl2fc, -mlog10p, na.last = TRUE)
   
   # Selection helpers
   outtab[, istop := FALSE]
   outtab[(meetthresh), row := 1:.N]
   outtab[meetthresh & row <= ntop, istop := TRUE]  # The top N hits, but they must first actually be hits.
-  outtab[, dist := NULL] [, absl2fc := NULL] [, row := NULL]  # they did their job
   outtab[, category := highlight[1]]
   outtab[!is.na(padj.shrink) & padj.shrink < params$pcutoff & !meetthresh, category := highlight[2]]
   outtab[meetthresh & !istop, category := highlight[3]]
   outtab[(istop), category := highlight[4]]
   outtab[, category := factor(category, ordered=TRUE, levels=highlight)]
+ 
+  outtab[, dist := NULL] [, absl2fc := NULL] [, row := NULL]  # they did their job
   
   # Filter out the uninteresting points, to make it lightweight and ggplotly-friendly
   subfc <- outtab[(meetthresh), ]
+  selcnt <- rpms[head(subfc$name, n=ntop), ]
+  selvst <- regcnt[head(subfc$name, n=ntop), ]
   # Handle freak cases.
   if (nrow(subfc) <= ntop) {
     subfc <- outtab[abs(log2FoldChange) >= 0.5 & padj < 0.1, ] 
@@ -647,6 +678,11 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
     # It's too much hassle to code alternatives for all the places subfc is used.
   }
   
+  
+  # Increment the 0s so they survive the log-transformation, but in a way they don't mix with non-zero data.
+  # If data has been pre-filtered with minMean, there should be no remaining zeros.
+  zeros <- min(outtab[refMeanTPM > 0, refMeanTPM], outtab[treatMeanTPM > 0, treatMeanTPM]) / 10
+  
   ## Volcanos
   
   # Static image.
@@ -655,12 +691,12 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
             geom_vline(xintercept = lfcthreshold, linetype="dashed",  colour="steelblue1") + 
             geom_vline(xintercept = -lfcthreshold, linetype="dashed",  colour="steelblue1") + 
             geom_hline(yintercept = -log10(pcutoff), linetype="dashed",  colour="steelblue1") + 
-            geom_point(alpha=0.5) +
-            geom_text_repel(data=outtab[(istop), ], size=rel(2.5),  colour="red",
+            geom_point(aes(size=refMeanTPM), alpha=0.5) +
+            geom_text_repel(data=outtab[(istop), ], size=rel(2.5),  colour="violet",
                             segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=1, force_pull=1) +
             scale_colour_manual(values=c("black", "red")) +
             labs(x='log2( FC )', y='-log10( Padj )', title=ctrname) +
-            theme(legend.position = "none", panel.grid = element_blank())
+            theme(aspect.ratio=1, legend.position = "none", panel.grid = element_blank())
   
   pv2 <- ggplot(outtab, 
                 aes(x=log2FoldChange.shrink, y=mlog10p.shrink, colour=istop, label=name)) + 
@@ -668,11 +704,11 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
             geom_vline(xintercept = -lfcthreshold, linetype="dashed",  colour="steelblue1") + 
             geom_hline(yintercept = -log10(pcutoff), linetype="dashed",  colour="steelblue1") + 
             geom_point(alpha=0.5) +
-            geom_text_repel(data=outtab[(istop), ], size=rel(2.5), colour="red",
+            geom_text_repel(data=outtab[(istop), ], size=rel(2.5), colour="violet",
                             segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=1, force_pull=1) +
             scale_colour_manual(values=c("black", "red")) +
             labs(x='log2( shrunken FC )', y='-log10( Padj )', title=ctrname) +
-            theme(legend.position = "none", panel.grid = element_blank())
+            theme(aspect.ratio=1, legend.position = "none", panel.grid = element_blank())
   
   # Lighter image for interactive plotly. Only points that pass thresholds.
   pvly <- ggplot(subfc, 
@@ -683,7 +719,7 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
             geom_point(alpha=0.5) +
             scale_colour_manual(values=c("black", "red")) +
             labs(x='log2( shrunken FC )', y='-log10( Padj )', title=ctrname) +
-            theme(legend.position = "none", panel.grid = element_blank())
+            theme(aspect.ratio=1, legend.position = "none", panel.grid = element_blank())
   
   ## MA
   
@@ -696,7 +732,7 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
             geom_point(data=outtab[name %in% subfc[(istop), name], ], colour='red') +
             geom_hline(yintercept = lfcthreshold, linetype="dashed",  colour="steelblue1") + 
             geom_hline(yintercept = -lfcthreshold, linetype="dashed",  colour="steelblue1") + 
-            geom_text_repel(data=outtab[(istop), ], colour="red", size=rel(2.5), segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=1, force_pull=1) +
+            geom_text_repel(data=outtab[(istop), ], colour="violet", size=rel(2.5), segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=1, force_pull=1) +
             scale_x_log10() +
             annotation_logticks(base=10, sides='b') +
             labs(y='log2( FC )', y='baseMean', title=ctrname) +
@@ -710,7 +746,7 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
             geom_point(data=outtab[(istop), ], colour='red') +
             geom_hline(yintercept = lfcthreshold, linetype="dashed",  colour="steelblue1") + 
             geom_hline(yintercept = -lfcthreshold, linetype="dashed",  colour="steelblue1") + 
-            geom_text_repel(data=outtab[name %in% subfc[(istop), name],], colour="red", size=rel(2.5), segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=1, force_pull=1) +
+            geom_text_repel(data=outtab[name %in% subfc[(istop), name],], colour="violet", size=rel(2.5), segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=1, force_pull=1) +
             scale_x_log10() +
             annotation_logticks(base=10, sides='b') +
             labs(y='log2( shrunken FC )', y='baseMean', title=ctrname) +
@@ -728,13 +764,6 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
             theme(legend.position = "none", panel.grid = element_blank())
   
   ## Expression heatmap of ntop genes that meet thresholds
-  
-  # Get the counts for the relevant samples only
-  cD <- colData(dds)
-  refs <- rownames(cD)[cD[, contrast[1]] == contrast[3]]
-  treats <- rownames(cD)[cD[, contrast[1]] == contrast[2]]
-  selcnt <- rpms[head(subfc$name, n=ntop), ]
-  selvst <- regcnt[head(subfc$name, n=ntop), ]
   
   if (is.null(dim(selcnt))) {
     # if there is only one hit
@@ -776,6 +805,7 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
             geom_tile() +
             # facet_grid(. ~ type) +
             scale_fill_gradient(high="yellow2", low="darkgreen", na.value = "black", name="log10(TPM)") +
+            coord_equal(ratio=1) +
             labs(title=ctrname) +
             theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
                   panel.grid = element_blank())
@@ -784,36 +814,12 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
             geom_tile() +
             # facet_grid(. ~ type) +
             scale_fill_gradient(high="yellow2", low="darkgreen", na.value = "black") +
+            coord_equal(ratio=1) +
             labs(title=ctrname) +
             theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
                   panel.grid = element_blank())
   
   ## Expression scatters
-  
-  # Add expression
-  
-  cnt <- merge( data.table(name = rownames(counts(dds)),
-                           # counts(dds)[outtab$name, c(refs, treats), drop=FALSE],
-                           refMean = rowMeans(counts(dds)[outtab$name, refs, drop=FALSE]),
-                           treatMean = rowMeans(counts(dds)[outtab$name, treats, drop=FALSE]),
-                           maxCount = rowMaxs(counts(dds)[outtab$name, c(refs, treats), drop=FALSE]),
-                           refStDev = sqrt(rowVars(counts(dds)[outtab$name, refs, drop=FALSE])),
-                           treatStDev = sqrt(rowVars(counts(dds)[outtab$name, treats, drop=FALSE])) ),
-                data.table(name=rownames(rpms), 
-                           # rpms[, c(refs, treats), drop=FALSE],
-                           refMeanTPM = rowMeans(rpms[, refs]),
-                           treatMeanTPM = rowMeans(rpms[, treats]),
-                           maxScaledCount = rowMaxs(rpms[, c(refs, treats )]) ),
-                all=TRUE, by="name" )
-  
-  outtab <-merge(outtab,
-                 cnt,
-                 all=TRUE, by="name")
-  
- 
-  # Increment the 0s so they survive the log-transformation, but in a way they don't mix with non-zero data.
-  # If data has been pre-filtered with minMean, there should be no remaining zeros.
-  zeros <- min(outtab[refMeanTPM > 0, refMeanTPM], outtab[treatMeanTPM > 0, treatMeanTPM]) / 10
   
   pe1 <- ggplot(NULL, aes(x=refMeanTPM + zeros, y=treatMeanTPM + zeros, label=name, colour=category)) +
       geom_abline(intercept = 0, slope = 1, colour='black') +
@@ -821,14 +827,14 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
       geom_point(data=outtab[category == highlight[2], ], alpha=0.7, size=rel(0.8)) +
       geom_point(data=outtab[category == highlight[3], ], alpha=0.7) +
       geom_point(data=outtab[category == highlight[4], ]) +
-      geom_label_repel(data=outtab[category == highlight[4], ], size=rel(2.5), colour="red",
+      geom_label_repel(data=outtab[category == highlight[4], ], size=rel(2.5), colour="violet",
                        segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=10, force_pull=5) +
       scale_x_log10() + 
       scale_y_log10() +
       scale_colour_manual(values=hlcol) +
       annotation_logticks(base=10, sides='lrtb') +
       labs(title=ctrname, x=paste('reference Mean', PMtype), y=paste('treatment Mean', PMtype)) +
-      theme(panel.grid.minor = element_blank())
+      theme(aspect.ratio=1, panel.grid.minor = element_blank())
   
   pe1ly <- ggplot(NULL, aes(x=refMeanTPM + zeros, y=treatMeanTPM, label=name, colour=category)) +
       geom_abline(intercept = 0, slope = 1, colour='black') +
@@ -838,35 +844,50 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
       scale_y_log10() +
       scale_colour_manual(values=hlcol) +
       labs(title=ctrname, x=paste('reference Mean', PMtype), y=paste('treatment Mean', PMtype)) +
-      theme(legend.position = "none", panel.grid.minor = element_blank()) 
+      theme(aspect.ratio=1, legend.position = "none", panel.grid.minor = element_blank()) 
   
   pe2 <- ggplot(NULL, aes(x=refMeanTPM + zeros, y=refStDev / (refMeanTPM + zeros), label=name, colour=category)) +
       geom_point(data=outtab[category == highlight[1], ], alpha=0.4, size=0.8) +
       geom_point(data=outtab[category == highlight[2], ], alpha=0.7, size=0.8) +
       geom_point(data=outtab[category == highlight[3], ], alpha=0.7) +
       geom_point(data=outtab[category == highlight[4], ]) +
-      geom_label_repel(data=outtab[category == highlight[4], ], size=rel(2.5), colour="red",
+      geom_label_repel(data=outtab[category == highlight[4], ], size=rel(2.5), colour="violet",
                        segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=10, force_pull=5) +
       scale_x_log10() + 
       scale_y_log10() +
       scale_colour_manual(values=hlcol) +
       annotation_logticks(base=10, sides='lrtb') +
       labs(title=ctrname, x=paste('reference Mean', PMtype), y='reference Variation Coeff.') +
-      theme(panel.grid.minor = element_blank()) 
+      theme(aspect.ratio=1, panel.grid.minor = element_blank()) 
   
   pe3 <- ggplot(NULL, aes(x=treatMeanTPM + zeros, y=treatStDev / (treatMeanTPM + zeros), label=name, colour=category)) +
       geom_point(data=outtab[category == highlight[1], ], alpha=0.4, size=0.8) +
       geom_point(data=outtab[category == highlight[2], ], alpha=0.7, size=0.8) +
       geom_point(data=outtab[category == highlight[3], ], alpha=0.7) +
       geom_point(data=outtab[category == highlight[4], ]) +
-      geom_label_repel(data=outtab[category == highlight[4], ], size=rel(2.5), colour="red",
+      geom_label_repel(data=outtab[category == highlight[4], ], size=rel(2.5), colour="violet",
                        segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=10, force_pull=5) +
       scale_x_log10() + 
       scale_y_log10() +
       scale_colour_manual(values=hlcol) +
       annotation_logticks(base=10, sides='lrtb') +
       labs(title=ctrname, x=paste('treatment Mean', PMtype), y='treatment Variation Coeff.') +
-      theme(panel.grid.minor = element_blank()) 
+      theme(aspect.ratio=1, panel.grid.minor = element_blank()) 
+  
+  pe4 <- ggplot(NULL, aes(y=refMeanTPM + zeros, x=log2FoldChange, label=name, colour=category)) +
+      geom_vline(xintercept = lfcthreshold, linetype="dashed",  colour="steelblue1") + 
+      geom_vline(xintercept = -lfcthreshold, linetype="dashed",  colour="steelblue1") + 
+      geom_point(data=outtab[category == highlight[1], ], alpha=0.4, size=rel(0.8),  colour="black") +
+      geom_point(data=outtab[category == highlight[2], ], alpha=0.7, size=rel(0.8),  colour="black") +
+      geom_point(data=outtab[category == highlight[3], ], alpha=0.7,  colour="black") +
+      geom_point(data=outtab[category == highlight[4], ]) +
+      geom_label_repel(data=outtab[category == highlight[4], ], size=rel(2.5), colour="violet",
+                       segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=10, force_pull=5) +
+      scale_y_log10() + 
+      scale_colour_manual(values=hlcol) +
+      annotation_logticks(base=10, sides='lr') +
+      labs(title=ctrname, y=paste('reference Mean', PMtype), x='log2( FC )') +
+      theme(aspect.ratio=1, legend.position='none',  panel.grid.minor = element_blank())
   
   ## Table pt2
   
@@ -903,7 +924,7 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
   return(list(contrast=ctrname, 
               pv1=pv1, pv2=pv2, #pvly=ggplotly(pvly, dynamicTicks = TRUE),
               pma1=pma1, pma2=pma2, #pmaly=ggplotly(pmaly, dynamicTicks = TRUE),
-              pe1=pe1, pe2=pe2, pe3=pe3, #pe1ly=ggplotly(pe1ly, dynamicTicks = TRUE),
+              pe1=pe1, pe2=pe2, pe3=pe3, pe4=pe4, #pe1ly=ggplotly(pe1ly, dynamicTicks = TRUE),
               ph1=ph1, ph2=ph2, 
               tophits=rn, hashits=hashits,
               outtab=outtab, virgin=virgin))
@@ -926,7 +947,7 @@ if (!is.null(params$comparisons)) {
 
 IMPORTANT: In the name of each comparison, the condition used as **"reference" is always shown to the right** of the `vs` in the name, whereas the condition used as **"treatment" is always shown on the left** of the `vs`.
 
-```{r expov, warning=FALSE, fig.height=9, fig.width=10}
+```{r expov, warning=FALSE, fig.height=13.5, fig.width=15}
 for (res in resall) {
   # res <- resall[[1]]
   
@@ -950,6 +971,7 @@ for (res in resall) {
   ################
   
   print(res[["pv1"]])
+  # print(res[["pe4"]])
   print(res[["pe1"]])
   # print( (res[["pe2"]] + theme(legend.position='none')) | (res[["pe3"]] + theme(legend.position='none')))
   # print(res[["pma1"]])
@@ -1004,6 +1026,7 @@ if (!is.null(params$comparisons)) {
   pallexp <- ggplot(allhitdf, aes(y=Feature, x=Sample, fill=log10(RPM))) +
     geom_tile() +
     scale_fill_gradient(high="gold", low="black", na.value='gray50', paste('log10', colsuffix)) +
+    coord_equal(ratio=1) +
     labs(y='', x='') +
     theme(axis.text.x = element_text(angle=90, hjust = 1, vjust = 0.5, size=rel(1)),
           axis.text.y = element_text(size=rel(0.6)),
@@ -1014,12 +1037,13 @@ if (!is.null(params$comparisons)) {
   allhitdf <- melt(allhitdf, value.name = ifelse(params$rlog, "rlog_count", "VST_count"), 
                    variable.name = "Sample", id.vars = "Feature")
   allhitdf[, Feature := ordered(Feature, levels=rn)]
-  allhitdf[, Sample := ordered(Sample, levels=cn)]
+  # allhitdf[, Sample := ordered(Sample, levels=cn)]
   
   pallvst <- ggplot(allhitdf, 
                     aes_string(y="Feature", x="Sample", fill=ifelse(params$rlog, "rlog_count", "VST_count"))) +
     geom_tile() +
     scale_fill_gradient(high="gold", low="black", na.value='gray50') +
+    coord_equal(ratio=1) +
     labs(y='', x='') +
     theme(axis.text.x = element_text(angle=90, hjust = 1, vjust = 0.5, size=rel(1)),
           axis.text.y = element_text(size=rel(0.6)),

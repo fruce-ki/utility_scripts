@@ -19,8 +19,8 @@ spec = matrix(c(
   'nidcols',       'I', 1, "numeric",   "Number of ID columns at the start of the table (1). See also -i.",
   'prescaled',     'k', 0, "logical",   "Don't let Deseq2 rescale the libraries. (False)",
   'label',         'l', 0, "logical",   "Add comparison details to the standard column names. Useful for merging multiple outputs.",
-  'minSingle',     'm', 1, "numeric",   "Minimum number of reads in any sinlge sample for a gene to be considered if the minMean is not met (100).",
-  'minMean',       'M', 1, "numeric",   "Minimum mean number of reads across all samples combined for a gene to be considered (10).",
+  'minCount',      'm', 1, "numeric",   "Minimum number of reads in either condition in a contrast. (100)",
+  'minTPM',        'M', 1, "numeric",   "Minimum TPM in either condition in a contrast. (5)",
   'ntop',          'n', 1, "numeric",   "Number of hits to highlight (50)",
   'resultsDir',    'o', 1, "character", "Directory in which to save the contrast results. If omitted, only the RDS will be output.",
   'pcutoff',       'p', 1, "numeric",   "P-value cutoff (0.05)",
@@ -55,8 +55,8 @@ if (is.null(opt$prescaled)) opt$prescaled <- FALSE
 if (is.null(opt$label)) opt$label <- FALSE
 if (is.null(opt$baseDir)) opt$baseDir <- '.'
 if (is.null(opt$resultsDir))  opt$resultsDir <- './results' 
-if (is.null(opt$minMean)) opt$minMean <- 10
-if (is.null(opt$minSingle)) opt$minSingle <- 100
+if (is.null(opt$minCount)) opt$minCount <- 100
+if (is.null(opt$minTPM)) opt$minTPM <- 5
 if (is.null(opt$ntop))  opt$ntop <- 50
 if (is.null(opt$pcutoff)) opt$pcutoff <- 0.05
 if (is.null(opt$lfcthreshold))  opt$lfcthreshold <- 1
@@ -188,11 +188,6 @@ for(y in unique(contexts)) {
     sizeFactors(DDS) <- factors
   }
 
-  # Prefilter out genes with very poor coverage. BE WARNED: This will completely remove those genes from the output as well.
-  # DESeq2 internally applies its own thresholds, unless disabled, but this only manifests as missing pvalues in the output, the filtered out genes are still listed.
-  keep <- (rowMeans(counts(DDS)) >= opt$minMean) | (rowSums(counts(DDS) >= opt$minSingle) >= 1)
-  DDS <- DDS[keep, ]
-  
   
   # Prepare file name.
   if (opt$prefix == '') {
@@ -206,7 +201,7 @@ for(y in unique(contexts)) {
   
   #######################
   #######################
-   subcomps <- NULL
+  subcomps <- NULL
   if (!is.null(opt$comparisons)) {
     subcomps <- lapply(1:length(condvars), function(i){ c(condvars[i], treatlevs[i], reflevs[i]) })
   }
@@ -223,8 +218,8 @@ for(y in unique(contexts)) {
                                 resultsDir = file.path(opt$resultsDir, opt$prefix),
                                 prefix = prefix,
                                 dds = DDS,
-                                minMean = opt$minMean,
-                                minSingle = opt$minSingle,
+                                minCount = opt$minCount,
+                                minTPM = opt$minTPM,
                                 filterBaseMean = opt$bmF,
                                 reducedFormula = opt$reducedFormula,
                                 longlabel=opt$label,
