@@ -274,7 +274,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
     scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+    theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
   
   # Square. Custom order. With values. Dyhamic range.
@@ -285,7 +285,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
     scale_x_discrete(position = "top") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+    theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
   
   
@@ -295,7 +295,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   #   scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
   #   scale_x_discrete(position = "top") +
   #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #   theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
   #         panel.grid = element_blank() )
   # 
   # # Square. Clustered order. No values. Dyhamic range.
@@ -304,7 +304,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   #   scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
   #   scale_x_discrete(position = "top") +
   #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #   theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
   #         panel.grid = element_blank() )
   # 
   # # Triangle. Clustered order. with values. Full range.
@@ -315,7 +315,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   #   scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
   #   scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
   #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #   theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
   #         panel.grid = element_blank() )
   # 
   # # Triangle. Clustered order. with values. Dyhamic range.
@@ -326,7 +326,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   #   scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "transparent" ) +
   #   scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
   #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #   theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
   #         panel.grid = element_blank() )
   
   # Square. Clustered order. With values. Full range.
@@ -337,7 +337,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
     scale_x_discrete(position = "top") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+    theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
   
   # Square. Clustered order. With values. Dyhamic range.
@@ -348,7 +348,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
     scale_x_discrete(position = "top") +
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+    theme(aspect.ratio=1, axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
   
   out <- list(corr=dcast(cormat2, observation1 ~ observation2, value.var = "Correlation"),
