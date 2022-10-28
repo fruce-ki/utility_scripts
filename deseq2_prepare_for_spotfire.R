@@ -17,11 +17,11 @@ spec = matrix(c(
 
 opt <- getopt(spec)
 
-# opt <- list(de='/groups/busslinger/Kimon/tanja/R13870_RNAseq_timecourse/spotfire/tmp/intron_genecounts.TF_Ikaros.LRT_CollectionTimeH.deseq2.txt', cnt='/groups/busslinger/Kimon/tanja/R13870_RNAseq_timecourse/spotfire/tmp/intron_genecounts.txt', fcThresh=3, pCutoff=0.05, countThresh=500L, tpmThresh=50, simplify=TRUE, url="http://ucsc.vbc.ac.at/cgi-bin/hgTracks?hgS_doOtherUser=submit&hgS_otherUserName=kimon.froussios&hgS_otherUserSessionName=R13870_ribominusRNAseq_Tanja")
+# opt <- list(de='/Volumes/groups/busslinger/Kimon/sarah/R13546_RNAseq/results/DE/intron_genecounts/intron_genecounts.type_ctrl.LRT_cell.deseq2.tsv', cnt='/Volumes/groups/busslinger/Kimon/sarah/R13546_RNAseq/process/featureCounts/intron_genecounts.txt', fcThresh=0.5, pCutoff=0.0001, countThresh=500L, tpmThresh=25, simplify=TRUE, url="foobar")
 
 if (is.null(opt$de)) stop("No input specified.")
 if (is.null(opt$cnt) & !is.null(opt$url)) stop("Need a counts table for gene positions with which to form the URLs.")
-if (is.null(opt$fcThresh)) { opt$lfcThresh <- 2 } else {  opt$lfcThresh <- as.numeric(opt$lfcThresh)  }
+if (is.null(opt$fcThresh)) { opt$fcThresh <- 2 } else {  opt$fcThresh <- as.numeric(opt$fcThresh)  }
 if (is.null(opt$pCutoff)) { opt$pCutoff <- 0.05 } else { opt$pCutoff <- as.numeric(opt$pCutoff) }
 if (is.null(opt$countThresh)) { opt$countThresh <- 100 } else { opt$countThresh <- as.numeric(opt$countThresh) }
 if (is.null(opt$tpmThresh)) { opt$tpmThresh <- 50 } else { opt$tpmThresh <- as.numeric(opt$tpmThresh) }
@@ -69,7 +69,7 @@ if (grepl('_vs_', opt$de)) {
   # Likelihood Ratio test, probably not be pairwise
   lfc <- NULL
   lfcs <- NULL
-  fc <- names(DE)[which(grepl("FC", names(DE)))]
+  fc <- names(DE)[which(grepl("FC$", names(DE)))]
   p <- names(DE)[which(grepl("padj", names(DE)))]
   pv <- names(DE)[which(grepl('pvalue', names(DE)))]
   mlp <- names(DE)[which(grepl("mlog10p", names(DE)))]
@@ -93,7 +93,7 @@ for (X in lfcs) {
   # X <- lfcs[1]
   newcol <- sub("log2FoldChange.shrink", "sFC_thresh", X)
   set(DE, i=NULL, j=newcol, value="low")     # default value
-  steps <- unique(c(2, 3, as.numeric(opt$lfcThresh)))
+  steps <- unique(c(2, 3, opt$fcThresh))
   steps <- steps[order(steps)]                      # smaller to bigger, order is important
   for (Y in steps)                                  # overwrite
     set(DE, i=which(2 ^ abs(DE[[X]]) >= Y), j=newcol, value=paste(">=", Y))
@@ -103,7 +103,7 @@ for (X in fc) {
   # X <- fc[1]
   newcol <- sub("FC", "FC_thresh", X)
   set(DE, i=NULL, j=newcol, value="low")     # default value
-  steps <- unique(c(2, 3, as.numeric(opt$lfcThresh)))
+  steps <- unique(c(2, 3, opt$fcThresh))
   steps <- steps[order(steps)]                      # smaller to bigger, order is important
   for (Y in steps)                                  # overwrite
     set(DE, i=which(DE[[X]] >= Y | DE[[X]] < (1 / Y)), j=newcol, value=paste(">=", Y))
