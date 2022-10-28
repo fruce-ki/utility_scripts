@@ -55,7 +55,7 @@ DE <- fread(opt$de)
 
 
 # Identify columns
-if (grepl('_vs_', opt$de)) {
+if (grepl('_vs_|all', opt$de)) {
   # pairwise Wald test
   lfc <- names(DE)[which(grepl("log2FoldChange(?!.shrink)", perl=TRUE, names(DE)))]
   lfcs <- names(DE)[which(grepl("log2FoldChange.shrink", names(DE)))]
@@ -76,7 +76,7 @@ if (grepl('_vs_', opt$de)) {
   cnt <- names(DE)[which(grepl("baseMean", names(DE)))]
   scnt <- names(DE)[which(grepl("baseScaled", names(DE)))]
 } else {
-  stop()
+  stop("Unable to intepret contents from filename.")
 }
 
 ## Create filters
