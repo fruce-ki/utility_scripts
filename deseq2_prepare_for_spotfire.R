@@ -92,7 +92,7 @@ if (grepl('_vs_|all', opt$de)) {
 for (X in lfcs) {
   # X <- lfcs[1]
   newcol <- sub("log2FoldChange.shrink", "sFC_thresh", X)
-  set(DE, i=NULL, j=newcol, value="low")     # default value
+  set(DE, i=NULL, j=newcol, value="small")     # default value
   steps <- unique(c(2, 3, opt$fcThresh))
   steps <- steps[order(steps)]                      # smaller to bigger, order is important
   for (Y in steps)                                  # overwrite
@@ -102,22 +102,13 @@ for (X in lfcs) {
 for (X in fc) {
   # X <- fc[1]
   newcol <- sub("FC", "FC_thresh", X)
-  set(DE, i=NULL, j=newcol, value="low")     # default value
+  set(DE, i=NULL, j=newcol, value="small")     # default value
   steps <- unique(c(2, 3, opt$fcThresh))
   steps <- steps[order(steps)]                      # smaller to bigger, order is important
   for (Y in steps)                                  # overwrite
     set(DE, i=which(DE[[X]] >= Y | DE[[X]] < (1 / Y)), j=newcol, value=paste(">=", Y))
 }
 
-# FC direction
-for (X in lfc) {
-  # X <- lfc[1]
-  newcol <- sub("log2FoldChange", "Deregulation", X)
-  padj <- sub("log2FoldChange", "padj", X)    # global_padj fields not created yet, so no clash
-  set(DE, i=NULL, j=newcol, value="neutral")
-  set(DE, i=which(DE[[X]] > 0 & DE[[padj]] < opt$pCutoff), j=newcol, value="Up")
-  set(DE, i=which(DE[[X]] < 0 & DE[[padj]] < opt$pCutoff), j=newcol, value="Down")
-}
 
 # Significance cutoff
 for (X in p) {
@@ -148,6 +139,16 @@ for (X in p) {
   steps <- steps[order(steps, decreasing=TRUE)]     # high to low, order is important
   for (Y in steps)                                  # overwrite
     set(DE, i=which(abs(DE[[X]]) < Y), j=newcol, value=paste("<", Y))
+}
+
+# FC direction
+for (X in lfc) {
+  # X <- lfc[1]
+  newcol <- sub("log2FoldChange", "Deregulation", X)
+  padj <- sub("log2FoldChange", "global_padj", X)
+  set(DE, i=NULL, j=newcol, value="neutral")
+  set(DE, i=which(DE[[X]] > 0 & DE[[padj]] < opt$pCutoff), j=newcol, value="UP")
+  set(DE, i=which(DE[[X]] < 0 & DE[[padj]] < opt$pCutoff), j=newcol, value="DOWN")
 }
 
 # Count threshold cap
