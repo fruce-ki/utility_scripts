@@ -17,7 +17,7 @@ spec = matrix(c(
 
 opt <- getopt(spec)
 
-# opt <- list(de='/Volumes/groups/busslinger/Kimon/sarah/R13546_RNAseq/results/DE/intron_genecounts/intron_genecounts.type_ctrl.LRT_cell.deseq2.tsv', cnt='/Volumes/groups/busslinger/Kimon/sarah/R13546_RNAseq/process/featureCounts/intron_genecounts.txt', fcThresh=0.5, pCutoff=0.0001, countThresh=500L, tpmThresh=25, simplify=TRUE, url="foobar")
+# opt <- list(de='/Volumes/groups/busslinger/Kimon/sarah/R13546_RNAseq/results/DE_ctrl/intron_genecounts/all.deseq.txt', cnt='/Volumes/groups/busslinger/Kimon/sarah/R13546_RNAseq/process/featureCounts/intron_genecounts.txt', fcThresh=0.5, pCutoff=0.000001, countThresh=500, tpmThresh=25, simplify=TRUE, url="foobar")
 
 if (is.null(opt$de)) stop("No input specified.")
 if (is.null(opt$cnt) & !is.null(opt$url)) stop("Need a counts table for gene positions with which to form the URLs.")
@@ -57,24 +57,24 @@ DE <- fread(opt$de)
 # Identify columns
 if (grepl('_vs_|all', opt$de)) {
   # pairwise Wald test
-  lfc <- names(DE)[which(grepl("log2FoldChange(?!.shrink)", perl=TRUE, names(DE)))]
-  lfcs <- names(DE)[which(grepl("log2FoldChange.shrink", names(DE)))]
-  fc <- NULL
-  p <- names(DE)[which(grepl("padj", names(DE)))]
-  pv <- names(DE)[which(grepl('pvalue', names(DE)))]
-  mlp <- names(DE)[which(grepl("mlog10p", names(DE)))]
-  cnt <- names(DE)[which(grepl("maxCount", names(DE)))]
-  scnt <- names(DE)[which(grepl("maxScaledCount", names(DE)))]
+  fc <- names(DE)[which(grepl("^FC", names(DE)))]
+  lfc <- names(DE)[which(grepl("^log2FoldChange(?!.shrink)", perl=TRUE, names(DE)))]
+  lfcs <- names(DE)[which(grepl("^log2FoldChange.shrink", names(DE)))]
+  p <- names(DE)[which(grepl("^padj", names(DE)))]
+  pv <- names(DE)[which(grepl('^pvalue', names(DE)))]
+  mlp <- names(DE)[which(grepl("^mlog10p", names(DE)))]
+  cnt <- names(DE)[which(grepl("^maxCount", names(DE)))]
+  scnt <- names(DE)[which(grepl("^maxScaledCount", names(DE)))]
 } else if (grepl('\\.LRT_', opt$de)) {
   # Likelihood Ratio test, probably not be pairwise
+  fc <- names(DE)[which(grepl("^FC", names(DE)))]
   lfc <- NULL
   lfcs <- NULL
-  fc <- names(DE)[which(grepl("FC$", names(DE)))]
-  p <- names(DE)[which(grepl("padj", names(DE)))]
-  pv <- names(DE)[which(grepl('pvalue', names(DE)))]
-  mlp <- names(DE)[which(grepl("mlog10p", names(DE)))]
-  cnt <- names(DE)[which(grepl("baseMean", names(DE)))]
-  scnt <- names(DE)[which(grepl("baseScaled", names(DE)))]
+  p <- names(DE)[which(grepl("^padj", names(DE)))]
+  pv <- names(DE)[which(grepl('^pvalue', names(DE)))]
+  mlp <- names(DE)[which(grepl("^mlog10p", names(DE)))]
+  cnt <- names(DE)[which(grepl("^baseMean", names(DE)))]
+  scnt <- names(DE)[which(grepl("^baseScaled", names(DE)))]
 } else {
   stop("Unable to intepret contents from filename.")
 }
@@ -142,13 +142,13 @@ for (X in p) {
 }
 
 # FC direction
-for (X in lfc) {
-  # X <- lfc[1]
-  newcol <- sub("log2FoldChange", "Deregulation", X)
-  padj <- sub("log2FoldChange", "global_padj", X)
+for (X in fc) {
+  # X <- fc[1]
+  newcol <- sub("FC", "Deregulation", X)
+  padj <- sub("FC", "global_padj", X)
   set(DE, i=NULL, j=newcol, value="neutral")
-  set(DE, i=which(DE[[X]] > 0 & DE[[padj]] < opt$pCutoff), j=newcol, value="UP")
-  set(DE, i=which(DE[[X]] < 0 & DE[[padj]] < opt$pCutoff), j=newcol, value="DOWN")
+  set(DE, i=which(DE[[X]] > 1 & DE[[padj]] < opt$pCutoff), j=newcol, value="UP")
+  set(DE, i=which(DE[[X]] < 1 & DE[[padj]] < opt$pCutoff), j=newcol, value="DOWN")
 }
 
 # Count threshold cap
@@ -156,8 +156,8 @@ for (X in cnt) {
   # X <- cnt[1]
   newcol <- sub('maxCount|baseMean', 'count_thresh', X)
   set(DE, i=NULL, j=newcol, value=DE[[X]])
-  set(DE, i=which(DE[[X]] > opt$countThresh), j=newcol, value=opt$countThresh) # Set upper cap
-  set(DE, i=NULL, j=newcol, value=floor(DE[[X]]) )                             # Decimal precision is not useful for this
+  set(DE, i=which(DE[[X]] > opt$countThresh), j=newcol, value=opt$countThresh) # Set upper cap to the filter range.
+  set(DE, i=NULL, j=newcol, value=floor(DE[[newcol]]) )                        # Decimals may distract. Should already be integers anyway, unless scaled or estimated.
   if (grepl('maxCount', X))
     set(DE, j=X, value=NULL)
 }
@@ -167,29 +167,36 @@ for (X in scnt) {
   # X <- scnt[1]
   newcol <- sub('maxScaledCount|baseScaled', 'scaledCount_thresh', X)
   set(DE, i=NULL, j=newcol, value=DE[[X]])
-  set(DE, i=which(DE[[X]] > opt$tpmThresh), j=X, value=opt$tpmThresh) # Set upper cap
-  set(DE, i=NULL, j=X, value=round(DE[[X]], 1) )                      # One decimal should be enough. Integers may be already too big for deep libraries.
+  set(DE, i=which(DE[[X]] > opt$tpmThresh), j=newcol, value=opt$tpmThresh) # Set upper cap to the filter range.
+  set(DE, i=NULL, j=newcol, value=round(DE[[newcol]], 1) )            # One decimal should be enough. Integers may be already too big for deep libraries.
+  if (grepl('maxScaledCount', X))
+    set(DE, j=X, value=NULL)
 }
 
-## Spotfire does no recognise Inf values. So replace with suitable finite values.
-# This affects -log(p) because DESeq2 can assign 0 to p.
+## Spotfire does not recognise Inf values. So replace with suitable finite values.
+
 for (X in mlp) {
   # X <- mlp[1]
   set(DE, i=which(is.infinite(DE[[X]])), j=X, value=max(60, max( DE[[X]][is.finite(DE[[X]])] )) )
 }
-for (X in fc) {
-  # X <- fc[1]
-  if (grepl('_vs_', opt$de)) {
+for (i in 1:length(fc)) {
+  # i <- 1
+  X <- fc[i]
+  set(DE, i=which(is.infinite(DE[[X]]) & DE[[X]] > 1), j=X, value=max(100, max( DE[[X]][is.finite(DE[[X]])] )) )
+  set(DE, i=which(DE[[X]] == 0), j=X, value=min(0.01, min( DE[[X]][DE[[X]] > 0] )) )
+  
+  if (!is.null(lfc)) {
+    X <- lfc[i]
     set(DE, i=which(is.infinite(DE[[X]]) & DE[[X]] > 0), j=X, value=max(10, max( DE[[X]][is.finite(DE[[X]])] )) )
-    set(DE, i=which(is.infinite(DE[[X]]) & DE[[X]] < 0), j=X, value=min(10, min( DE[[X]][is.finite(DE[[X]])] )) )
-  } else {
-    set(DE, i=which(is.infinite(DE[[X]]) & DE[[X]] > 1), j=X, value=max(1000, max( DE[[X]][is.finite(DE[[X]])] )) )
-    set(DE, i=which(DE[[X]] == 0), j=X, value=min(0.001, min( DE[[X]][DE[[X]] > 0] )) )
+    set(DE, i=which(is.infinite(DE[[X]]) & DE[[X]] < 0), j=X, value=min(-10, min( DE[[X]][is.finite(DE[[X]])] )) )
+  } 
+  
+  if (!is.null(lfcs)) {
+    X <- lfcs[i]
+    set(DE, i=which(is.infinite(DE[[X]]) & DE[[X]] > 0), j=X, value=max(10, max( DE[[X]][is.finite(DE[[X]])] )) )
+    set(DE, i=which(is.infinite(DE[[X]]) & DE[[X]] < 0), j=X, value=min(-10, min( DE[[X]][is.finite(DE[[X]])] )) )
   }
 }
-
-
-# Inf fold-change is already handled by DESeq2 by default, by extrapolating a more likely FC from a fitted model and by explicitly capping the FC.
 
 
 # Simplify column names
