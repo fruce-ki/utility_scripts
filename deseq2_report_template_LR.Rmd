@@ -55,15 +55,15 @@ theme_set(theme_bw())
 data.table::setDTthreads(1L)
 
 options(scipen=2)
+```
 
+```{r preprocess}
 if (!is.null(params$reducedFormula)){
   if (params$reducedFormula == 'NULL') {
     params$reducedFormula <- NULL
   }
 }
-```
 
-```{r preprocess}
 # DESeq2 object set up with he relevant materials for this comparison formula
 #deobj <- params$dds
 
@@ -767,14 +767,14 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
   
   if (is.null(dim(selcnt))) {
     # if there is only one hit
-    selvst <- as.data.frame( c(as.list(selvst[c(refs, treats)]), list(name=subfc$name)) )
+    selvst <- as.data.table( c(list(name=subfc$name), as.list(selvst[c(refs, treats)])) )
     selvst$type <- ifelse(rlog, "rlog_count", "VST_count")
-    selcnt <- as.data.frame( c(as.list(selcnt[c(refs, treats)]), list(name=subfc$name)) )
+    selcnt <- as.data.table( c(list(name=subfc$name), as.list(selcnt[c(refs, treats)])) )
     selcnt$type <- PMtype
     # selcnt <- rbind(selcnt, selvst)
-    selcnt <- melt(selcnt, id.vars="name", variable.name="sample", value.name=PMtype)
-    selvst <- melt(selvst, id.vars="name", variable.name="sample", value.name=ifelse(rlog, "rlog_count", "VST_count"))
-    # rn <- subfc$name
+    selcnt <- melt(selcnt, id.vars=c('name', 'type'), variable.name="sample", value.name=PMtype)
+    selvst <- melt(selvst, id.vars=c('name', 'type'), variable.name="sample", value.name=ifelse(rlog, "rlog_count", "VST_count"))
+    rn <- subfc$name
   } else {
     selcnt <- selcnt[, c(refs, treats)]
     selvst <- selvst[, c(refs, treats)]
@@ -894,10 +894,10 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
   hashits <- any(outtab[, meetthresh], na.rm=TRUE)
   setnames(outtab, sub('TPM|RPM', PMtype, names(outtab)))
   
-  # Drop columns I don't need
+  # Drop columns I don't need,
   keep <- c("name", "baseMean", "FC", "pvalue", "padj",
               names(outtab)[grepl("refMean", names(outtab))], names(outtab)[grepl("treatMean", names(outtab))], # avoid explicitly handling TPM vs RPM
-              "log2FoldChange", "mlog10p", "log2FoldChange.shrink", "maxCount", "maxScaledCount")
+             "log2FoldChange", "log2FoldChange.shrink",  "mlog10p", "maxCount", "maxScaledCount")     # convenience fields for plotting or filtering
   outtab <- outtab[, keep, with=FALSE]
   
   virgin <- NULL
