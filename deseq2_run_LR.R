@@ -37,7 +37,7 @@ spec = matrix(c(
 ), byrow=TRUE, ncol=5)
 
 opt = getopt(spec)
-# opt <- list(createID=FALSE, baseDir='/Volumes/groups/busslinger/Kimon/sarah/R13546_RNAseq', countsFile='process/featureCounts/intron_genecounts.txt', resultsDir='results/DE_time', samplesFile='description/covars_de.txt', minMean=0, minSingle=0, lfcthreshold=1, nidcols=6, idcol=1, ntop=50, bmF=FALSE, pcutoff=0.05, prescaled=FALSE, prefix='intron_genecounts', label=FALSE, widthsCol=6, reportTemplate="/Volumes/groups/busslinger/Kimon/tanja/R13870_RNAseq_timecourse/code/deseq2_report_template_time.Rmd", comparisons="cell-2v1,cell-3v2,cell-4v3", contexts="type-1,type-1,type-1", fullFormula="~cell", reducedFormula="~ 1")
+# opt <- list(createID=FALSE, baseDir='/Volumes/groups/busslinger/Kimon/sarah/R13546_RNAseq', countsFile='process/featureCounts/exon_genecounts.txt', resultsDir='results/DE', samplesFile='description/covars_de.txt', minCount=100, minTPM=5, lfcthreshold=1, nidcols=6, idcol=1, ntop=100, bmF=FALSE, pcutoff=0.05, prescaled=FALSE, prefix='exon_genecounts', label=FALSE, widthsCol=6, reportTemplate="/Volumes/groups/busslinger/Kimon/sarah/R13546_RNAseq/code/deseq2_report_template_LR.Rmd", comparisons="type_cell-2v1,type_cell-4v3,type_cell-6v5,type_cell-7v8,type_cell-2v1,type_cell-4v3,type_cell-6v5,type_cell-7v8,type_cell-2v1,type_cell-4v3,type_cell-6v5,type_cell-7v8", contexts="tf-1,tf-1,tf-1,tf-1,tf-2,tf-2,tf-2,tf-2,tf-3,tf-3,tf-3,tf-3", fullFormula="~type_cell", reducedFormula="NULL")
 
 
 if ( !is.null(opt$help) ) {
@@ -201,10 +201,12 @@ for(y in unique(contexts)) {
   
   #######################
   #######################
+  
   subcomps <- NULL
   if (!is.null(opt$comparisons)) {
     subcomps <- lapply(1:length(condvars), function(i){ c(condvars[i], treatlevs[i], reflevs[i]) })
   }
+  
   # Fire up an Rmd report
   rmarkdown::render(opt$reportTemplate,
                     output_file = name,
