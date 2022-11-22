@@ -62,7 +62,6 @@ if (grepl('_vs_|all', opt$de)) {
   lfcs <- names(DE)[which(grepl("^log2FoldChange.shrink", names(DE)))]
   p <- names(DE)[which(grepl("^padj", names(DE)))]
   pv <- names(DE)[which(grepl('^pvalue', names(DE)))]
-  mlp <- names(DE)[which(grepl("^mlog10p", names(DE)))]
   cnt <- names(DE)[which(grepl("^maxCount", names(DE)))]
   scnt <- names(DE)[which(grepl("^maxScaledCount", names(DE)))]
 } else if (grepl('\\.LRT_', opt$de)) {
@@ -72,7 +71,6 @@ if (grepl('_vs_|all', opt$de)) {
   lfcs <- NULL
   p <- names(DE)[which(grepl("^padj", names(DE)))]
   pv <- names(DE)[which(grepl('^pvalue', names(DE)))]
-  mlp <- names(DE)[which(grepl("^mlog10p", names(DE)))]
   cnt <- names(DE)[which(grepl("^baseMean", names(DE)))]
   scnt <- names(DE)[which(grepl("^baseScaled", names(DE)))]
 } else {
@@ -130,8 +128,8 @@ P <- dcast(P, name ~ headline, value.var='gpadj')
 DE <- merge(DE, P, by='name', all.x=TRUE)
 
 # Global significance, cutoff
-p <- names(DE)[which(grepl("global_padj", names(DE)))]
-for (X in p) {
+gp <- names(DE)[which(grepl("global_padj", names(DE)))]
+for (X in gp) {
   # X <- p[1]
   newcol <- sub("padj", "p_cutoff", X)
   set(DE, i=NULL, j=newcol, value="non-sig.")     # default value
@@ -139,6 +137,13 @@ for (X in p) {
   steps <- steps[order(steps, decreasing=TRUE)]     # high to low, order is important
   for (Y in steps)                                  # overwrite
     set(DE, i=which(abs(DE[[X]]) < Y), j=newcol, value=paste("<", Y))
+}
+
+# Precalculate -log10(global padj)
+for (X in gp) {
+  # X <- gp[1]
+  newcol <- sub("global_padj", "mlog10gp", X)
+  set(DE, i=NULL, j=newcol, value=-log10(DE[[X]]))
 }
 
 # FC direction
@@ -174,7 +179,7 @@ for (X in scnt) {
 }
 
 ## Spotfire does not recognise Inf values. So replace with suitable finite values.
-
+mlp <- names(DE)[which(grepl("^mlog10g?p", names(DE)))]
 for (X in mlp) {
   # X <- mlp[1]
   set(DE, i=which(is.infinite(DE[[X]])), j=X, value=max(60, max( DE[[X]][is.finite(DE[[X]])] )) )
