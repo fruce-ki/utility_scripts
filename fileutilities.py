@@ -404,13 +404,11 @@ def count_columns(flist=[None], colSep=["\t"]):
             file = "<STDIN>"
         else:
             f = open(file)
-        while True:
-            line = f.readline()
+        line = f.readline()
+        while len(line.rstrip()) > 0 and (line[0] == "#" or line == "\n"):
             # Skip comments.
-            if line[0] != "#":
-                counts.append(len( tokenizer.split(line.rstrip()) ))
-                break
-            f.readline
+          	line = f.readline
+        counts.append(len( tokenizer.split(line.rstrip()) ))
         if f != sys.stdin:
             f.close()
     return counts
@@ -636,7 +634,7 @@ def get_columns_manual(file=None, cols=[0], colSep=["\t"], header=False, index=N
     df = prepare_df(df, myalias=alias, keyCol=index, header=header, cols=expandedcols,
                     keyhead=keyhead, appendNum=True if len(expandedcols)>1 else False)
     if alias+"_|my_garbage_label_row_key" in df.columns:
-            df.drop(alias+"_|my_garbage_label_row_key", 1, inplace=True)
+            df.drop(labels=alias+"_|my_garbage_label_row_key", axis=1, inplace=True)
     return df
 
 
@@ -741,6 +739,9 @@ def append_columns(flist, colSep=["\t"], header=False, index=None, merge=True, t
     keyhead = None
     for f, (myfile, myalias) in flist.enum():
         # List the columns and remove the index one from among them.
+        if numofcols[f] == 0:
+            ml.warnstring("Skipped " + myfile + " because no columns were detected.")
+            next
         cols = None
         if index:
             cols = [i for i in range(0, numofcols[f]) if i != index[min(f, len(index) - 1)]]
