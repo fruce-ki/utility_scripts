@@ -37,7 +37,7 @@ spec = matrix(c(
 ), byrow=TRUE, ncol=5)
 
 opt = getopt(spec)
-# opt <- list(createID=FALSE, baseDir='/Volumes/groups/busslinger/Kimon/sarah/R13546_RNAseq', countsFile='process/featureCounts/exon_genecounts.txt', resultsDir='results/DE', samplesFile='description/covars_de.txt', minCount=100, minTPM=5, lfcthreshold=1, nidcols=6, idcol=1, ntop=100, bmF=FALSE, pcutoff=0.05, prescaled=FALSE, prefix='exon_genecounts', label=FALSE, widthsCol=6, reportTemplate="/Volumes/groups/busslinger/Kimon/sarah/R13546_RNAseq/code/deseq2_report_template_LR.Rmd", comparisons="type_cell-2v1,type_cell-4v3,type_cell-6v5,type_cell-7v8,type_cell-2v1,type_cell-4v3,type_cell-6v5,type_cell-7v8,type_cell-2v1,type_cell-4v3,type_cell-6v5,type_cell-7v8", contexts="tf-1,tf-1,tf-1,tf-1,tf-2,tf-2,tf-2,tf-2,tf-3,tf-3,tf-3,tf-3", fullFormula="~type_cell", reducedFormula="NULL")
+# opt <- list(createID=FALSE, baseDir='/scratch-cbe/users/kimon.froussios/tanja/R14425_RNAseq', countsFile='process/featureCounts_fixed/exon_spliced_genecounts.txt', resultsDir='results/DE', samplesFile='description/covars.txt', minCount=0, minTPM=0, lfcthreshold=1, nidcols=6, idcol=1, ntop=50, bmF=FALSE, pcutoff=0.05, prescaled=FALSE, prefix='exon_spliced_genecounts', label=FALSE, widthsCol=6, reportTemplate="/groups/busslinger/Kimon/tanja/R14425_RNAseq/code/deseq2_report_template_LR.Rmd", comparisons="TF_type-1v2,TF_type-3v4,TF_type-3v4,TF_type-3v4,TF_type-3v4,TF_type-3v4,TF_type-5v6", contexts="Cell-1,Cell-1,Cell-2,Cell-3,Cell-4,Cell-5,Cell-5", fullFormula="~TF_type", reducedFormula="NULL", specnorm='^ENSMUSG|^TCR|^IGHG|^IGHM|^IGH[^GM]')
 
 
 if ( !is.null(opt$help) ) {
@@ -78,10 +78,10 @@ dir.create(file.path(opt$baseDir, opt$resultsDir, opt$prefix), recursive=TRUE)
 covars <- read.csv(file.path(opt$baseDir, opt$samplesFile), sep="\t", row.names="Sample", header=TRUE, check.names = FALSE, colClasses="character")
 
 # Contrasts
-contexts <- strsplit(opt$contexts, ',')[[1]]
+contexts <- strsplit(gsub(' ', '', opt$contexts), ',')[[1]]
 contexts <- strsplit(contexts , '-')
 if (!is.null(opt$comparisons)) {
-  comparisons <- strsplit(opt$comparisons, ',')[[1]]
+  comparisons <- strsplit(gsub(' ', '', opt$comparisons), ',')[[1]]
   
   stopifnot(length(contexts) == length(comparisons))
   
@@ -94,8 +94,13 @@ if (!is.null(opt$comparisons)) {
 
 # Counts
 cts <- fread(file.path(opt$baseDir, opt$countsFile), sep="\t", header=TRUE, check.names = FALSE, colClasses="character")
-# Setting all columns to character prevents numeric IDs at the top of the ID columns from auto-defining these columns as numeric when there could be character IDs further down that would otherwise become NaN.
+    # Setting all columns to character prevents numeric IDs at the top of the ID columns from auto-defining these columns as numeric when there could be character IDs further down that would otherwise become NaN.
 cts <- unique(cts)         # non-summarized featureCounts have repeated exons from sharing among transcripts.
+# Remove disruptive features (such as immunoglobins in plasmablasts).
+ogn <- nrow(cts)
+if (!is.null(opt$specnorm))
+  cts <- cts[!grepl(opt$specnorm, Geneid), ]
+deltan <- ogn - nrow(cts)
 xref <- cts[, 1:opt$nidcols]
 cts <- as.matrix(cts[, rownames(covars), with=FALSE])    # Order and subset columns
 cts <- matrix(as.numeric(cts), ncol=ncol(cts))
@@ -133,7 +138,7 @@ stopifnot(all(rownames(cts) == featLens[[1]]))
 #######################
 ###  Split up data as instructed
 for(y in unique(contexts)) {
-  # y <- unique(contexts)[[1]]
+  # y <- unique(contexts)[[3]]
   
   contvar <- y[1]
   contlev <- unique(covars[[contvar]])[as.integer(y[2])]
@@ -228,6 +233,7 @@ for(y in unique(contexts)) {
                                 covars=covars,
                                 widths = featLens,
                                 specnorm=opt$specnorm,
+                                deltaN=deltan,
                                 rlog=!opt$vst,
                                 comparisons=subcomps,
                                 althyp=opt$altHypo,
