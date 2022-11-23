@@ -1,10 +1,9 @@
- ### snakemake --local-cores 1 --jobs 50 --use-envmodules --latency-wait 30 --restart-times 10 --cluster "sbatch -c {threads} --time={resources.maxtime} --mem={resources.mem} -e ./logdump/slurm-%j.err -o ./logdump/slurm-%j.out" 
+### snakemake --local-cores 1 --jobs 50 --use-envmodules --latency-wait 30 --restart-times 10 --cluster "sbatch -c {threads} --time={resources.maxtime} --mem={resources.mem} -e ./logdump/slurm-%j.err -o ./logdump/slurm-%j.out" 
 
 configfile: "snake_config.yaml"
-localrules: all, update_alignments_table, extract_relevant_alignment_info, stage_in, multiqc_pre, fix_names_and_stage_out_featureCounts, setup_DE, stage_out_DE_reports, stage_out_DE_table#, kallisto_rehead, kallisto_stage_out
+localrules: all, directories, update_alignments_table, extract_relevant_alignment_info, stage_in, multiqc_pre, fix_names_and_stage_out_featureCounts, setup_DE, stage_out_DE, kallisto_rehead, kallisto_stage_out
 
-import os
-import re
+import os, sys, re
 import pandas as pd
 import subprocess as sp
 from itertools import compress
@@ -37,34 +36,41 @@ THREADS=8
 
 ## Parse sample IDs and names from description file
 samples_raw = None
+dates_raw = None
 samples_temp = {}
+dates_temp = {}
 with open(config["sampleinfo"], 'r') as fin:
 	next(fin) # skip heqader line
 	# Get sample identifiers as tuples.
 	samples_raw = [ (x[config["idcols"]["id"]].rstrip("\n"), \
 	                 x[config["idcols"]["name"]].rstrip("\n")) \
 	               for x in [line.split("\t") for line in fin] ]
+with open(config["sampleinfo"], 'r') as fin:
+	next(fin) # skip heqader line
+	dates_raw = [ (x[config["idcols"]["id"]].rstrip("\n"), \
+	                 x[config["idcols"]["aligndate"]].rstrip("\n")) \
+	               for x in [line.split("\t") for line in fin] ]
 # Convert tuples to dictionary.
 def Convert(tup, di):
     di = dict(tup)
     return di
 samples = Convert(samples_raw, samples_temp)
+dates = Convert(dates_raw, dates_temp)
 
 
-# Create file names based on assigned name and original sample ID.
+# Create file names based on assgned name and original sample ID.
 uscore = config["idjoin"]
 COMBONAME = [uscore.join([samples[x], x]) for x in samples.keys()]
 
-FLAVOURS = ["exon_genecounts", "intron_genecounts", "exon_spliced_genecounts"]
-#, "exonL1_genecounts", "intronF1_genecounts", "exonL2_genecounts", "intronF2_genecounts", "exonL2_spliced_genecounts"]
+FLAVOURS = ["exon_genecounts", "intron_genecounts", "spliced_genecounts"]
 
 
 ## Parse contrasts and covariates, to work out what output file names to expect.
-contexts = config['DE']['contexts'].split(',')
+contexts = re.sub(' |\t', '', config['DE']['contexts']).split(',')
 context_names = [x.split('-')[0] for x in contexts]
 context_levs = [int(x.split('-')[1]) for x in contexts]
 contexts = [x for x in zip(context_names, context_levs)]
-comparisons = config['DE']['comparisons'].split(',')
+comparisons = re.sub(' |\t', '', config['DE']['comparisons']).split(',')
 comparison_names = [x.split('-')[0] for x in comparisons]
 comparison_vs = [x.split('-')[1] for x in comparisons]
 comparison_treat = [int(x.split('v')[0]) for x in comparison_vs]
@@ -89,10 +95,8 @@ if config["do_DE"]:
 		input:
 			HOME + "/process/multiqc_pre/multiqc_report.html",
 			HOME + "/process/duprates/duprates.txt",
-			HOME + "/process/duprates/duprates.melted.txt",
 			expand(HOME + "/process/featureCounts/{countsfile}.txt", countsfile=FLAVOURS),
 			expand(HOME + "/results/PCA/{countsfile}.default.pca.html", countsfile=FLAVOURS),
-			expand(HOME + "/results/DE/{countsfile}.{dename}.deseq2.html", countsfile=FLAVOURS, dename=EXPECTED_DE),
 			expand(HOME + "/results/DE/{countsfile}.{dename}.deseq2.nolab.spotfire.txt", countsfile=FLAVOURS, dename=EXPECTED_DE)
 		# params:
 		# 	scratch=SCRATCH
@@ -105,7 +109,6 @@ else:
 		input:
 			HOME + "/process/multiqc_pre/multiqc_report.html",
 			HOME + "/process/duprates/duprates.txt",
-			HOME + "/process/duprates/duprates.melted.txt",
 			expand(HOME + "/process/featureCounts/{countsfile}.txt", countsfile=FLAVOURS),
 			expand(HOME + "/results/PCA/{countsfile}.default.pca.html", countsfile=FLAVOURS)
 		params:
@@ -117,31 +120,50 @@ else:
 
 
 
+# Set up directories
+rule directories:
+	output:
+		"dirsdone"
+	shell:
+		"""
+		mkdir -p aux data logdump process results
+		touch dirsdone
+		"""
+
 # Obtain data from VBCF
 
 rule update_alignments_table:
+	input:
+		"dirsdone"
 	output:
 		HOME + "/aux/all_alignments_table.txt"
 	params:
-		url=config["vbcf_alignments_table_url"]
+		url=config["vbcf_alignments_table_url"],
+		un=config["un"],
+		pw=config["pw"]
 	shell:
-		"/usr/bin/wget -c --no-check-certificate --auth-no-challenge --user $(cat $HOME/vbcf_username.txt) --password $(cat $HOME/vbcf_password.txt) -O {output} {params.url}"
+		"""
+		/usr/bin/wget -c --no-check-certificate --auth-no-challenge --user $(cat {params.un}) --password $(cat {params.pw}) -O {output} {params.url}
+		rm dirsdone
+		"""
 
 
 rule extract_relevant_alignment_info:
 	input:
-		rules.update_alignments_table.output
+		HOME + "/aux/all_alignments_table.txt"
 	output:
 		HOME + "/aux/sample_vbcf_metadata.txt"
 	run:
 		r = re.compile('|'.join(samples.keys()))
+		q = re.compile('|'.join(dates.values()))
 		with open(str(input), 'r') as fin:
 			with open(str(output), 'w') as fout:
 				for line in fin:
 					l = line.split("\t")
-					matched = r.match(l[11])  # 11 sample id, 50 paired, 52 bam path, 54 bam url. 
-					special_matched = r.match(l[0])  # On some problematic samples, id is in column 0 instead.
-					if matched or special_matched or l[0] == "flowcellId":
+					matched = r.match(l[11])  # 11 sample id, 47 date, 50 paired, 52 bam path, 54 bam url. 
+					special_matched = r.match(l[0])  # Lazy data management means sample IDs end up in column 0 instead, with a lot of metadata left undefined.
+					dated = q.match(l[47])
+					if ((matched or special_matched) and dated) or l[0] == "flowcellId":
 						fout.write(line)
 
 
@@ -151,14 +173,16 @@ rule fetch_alignments:
 	output:
 		HOME + "/data/{comboname}.aligned.bam"
 	params:
-		sep=uscore
+		sep=uscore,
+		un=config["un"],
+		pw=config["pw"]
 	threads: 1
 	resources:
 		maxtime=10,
 		mem='1G'
 	shell:
 		"""
-		/usr/bin/wget -c --no-check-certificate --auth-no-challenge --user $(cat $HOME/vbcf_username.txt) --password $(cat $HOME/vbcf_password.txt) -O {output} $(grep $(perl -e '$a="{output}";$a=~s/.*?{params.sep}(\d+)\.aligned\.bam/$1/;print $a') {input} | cut -f 55)
+		/usr/bin/wget -c --no-check-certificate --auth-no-challenge --user $(cat {params.un}) --password $(cat {params.pw}) -O {output} $(grep $(perl -e '$a="{output}";$a=~s/.*?{params.sep}(\d+)\.aligned\.bam/$1/;print $a') {input} | cut -f 55)
 		"""
 ##
 
@@ -198,21 +222,22 @@ if pairedend:
 			"samtools view -h -G 1024 {input} | sed 's/chrMT/chrM/g' | samtools view -Sb - > {output}"
 
 
-	rule split_pair_bam:     # for Kallisto
-		input:
-			SCRATCH + "/data/{comboname}.aligned.bam"
-		output:
-			r1=SCRATCH + "/data_fastq/{comboname}.1.fastq",
-			r2=SCRATCH + "/data_fastq/{comboname}.2.fastq"
-		envmodules:
-			sysenv22,
-			samt
-		threads: THREADS - 1
-		resources:
-			maxtime=5,
-			mem='4G'
-		shell:
-			"samtools collate -@ $(({threads} - 1)) -O -u {input} | samtools fastq -s /dev/null -0 /dev/null -1 {output.r1} -2 {output.r2} -n"
+	if config.get("kallisto_index", None) is not None:   # Providing a genome index or not controls whether to also run Kallisto or not.
+		rule split_pair_bam:     # for Kallisto
+			input:
+				SCRATCH + "/data/{comboname}.aligned.bam"
+			output:
+				r1=SCRATCH + "/data_fastq/{comboname}.1.fastq",
+				r2=SCRATCH + "/data_fastq/{comboname}.2.fastq"
+			envmodules:
+				sysenv22,
+				samt
+			threads: THREADS - 1
+			resources:
+				maxtime=5,
+				mem='4G'
+			shell:
+				"samtools collate -@ $(({threads} - 1)) -O -u {input} | samtools fastq -s /dev/null -0 /dev/null -1 {output.r1} -2 {output.r2} -n"
 
 else:
 
@@ -232,20 +257,21 @@ else:
 			"samtools view -h {input} | sed 's/chrMT/chrM/g' | samtools view -Sb - > {output}"
 
 
-	rule split_pair_bam:     # for Kallisto
-		input:
-			SCRATCH + "/data/{comboname}.aligned.bam"
-		output:
-			SCRATCH + "/data_fastq/{comboname}.fastq"
-		envmodules:
-			sysenv22,
-			samt
-		threads: THREADS - 1
-		resources:
-			maxtime=5,
-			mem='4G'
-		shell:
-			"samtools collate -@ $(({threads} - 1)) -O -u {input} | samtools fastq -s /dev/null -0 /dev/null -o {output} -n"
+	if config.get("kallisto_index", None) is not None:   # Providing a genome index or not controls whether to also run Kallisto or not.
+		rule split_pair_bam:     # for Kallisto
+			input:
+				SCRATCH + "/data/{comboname}.aligned.bam"
+			output:
+				SCRATCH + "/data_fastq/{comboname}.fastq"
+			envmodules:
+				sysenv22,
+				samt
+			threads: THREADS - 1
+			resources:
+				maxtime=5,
+				mem='4G'
+			shell:
+				"samtools collate -@ $(({threads} - 1)) -O -u {input} | samtools fastq -s /dev/null -0 /dev/null -o {output} -n"
 ##
 
 
@@ -383,8 +409,7 @@ rule merge_dup:
 		table=expand(SCRATCH + "/duprate/{comboname}.duprate.txt", comboname=COMBONAME)
 	output:
 		pdf=HOME + "/process/duprates/duprates.pdf",
-		table=HOME + "/process/duprates/duprates.txt",
-		melt=HOME + "/process/duprates/duprates.melted.txt"
+		table=HOME + "/process/duprates/duprates.txt"
 	params:
 		code=config["codeDir"],
 		scratch=SCRATCH,
@@ -403,10 +428,10 @@ rule merge_dup:
 		mkdir -p {params.home}/process/duprates &&
 
 		pdfmerge() {{ gs -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 -dPDFSETTINGS=/default -dNOPAUSE -dQUIET -dBATCH -dDetectDuplicateImages -dCompressFonts=true -r150 -sOutputFile=$@ ; }}
-		pdfmerge {output.pdf} {input.pdf} &&
+		
+		pdfmerge {output.pdf} {input.pdf}
 
-		{params.code}/fileutilities.py T {params.scratch}/duprate/*duprate.txt -i -l --cols 10 12 | perl -pe '~s/_\|10//g;~s/\.duprate_\|12/.RPKb/g' > {output.table} &&
-		Rscript {params.code}/dup_melt.R {output.table}
+		{params.code}/fileutilities.py T {params.scratch}/duprate/*duprate.txt -i -l --cols 10 12 | perl -pe '~s/_\|10//g;~s/\.duprate_\|12/.RPKb/g' > {output.table}
 		"""
 ##
 
@@ -414,12 +439,6 @@ rule merge_dup:
 
 
 ## Quantify
-
-stranding = ''    # Kallisto stranding flags
-if config["stranding"] == 1:
-	stranding = "--fr-stranded "
-elif config["stranding"] == 2:
-	stranding = "--rf-stranded "
 
 
 if pairedend:
@@ -476,7 +495,7 @@ if pairedend:
 			input:
 				expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
 			output:
-				SCRATCH + "/featureCounts/exon_spliced_genecounts.txt"
+				SCRATCH + "/featureCounts/spliced_genecounts.txt"
 			params:
 				stranding=config["stranding"],
 				ann=config["annotation"]["exons"]
@@ -492,25 +511,26 @@ if pairedend:
 				"featureCounts -T {threads} -t exon --splitOnly -O --fraction -p --countReadPairs -B -C -a {params.ann} -o {output} -s {params.stranding} {input}"
 
 
-	#rule kallisto_pairedend:
-	#	input:
-	#		r1=SCRATCH + "/data_fastq/{comboname}.1.fastq",
-	#		r2=SCRATCH + "/data_fastq/{comboname}.2.fastq"
-	#	output:
-	#		txt=SCRATCH + "/kallisto/{comboname}/abundance.tsv",
-	#		boot=SCRATCH + "/kallisto/{comboname}/abundance.h5"
-	#	params:
-	#		idx=config["kallisto_index"]
-	#	envmodules:
-	#		sysenv22,
-	#		kal
-	#	group: "kallisto"
-	#	threads: THREADS
-	#	resources:
-	#		maxtime=120,
-	#		mem="48G"
-	#	shell:
-	#		"kallisto quant -t {threads} -i {params.idx} -o $(dirname {output.txt}) --bias -b 100 " + stranding + "{input.r1} {input.r2}"
+	if config.get("kallisto_index", None) is not None:   # Providing a genome index or not controls whether to also run Kallisto or not.
+		rule kallisto_pairedend:
+			input:
+				r1=SCRATCH + "/data_fastq/{comboname}.1.fastq",
+				r2=SCRATCH + "/data_fastq/{comboname}.2.fastq"
+			output:
+				txt=SCRATCH + "/kallisto/{comboname}/abundance.tsv",
+				boot=SCRATCH + "/kallisto/{comboname}/abundance.h5"
+			params:
+				idx=config["kallisto_index"]
+			envmodules:
+				sysenv22,
+				kal
+			group: "kallisto"
+			threads: THREADS
+			resources:
+				maxtime=120,
+				mem="48G"
+			shell:
+				"kallisto quant -t {threads} -i {params.idx} -o $(dirname {output.txt}) --bias -b 100 --rf-stranded {input.r1} {input.r2}"
 
 else:
 
@@ -564,7 +584,7 @@ else:
 			input:
 				expand(SCRATCH + "/data_fixed/{comboname}.aligned.bam", comboname=COMBONAME)
 			output:
-				SCRATCH + "/featureCounts/exon_spliced_genecounts.txt"
+				SCRATCH + "/featureCounts/spliced_genecounts.txt"
 			params:
 				stranding=config["stranding"],
 				ann=config["annotation"]["exons"]
@@ -580,28 +600,28 @@ else:
 				"featureCounts -T {threads} -t exon --splitOnly -O --fraction -a {params.ann} -o {output} -s {params.stranding} {input}"
 
 
-	#rule kallisto_singleend:
-	#		input:
-	#			SCRATCH + "/data_fastq/{comboname}.fastq"
-	#		output:
-	#			txt=SCRATCH + "/kallisto/{comboname}/abundance.tsv",
-	#			boot=SCRATCH + "/kallisto/{comboname}/abundance.h5"
-	#		params:
-	#			idx=config["kallisto_index"],
-	#			fragLen=config["fragLen"],
-	#			fragLenSD=config["fragLenSD"],
-	#			stranding=
-	#		envmodules:
-	#			sysenv21,
-	#			kal
-	#		group: "kallisto"
-	#		threads: THREADS
-	#		resources:
-	#			maxtime=120,
-	#			mem="48G"
-	#		shell:
-	#			"kallisto quant -t {threads} -i {params.idx} -o $(dirname {output.txt}) --bias -b 100 " + stranding + "--single -l {params.fragLen} -s {fragLenSD} {input}"
-#
+	if config.get("kallisto_index", None) is not None:   # Providing a genome index or not controls whether to also run Kallisto or not.
+		rule kallisto_singleend:
+				input:
+					SCRATCH + "/data_fastq/{comboname}.fastq"
+				output:
+					txt=SCRATCH + "/kallisto/{comboname}/abundance.tsv",
+					boot=SCRATCH + "/kallisto/{comboname}/abundance.h5"
+				params:
+					idx=config["kallisto_index"],
+					fragLen=config["fragLen"],
+					fragLenSD=config["fragLenSD"]
+				envmodules:
+					sysenv21,
+					kal
+				group: "kallisto"
+				threads: THREADS
+				resources:
+					maxtime=120,
+					mem="48G"
+				shell:
+					"kallisto quant -t {threads} -i {params.idx} -o $(dirname {output.txt}) --bias -b 100 --rf-stranded --single -l {params.fragLen} -s {fragLenSD} {input}"
+##
 
 
 rule fix_names_and_stage_out_featureCounts: # featureCounts uses full input paths as sample names, which would suck for everything downstream.
@@ -621,75 +641,78 @@ rule fix_names_and_stage_out_featureCounts: # featureCounts uses full input path
 		cp {output.tmp} {output.staged}  &&
 		cp {input}.summary {output.staged}.summary 
 		"""
+##
 
 
-#rule kallisto_rehead:
-#	input:
-#		SCRATCH + "/kallisto/{comboname}/abundance.tsv"
-#	output:
-#		SCRATCH + "/kallisto/{comboname}/reheaded.tsv"
-#	shell:
-#		"""
-#			head -n 1 {input} | perl -e 'foreach $a (<STDIN>){{$a=~s/tpm/$ARGV[0]/;$a=~s/est_counts/$ARGV[0]/;print $a}}' $(basename $(dirname {input})) > {output} &&
-#			tail -n +2 {input} >> {output}
-#		"""
+if config.get("kallisto_index", None) is not None:   # Providing a genome index or not controls whether to also run Kallisto or not.
+
+	rule kallisto_rehead:
+		input:
+			SCRATCH + "/kallisto/{comboname}/abundance.tsv"
+		output:
+			SCRATCH + "/kallisto/{comboname}/reheaded.tsv"
+		shell:
+			"""
+				head -n 1 {input} | perl -e 'foreach $a (<STDIN>){{$a=~s/tpm/$ARGV[0]/;$a=~s/est_counts/$ARGV[0]/;print $a}}' $(basename $(dirname {input})) > {output} &&
+				tail -n +2 {input} >> {output}
+			"""
 
 
-#rule kallisto_collate_separate:
-#	input:
-#		expand(SCRATCH + "/kallisto/{comboname}/reheaded.tsv", comboname=COMBONAME)
-#	output:
-#		counts=SCRATCH + "/process/kallisto/est_counts.txt",
-#		tpms=SCRATCH + "/process/kallisto/tpm.txt",
-#		counts_intron=SCRATCH + "/process/kallisto/est_counts.only_premRNA.txt",
-#		tpms_intron=SCRATCH + "/process/kallisto/tpm.only_premRNA.txt",
-#		counts_exon=SCRATCH + "/process/kallisto/est_counts.only_tx.txt",
-#		tpms_exon=SCRATCH + "/process/kallisto/tpm.only_tx.txt"
-#	envmodules:
-#		sysenv22,
-#		py,
-#		scipy
-#	resources:
-#		maxtime=5,
-#		mem="4G"
-#	shell:
-#		"""
-#		code/fileutilities.py T {input} -r -i --cols 3 > {output.counts} &&
-#		code/fileutilities.py T {input} -r -i --cols 4 > {output.tpms} &&
+	rule kallisto_collate_separate:
+		input:
+			expand(SCRATCH + "/kallisto/{comboname}/reheaded.tsv", comboname=COMBONAME)
+		output:
+			counts=SCRATCH + "/process/kallisto/est_counts.txt",
+			tpms=SCRATCH + "/process/kallisto/tpm.txt",
+			counts_intron=SCRATCH + "/process/kallisto/est_counts.only_premRNA.txt",
+			tpms_intron=SCRATCH + "/process/kallisto/tpm.only_premRNA.txt",
+			counts_exon=SCRATCH + "/process/kallisto/est_counts.only_tx.txt",
+			tpms_exon=SCRATCH + "/process/kallisto/tpm.only_tx.txt"
+		envmodules:
+			sysenv22,
+			py,
+			scipy
+		resources:
+			maxtime=5,
+			mem="4G"
+		shell:
+			"""
+			code/fileutilities.py T {input} -r -i --cols 3 > {output.counts} &&
+			code/fileutilities.py T {input} -r -i --cols 4 > {output.tpms} &&
 
-#		head -n 1 {output.counts} > {output.counts_intron} &&
-#		grep _pre {output.counts} >> {output.counts_intron} &&
-#		head -n 1 {output.tpms} > {output.tpms_intron} &&
-#		grep _pre {output.tpms} >> {output.tpms_intron} &&
-		
-#		head -n 1 {output.counts} > {output.counts_exon} &&
-#		grep _no_pre {output.counts} | perl -ne 's/_no_pre[+-]//;print' >> {output.counts_exon} &&
-#		grep -E -v _pre {output.counts} >> {output.counts_exon} &&
-#		head -n 1 {output.tpms} > {output.tpms_exon} &&
-#		grep _no_pre {output.tpms} | perl -ne 's/_no_pre[+-]//;print' >> {output.tpms_exon} &&
-#		grep -E -v _pre {output.tpms} >> {output.tpms_exon}
-#		"""
+			head -n 1 {output.counts} > {output.counts_intron} &&
+			grep _pre {output.counts} >> {output.counts_intron} &&
+			head -n 1 {output.tpms} > {output.tpms_intron} &&
+			grep _pre {output.tpms} >> {output.tpms_intron} &&
+			
+			head -n 1 {output.counts} > {output.counts_exon} &&
+			grep _no_pre {output.counts} | perl -ne 's/_no_pre[+-]//;print' >> {output.counts_exon} &&
+			grep -E -v _pre {output.counts} >> {output.counts_exon} &&
+			head -n 1 {output.tpms} > {output.tpms_exon} &&
+			grep _no_pre {output.tpms} | perl -ne 's/_no_pre[+-]//;print' >> {output.tpms_exon} &&
+			grep -E -v _pre {output.tpms} >> {output.tpms_exon}
+			"""
 
 
-#rule kallisto_stage_out:
-#	input:
-#		SCRATCH + "/process/kallisto/est_counts.txt",
-#		SCRATCH + "/process/kallisto/tpm.txt",
-#		SCRATCH + "/process/kallisto/est_counts.only_premRNA.txt",
-#		SCRATCH + "/process/kallisto/tpm.only_premRNA.txt",
-#		SCRATCH + "/process/kallisto/est_counts.only_tx.txt",
-#		SCRATCH + "/process/kallisto/tpm.only_tx.txt"
-#	output:
-#		HOME + "/process/kallisto/est_counts.txt",
-#		HOME + "/process/kallisto/tpm.txt",
-#		HOME + "/process/kallisto/est_counts.only_premRNA.txt",
-#		HOME + "/process/kallisto/tpm.only_premRNA.txt",
-#		HOME + "/process/kallisto/est_counts.only_tx.txt",
-#		HOME + "/process/kallisto/tpm.only_tx.txt"
-#	params:
-#		destdir=HOME + "/process/kallisto/"
-#	shell:
-#		"cp {input} {params.destdir}"
+	rule kallisto_stage_out:
+		input:
+			SCRATCH + "/process/kallisto/est_counts.txt",
+			SCRATCH + "/process/kallisto/tpm.txt",
+			SCRATCH + "/process/kallisto/est_counts.only_premRNA.txt",
+			SCRATCH + "/process/kallisto/tpm.only_premRNA.txt",
+			SCRATCH + "/process/kallisto/est_counts.only_tx.txt",
+			SCRATCH + "/process/kallisto/tpm.only_tx.txt"
+		output:
+			HOME + "/process/kallisto/est_counts.txt",
+			HOME + "/process/kallisto/tpm.txt",
+			HOME + "/process/kallisto/est_counts.only_premRNA.txt",
+			HOME + "/process/kallisto/tpm.only_premRNA.txt",
+			HOME + "/process/kallisto/est_counts.only_tx.txt",
+			HOME + "/process/kallisto/tpm.only_tx.txt"
+		params:
+			destdir=HOME + "/process/kallisto/"
+		shell:
+			"cp {input} {params.destdir}"
 ##
 
 
@@ -754,12 +777,11 @@ if config["do_DE"]:
 	rule DE:
 		input:
 			counts=SCRATCH + "/process/featureCounts_fixed/{countsfile}.txt",
-			samples=os.path.join(SCRATCH, config["DE"]["covars"])       # trigger the rule to copy the file into working dir
+			samples=os.path.join(SCRATCH, config["DE"]["covars"])       # listed only to trigger the setup rule
 		output:
-			SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.html",
-			SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.pdf",
-			SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.tsv",
-			SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.nolab.tsv"
+			lab=expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.tsv", dename=EXPECTED_DE, allow_missing=True),  # missing means the rule is ran for every value of {countsfile}
+			nolab=expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.nolab.tsv", dename=EXPECTED_DE, allow_missing=True)
+			# One table per contrast, but contrasts may get grouped into fewer HTML reports
 		wildcard_constraints:
 			countsfile="[^.]+",
 			dename=".+_vs_.+"
@@ -769,13 +791,15 @@ if config["do_DE"]:
 			rlibs,
 			pdoc
 		params:
+			samples=config["DE"]["covars"],     # not taking it from {input} because I don't want the full path value, nor the basename only
 			scratch=SCRATCH,
-			samples=config["DE"]["covars"],     # because I don't want the full path as parameter and this is the easier way
-			minMean=config["DE"]["minMean"],
-			minSingle=config["DE"]["minSingle"],
+			form=config["DE"]["formula"],
+			reform=config['DE']['reduced'],
+			minCnt=config["DE"]["minCnt"],
+			minTPM=config["DE"]["minTPM"],
 			ntop=config["DE"]["ntop"],
-			comps=config["DE"]["comparisons"],
-			bgr=config["DE"]["contexts"],
+			comps=re.sub(' |\t', '', config['DE']["comparisons"]),
+			bgr=re.sub(' |\t', '', config['DE']['contexts']),
 			lfc=config["DE"]["lfc_thresh"],
 			pcut=config["DE"]["p_cut"],
 			code=config["codeDir"],
@@ -783,17 +807,17 @@ if config["do_DE"]:
 		group: "deseq"
 		threads: 1
 		resources:
-			maxtime=10,
+			maxtime=20,
 			mem='4G'
 		shell:
 			"""
-			Rscript {params.code}/deseq2_run_SF.R -b {params.scratch} -c {params.lfc} -f process/featureCounts_fixed/$(basename {input.counts}) -G {params.pattern} -i 1 -I 6 -l -M {params.minMean} -m {params.minSingle} -n {params.ntop} -o results/DE -p {params.pcut} -P $(basename {input.counts} .txt) -r process/DE -s {params.samples} -T {params.code}/deseq2_report_template_SF.Rmd -W 6 -x {params.comps} -X {params.bgr}
-#			"""
+			Rscript {params.code}/deseq2_run_LR.R -b {params.scratch} -c {params.lfc} -f process/featureCounts_fixed/$(basename {input.counts}) -F {params.form} -G {params.pattern} -i 1 -I 6 -l -m {params.minCnt} -M {params.minTPM} -n {params.ntop} -o results/DE -p {params.pcut} -P $(basename {input.counts} .txt) -r process/DE -R {params.reform} -s {params.samples} -T {params.code}/deseq2_report_template_LR.Rmd -W 6 -x {params.comps} -X {params.bgr}
+			"""
 
 
 	rule merge_DE_table:
 			input:
-				expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.tsv", dename=EXPECTED_DE, allow_missing=True)
+				expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.tsv", dename=EXPECTED_DE, allow_missing=True) # missing means the rule is ran for every value of {countsfile}
 			output:
 				SCRATCH + "/results/DE/{countsfile}/{countsfile}.all.deseq2.tsv"
 			wildcard_constraints:
@@ -850,29 +874,21 @@ if config["do_DE"]:
 			"""
 
 
-	rule stage_out_DE_table:
+	rule stage_out_DE:
 		input:
-			expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{denamenl}.spotfire.txt", countsfile=FLAVOURS, denamenl=["all.deseq2", *[x + ".deseq2.nolab" for x in EXPECTED_DE]])
+			spot=expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{denamenl}.spotfire.txt", countsfile=FLAVOURS, denamenl=["all.deseq2", *[x + ".deseq2.nolab" for x in EXPECTED_DE]]), # denamenl -> all the individual contrast tables and the merged table of them
+			vanilla=expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{denamenl}.tsv", countsfile=FLAVOURS, denamenl=["all.deseq2", *[x + ".deseq2.nolab" for x in EXPECTED_DE]])
 		output:
-			expand(HOME + "/results/DE/{countsfile}.{denamenl}.spotfire.txt", countsfile=FLAVOURS, denamenl=["all.deseq2", *[x + ".deseq2.nolab" for x in EXPECTED_DE]])
+			spot=expand(HOME + "/results/DE/{countsfile}.{denamenl}.spotfire.txt", countsfile=FLAVOURS, denamenl=["all.deseq2", *[x + ".deseq2.nolab" for x in EXPECTED_DE]]),
+			vanilla=expand(HOME + "/results/DE/{countsfile}.{denamenl}.tsv", countsfile=FLAVOURS, denamenl=["all.deseq2", *[x + ".deseq2.nolab" for x in EXPECTED_DE]])
 		params:
-			outdir=HOME + "/results/DE/"
+			outdir=HOME + "/results/DE/",
+			indir=SCRATCH + "/results/DE/"
 		shell:
 			"""
-			cp {input} {params.outdir}
-			"""
-
-
-	rule stage_out_DE_reports:
-		input: 
-			expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.html", countsfile=FLAVOURS, dename=EXPECTED_DE),
-		output:
-			expand(HOME + "/results/DE/{countsfile}.{dename}.deseq2.html", countsfile=FLAVOURS, dename=EXPECTED_DE),
-		params:
-			outdir=HOME + "/results/DE/"
-		shell:
-			"""
-			cp {input} {params.outdir}
+			cp {input.spot} {params.outdir}
+			cp {input.vanilla} {params.outdir}
+			cp {params.indir}/*/*.html {params.outdir} 
 			"""
 ##
 

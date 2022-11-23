@@ -1,60 +1,63 @@
-### snakemake --local-cores 1 --jobs 50 --use-envmodules --latency-wait 30 --restart-times 10 --cluster "sbatch -c {threads} --time={resources.maxtime} --mem={resources.mem}" 
+### snakemake --local-cores 1 --jobs 50 --use-envmodules --latency-wait 30 --restart-times 10 --cluster "sbatch -c {threads} --time={resources.maxtime} --mem={resources.mem} -e ./logdump/slurm-%j.err -o ./logdump/slurm-%j.out"
 
-projectHome: "/groups/busslinger/Kimon/tanja/R13065_RNAseq"      # UPDATE HERE!
-projectScratch: "/scratch-cbe/users/kimon.froussios/tanja/R13065_RNAseq"      # UPDATE HERE!
-codeDir: "/groups/busslinger/Kimon/tanja/R13065_RNAseq/code"      # UPDATE HERE! always make a fresh copy for a new project
+projectHome: "pro/ject"      # UPDATE HERE!
+projectScratch: "/scratch-cbe/pro/ject"      # UPDATE HERE!
+codeDir: "pro/ject/code"      # UPDATE HERE! I always make a fresh copy for a new project
 
-sampleinfo: "description/sample_info.txt"      # UPDATE HERE maybe?
-idcols:        # in sampleinfo above
-  id: 0              # UPDATE HERE maybe?
-  name: 9            # UPDATE HERE!
-idjoin: "__"
+sampleinfo: "description/sample_info.txt"      # Samples to fetch. UPDATE HERE?
+idcols:        # In sampleinfo above
+  id: 0              # Seqmate sample ID. 0-based.                                 UPDATE HERE maybe?
+  aligndate: 1       # Analysis date from seqmate, to desambiguate re-submissions. UPDATE HERE maybe?
+  name: 11           # Human-friendly sample names. 0-based                        UPDATE HERE!
+idjoin: "__"         # Sample & file name format in the pipeline: <name><idjoin><id>    UPDATE HERE maybe?
 
 vbcf_alignments_table_url: "https://seqmate-archive.vbc.ac.at/alignments/group/busslinger/text"
+un: "~/vbcf_username.txt"   #  Text file containing only Seqmate username.     UPDATE HERE maybe?
+pw: "~/vbcf_password.txt"   #  Text file containing only Seqmate password.     UPDATE HERE maybe?
 
-ucsc_session: "http://ucsc.vbc.ac.at/cgi-bin/hgTracks?hgS_doOtherUser=submit&hgS_otherUserName=kimon.froussios&hgS_otherUserSessionName=R13065_ribominusRNAseq"
+ucsc_session: "NULL"   # UPDATE HERE!
 
 annotation:      # UPDATE HERE maybe?
-  introns: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.gtf"
-  exons: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.gtf"
-  firstintron: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.firstIntron_lastExon.gtf"
-  lastexon: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.firstIntron_lastExon.gtf"
-  first2introns: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.firstIntrons_lastExons.gtf"
-  last2exons: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.firstIntrons_lastExons.gtf"
-  #premrna: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.all-premRNA_plus_multiExon-mRNA.gtf"
-#kallisto_index: "/groups/busslinger/Kimon/genome_mm10/kallisto/GRCm38.mm10.all-premRNA_plus_multiExon-mRNA"
-reference: "/groups/busslinger/Bioinf/data/genomes/mm10/assembly/GRCm38.mm10.fa"
+  introns: "special/annotation.gtf"
+  exons: "any/annotation.gtf"
+#  premrna: "special/all-premRNA_plus_multiExon-mRNA.gtf"
+#kallisto_index: "special/rna.flattenedExons_premRNA"
+reference: "any/genome.fa"
 
 PCA:
+  covars: "description/covars.txt"   # covariates table for highlighting in plots        UPDATE HERE maybe?
   minMean: 50                        # minimum mean count across samples
   minSingle: 100                     # minimum count in a single sample, IF the minimum mean is not met
   ntop: 15                           # top loading genes to report per principal component
-  covars: "description/covars.txt"   # covariates table for highlighting in plots        UPDATE HERE maybe?
-  #specialnorm: "'^ENSMUSG|^TCR|^IGH'"  # ignore gene ids that match this pattern for calculation of the library size for TPM/RPM normalisation      UPDATE HERE!
+  #loopgroup: "Cell"             # Also create analyses of subsets defined by this variable in covars.        UPDATE HERE!
+  loopgroup: 'NULL'
+  #specialnorm: "'^ENSMUSG|^TCR|^IGH'"  # exclude gene ids that match this pattern.      UPDATE HERE?
   specialnorm: 'NULL'
 
 do_DE: True     # ONLY use for a single simple DE formula applicable to all samples. More complex datasets/requirements should be handled outside the pipeline.
-DE:
-  formula: "~Condition"               # no spaces    UPDATE HERE!
-  references: "Ikzf1,Ctrl,no,Tanja"   # reference value for each covariate, in order     UPDATE HERE!
-  loopgroup: TF                       # the formula will be applied within each subset defined by this covariate        UPDATE HERE!
-  lfc_thresh: 1
-  p_cut: 0.05
-  minMean: 50                        # minimum mean count across samples
-  minSingle: 100                     # minimum count in a single sample, IF the minimum mean is not met
-  ntop: 50                           # top DE features to highlight
-  covars: "description/covars.txt"   # covariates table        UPDATE HERE maybe?
-  #specialnorm: "'^ENSMUSG|^TCR|^IGH'"  # ignore gene ids that match this pattern for calculation of the library size for TPM/RPM normalisation      UPDATE HERE!
+DE:  # indices are 1-based here
+  covars: "description/covars.txt"   # Covariates table. Contents will be used in filenames, so clean them up accordingly.        UPDATE HERE maybe?
+  formula: "~Condition"            # ~variable
+  comparisons: "Condition-1v2, Condition-3v4"    # variable-#v# (ie condition-2v1) where the numbers refer to values of the variable by order of appearance in covars.
+  contexts:    "Cell-1,      Cell-2"         # variable-# (ie Celltype-1) where the number refers to value of the variable by order of appearance in covars.
+  lfc_thresh: 1           # Minimum LFC, only for labelling purposes in the report.
+  p_cut: 0.05             # Significance level for deseq2 and for labelling in the report.
+  minCnt: 0               # Minimum read count, only for labelling purposes in the report.
+  minTPM: 0               # Minimum TPM, only for labelling purposes in the report.
+  ntop: 50                # Top DE features to label in the report.
+  #specialnorm: "'^ENSMUSG|^TCR|^IGHG|^IGHM|^IGH[^GM]'"  # ignore gene ids that match this pattern for calculation of the library size for TPM/RPM normalisation      UPDATE HERE!
   specialnorm: 'NULL'
+  #reduced: "~1"
+  reduced: "NULL"         # Reduced formula for Likelihood Ratio Test.
 
 Spotfire:
-  lfc_thresh: 1
-  p_cut: 0.05
-  countCap: 100                  # upper cap for the count filter
-  tpmCap: 10                     # upper cap for the tpm filter
+  lfc_thresh: 3                  # Create LFC threshold option at this value.
+  p_cut: 0.05                    # Create P-value cutoff option at this value.
+  countCap: 500                  # Upper cap for the read count threshold filter range.
+  tpmCap: 25                     # Upper cap for the TPM threshold range.
 
 stranding: 0                        # Stranding mode for dupRadar and featureCoutns.      UPDATE HERE!
 pairedend: True                                                                         # UPDATE HERE!
-#minFrag: 100      # Fsk3 fragment sizes must mean something different, these values cause abysmal alignment failures
-#maxFrag: 700
+#fragLen: 500                                                                           # UPDATE HERE?
+#fragLenSD: 500                                                                         # UPDATE HERE?
 #readLen: 60
