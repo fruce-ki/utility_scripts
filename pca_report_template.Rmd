@@ -10,16 +10,16 @@ output:
     toc_float:
       collapsed: false
 params:
-  cts: "./null_xref.tsv"              # a file MUST be specified
+  cts: NULL                           # path to counts file
+  tpm: data.frame()                   # values data.table
   covars: NULL                        # a data.frame
-  RDSdir: "."                         # a file MUST be specified
+  RDSdir: NULL                        # save path for intermediate data
   nidcols: 1                          # how many columns contain alternative IDs, including the col with the row IDs
   idcol: 1                            # column that has the row IDs
   ntop: 10                            # maximum number of hits to list
   minMean: 10                         # Filter out poorly covered genes
   minSingle: 100                      # Bypass of the above, for genes expressed only in one or few samples
-  widthsFile: NULL                    # Feature lengths.
-  widthsCol: NULL                     # Feature lengths.
+  widths: False                       # Feature-length normalised.
   createID: FALSE
   specnorm: NULL                      # Gene name pattern to exclude genes from TPM and PCA calculation. Like IG genes in plasma cells
   topVars: NULL                       # Number of top dispersed genes to use.
@@ -53,30 +53,9 @@ theme_set(theme_bw())
 ```
 
 ```{r functions}
-# TPM/RPM
-normscale <- function(counts, featLens=NULL, specnorm=params$specnorm){
-  if (!is.null(featLens)) {
-    # Reorder/subset
-    setkeyv(featLens, names(featLens)[1])
-    featLens <- featLens[rownames(counts)]
-    stopifnot(all(!is.na(featLens[, 2])))  # incomplete lengths
-    # Scale by feature size
-    TPMs <- sweep(counts, 1, featLens[[2]], `/`)
-  }
-  # Scale by sequencing depth
-  if (!is.null(specnorm)) {
-    colsums <- colSums(TPMs[!grepl(specnorm, rownames(TPMs), ignore.case=TRUE, perl=TRUE), ], na.rm=TRUE)  # MOUSE only!
-  } else {
-    colsums <- colSums(TPMs, na.rm=TRUE)
-  }
-  TPMs <- sweep(TPMs, 2, colsums, `/`) * 1e6
-  
-  return(TPMs)
-}
-
 # Correlations
 my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NULL, txs=3, minMean=0, minSingle=0, loopVal="default") {
-  # mat <- tpm[topgenes,]; samples <- covars$Sample
+  # mat <- params$tpm[topgenes,]; samples <- params$covars$Sample
   
   # Filter
   if (minMean != 0 | minSingle != 0) {
@@ -183,45 +162,45 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   colourswitch <- c( m + 0.49 * (M-m),  m + 0.51 * (M-m) )
   
   
-  # Square. Custom order. No values. Full range.
-  p1 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
-    geom_tile(aes(fill=Correlation)) +
-    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
-    scale_x_discrete(position = "top") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-          panel.grid = element_blank() )
-
-  # Square. Custom order. No values. Dynamic range.
-  p1a <- ggplot(cormat, aes(x=observation1, y=observation2)) +
-    geom_tile(aes(fill=Correlation)) +
-    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
-    scale_x_discrete(position = "top") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-          panel.grid = element_blank() )
-  
-  # Triangle. Custom order. With values. Full range.
-  p2 <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
-    geom_tile(aes(fill=Correlation)) +
-    geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
-    scale_x_discrete(position = "top") +
-    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
-    scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-          panel.grid = element_blank() )
-
-  # Triangle. Custom order. With values. Dynamic range.
-  p2a <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
-    geom_tile(aes(fill=Correlation)) +
-    geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
-    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "transparent" ) +
-    scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
-    scale_x_discrete(position = "top") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-          panel.grid = element_blank() )
+  # # Square. Custom order. No values. Full range.
+  # p1 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+  #   geom_tile(aes(fill=Correlation)) +
+  #   scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
+  #   scale_x_discrete(position = "top") +
+  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #         panel.grid = element_blank() )
+  # 
+  # # Square. Custom order. No values. Dynamic range.
+  # p1a <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+  #   geom_tile(aes(fill=Correlation)) +
+  #   scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
+  #   scale_x_discrete(position = "top") +
+  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #         panel.grid = element_blank() )
+  # 
+  # # Triangle. Custom order. With values. Full range.
+  # p2 <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
+  #   geom_tile(aes(fill=Correlation)) +
+  #   geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
+  #   scale_x_discrete(position = "top") +
+  #   scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
+  #   scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
+  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #         panel.grid = element_blank() )
+  # 
+  # # Triangle. Custom order. With values. Dynamic range.
+  # p2a <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
+  #   geom_tile(aes(fill=Correlation)) +
+  #   geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
+  #   scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "transparent" ) +
+  #   scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
+  #   scale_x_discrete(position = "top") +
+  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #         panel.grid = element_blank() )
   
   # Square. Custom order. With values. Full range.
   p12 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
@@ -246,56 +225,56 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
           panel.grid = element_blank() )
   
   
-  # Square. Clustered order. No values. Full range.
-  p3 <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
-    geom_tile(aes(fill=Correlation)) +
-    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
-    scale_x_discrete(position = "top") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-          panel.grid = element_blank() )
-
-  # Square. Clustered order. No values. Dyhamic range.
-  p3a <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
-    geom_tile(aes(fill=Correlation)) +
-    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
-    scale_x_discrete(position = "top") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-          panel.grid = element_blank() )
-
-  # Triangle. Clustered order. with values. Full range.
-  p4 <- ggplot(cormat4, aes(x=observation1, y=observation2)) +
-    geom_tile(aes(fill=Correlation)) +
-    geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
-    scale_x_discrete(position = "top") +
-    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
-    scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-          panel.grid = element_blank() )
-
-  # Triangle. Clustered order. with values. Dyhamic range.
-  p4a <- ggplot(cormat4, aes(x=observation1, y=observation2)) +
-    geom_tile(aes(fill=Correlation)) +
-    geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
-    scale_x_discrete(position = "top") +
-    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "transparent" ) +
-    scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-          panel.grid = element_blank() )
-  
-  # Square. Clustered order. With values. Full range.
-  p34 <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
-    geom_tile(aes(fill=Correlation)) +
-    geom_text(data=cormat4, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
-    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
-    scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
-    scale_x_discrete(position = "top") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-          panel.grid = element_blank() )
+  # # Square. Clustered order. No values. Full range.
+  # p3 <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
+  #   geom_tile(aes(fill=Correlation)) +
+  #   scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
+  #   scale_x_discrete(position = "top") +
+  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #         panel.grid = element_blank() )
+  # 
+  # # Square. Clustered order. No values. Dyhamic range.
+  # p3a <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
+  #   geom_tile(aes(fill=Correlation)) +
+  #   scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
+  #   scale_x_discrete(position = "top") +
+  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #         panel.grid = element_blank() )
+  # 
+  # # Triangle. Clustered order. with values. Full range.
+  # p4 <- ggplot(cormat4, aes(x=observation1, y=observation2)) +
+  #   geom_tile(aes(fill=Correlation)) +
+  #   geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
+  #   scale_x_discrete(position = "top") +
+  #   scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
+  #   scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
+  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #         panel.grid = element_blank() )
+  # 
+  # # Triangle. Clustered order. with values. Dyhamic range.
+  # p4a <- ggplot(cormat4, aes(x=observation1, y=observation2)) +
+  #   geom_tile(aes(fill=Correlation)) +
+  #   geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
+  #   scale_x_discrete(position = "top") +
+  #   scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "transparent" ) +
+  #   scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
+  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #         panel.grid = element_blank() )
+  # 
+  # # Square. Clustered order. With values. Full range.
+  # p34 <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
+  #   geom_tile(aes(fill=Correlation)) +
+  #   geom_text(data=cormat4, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
+  #   scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
+  #   scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
+  #   scale_x_discrete(position = "top") +
+  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+  #         panel.grid = element_blank() )
   
   # Square. Clustered order. With values. Dyhamic range.
   p34a <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
@@ -309,15 +288,15 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
           panel.grid = element_blank() )
   
   out <- list(corr=dcast(cormat2, observation1 ~ observation2, value.var = "Correlation"),
-              sfrnc=p1, sdrnc=p1a,
+              # sfrnc=p1, sdrnc=p1a,
               # tfrnc=p2, tdrnc=p2a,
               frnc=p12, drnc=p12a,
-              sfrc=pd + p3, sdrc=pd + p3a,
+              # sfrc=pd + p3, sdrc=pd + p3a,
               # tfrc=p4, tdrc=p4a,
-              frc=pd + p34 + plot_layout(ncol=2, widths=c(1,4)), 
+              # frc=pd + p34 + plot_layout(ncol=2, widths=c(1,4)), 
               drc=pd + p34a + plot_layout(ncol=2, widths=c(1,4)))
   
-  if (!is.null(rds) && loopVal == "default") {
+  if (!is.null(rds) && length(rds) > 0) {
     saveRDS(out, file = rds)
   }
   
@@ -326,15 +305,21 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
 
 ## helper function
 pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){
-  # pcx <- 1; pcy <- 2
+  # pc <- pc; loads <- infl; highloads <- highinfl; ig <- ig; pcaimp <- pcaimp; pcx <- 1; pcy <- 2
   mycolours <- c(
-    "#dd2200", "#0066ff", "#8800ff", "#ff8833", "#229900", 
-    "#880000", "#0000ff", "#5500aa", "#bb6600", "#224400",
-    "#eeaabb", "#00ccff", "#ff77ff", "#ffcc00", "#22cc00",
-    "#8899aa",
-    "#ff00dd", "#0099ff", "#8866ff", "#22ff00", "#886600", 
-    "#889900", "#88ccff", "#eeeeaa", "#0066aa", "#0099aa"
+  	"#bb6600", "#880000", "#bb3300", "#ff0000", "#ff9900", "#ffcc00", "#eedd00",
+  	"#0000ff", "#0066ff", "#0099ff", "#00ccff",  "#00ffff",
+  	"#5500aa", "#8800ff", "#8866ff", "#ee00bb", "#ff66ff",  "#ff99ff", "#ffccff",
+  	"#224400", "#226600", "#229900", "#22cc00", "#22ff00", "#88cc00", 
+  	"#8899aa",
+  	"#0033aa", "#0066aa", "#0099aa", "#00ccaa",
+  	"#886600", "#bb9900", "#889900",
+  	"#8800aa", "#8866aa", "#8899ff", "#88ccff",
+  	"#ff7700", "#ee99aa", "#eeccaa"
   )
+  # This works best when the colours are in a sensible sequence of gradual change.
+  getPalette <- colorRampPalette(mycolours[2:26])
+
   pcxs <- paste0("PC", pcx)
   pcys <- paste0("PC", pcy)
   subload <- loads[rowID %in% unique(c(head(highloads[[pcx]], 5), head(highloads[[pcy]], 5))), c("rowID", pcxs, pcys), with=FALSE]
@@ -342,18 +327,33 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){
   
   pc12 <- wrap_plots(lapply(ig, function(varname) {
     return(
+      # varname <- ig[3]
+      
       ggplot(pc, aes_string(x=pcxs, y=pcys, fill=varname, colour=varname)) +
         geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
         geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
-        geom_mark_hull(alpha=0.1, colour='transparent') +
-        geom_point() +
+        # geom_mark_hull(alpha=0.1, colour='transparent') +
+        geom_text(aes_string(label=varname), size=rel(2.1)) +
         coord_fixed(ratio=1, xlim=c(-lmt, lmt), ylim=c(-lmt, lmt) ) +
-        scale_colour_manual(values=mycolours) +
-        scale_fill_manual(values=mycolours) +
-        labs(x=paste0(pcxs, " (", round(pcaimp[PC==pcx, Explained], 1), "%)"), 
-             y=paste0(pcys, " (", round(pcaimp[PC==pcy, Explained], 1), "%)")) +
-        theme(panel.grid=element_blank())
-    )}), ncol = 2)
+        scale_colour_manual(values=getPalette(length(unique(pc[[varname]])))) +
+        scale_fill_manual(values=getPalette(length(unique(pc[[varname]])))) +
+        labs(x=paste0(pcxs, " (", round(pcaimp[PC==pcx, Explained], 1), "%)"),
+             y=paste0(pcys, " (", round(pcaimp[PC==pcy, Explained], 1), "%)"),
+             title=varname) +
+        theme(panel.grid=element_blank(), legend.position='none')
+      
+      # ggplot(pc, aes_string(x=pcxs, y=pcys, fill=varname, colour=varname)) +
+      #   geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
+      #   geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
+      #   geom_mark_hull(aes_string(label=varname), alpha=0.1, fill='transparent', con.cap=0) +
+      #   geom_point(shape=16, alpha=0.5) +
+      #   coord_fixed(ratio=1) +#, xlim=c(-lmt, lmt), ylim=c(-lmt, lmt) ) +
+      #   scale_colour_manual(values=getPalette(length(unique(pc[[varname]])))) +
+      #   scale_fill_manual(values=getPalette(length(unique(pc[[varname]])))) +
+      #   labs(x=paste0(pcxs, " (", round(pcaimp[PC==pcx, Explained], 1), "%)"), 
+      #        y=paste0(pcys, " (", round(pcaimp[PC==pcy, Explained], 1), "%)")) +
+      #   theme(panel.grid=element_blank(), legend.position='none')
+    )}), ncol = ifelse(nrow(pc) <= 10, 2, 3))
   
   pc12v <- wrap_plots(lapply(ig, function(varname) {
     return(
@@ -366,8 +366,8 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){
         geom_point() +
         geom_text_repel(data=subload, inherit.aes=FALSE, aes_string(label="rowID", x=pcxs, y=pcys), size=2) +
         coord_fixed(ratio=1, xlim=c(-lmt, lmt), ylim=c(-lmt, lmt) ) +
-        scale_colour_manual(values=mycolours) +
-        scale_fill_manual(values=mycolours) +
+        scale_colour_manual(values=getPalette(length(unique(pc[[varname]])))) +
+        scale_fill_manual(values=getPalette(length(unique(pc[[varname]])))) +
         labs(x=paste0(pcxs, " (", round(pcaimp[PC==pcx, Explained], 1), "%)"), 
              y=paste0(pcys, " (", round(pcaimp[PC==pcy, Explained], 1), "%)")) +
         theme(panel.grid=element_blank())
@@ -379,8 +379,8 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){
 # PCA
 # (scaling and centering of genes to one another, NOT samples to one another)
 do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, topgenes=NULL, exclude=NULL, minMean=0, minSingle=0, ntop=10) {
-  # countsmat <- log10(tpm); covars <- covars
-  # scale = TRUE; center = TRUE; rds=NULL; topgenes=NULL; exclude=NULL; minMean=0; minSingle=0; ntop=10
+  # countsmat <- log10(params$tpm); covars <- params$covars
+  # scale = TRUE; center = TRUE; rds = file.path(params$RDSdir, sub(".txt|.tsv", "_corrP.RDS", basename(params$cts))); topgenes=NULL; exclude=NULL; minMean=0; minSingle=0; ntop=10
   
   nvars <- nrow(countsmat)
   countsmat <- countsmat[rowSums(countsmat) > 0, ]
@@ -501,7 +501,7 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
               pc2d=L1, pcv2d=L2
               )
   
-  if (!is.null(rds)) {
+  if (!is.null(rds) && length(rds) > 0) {
     saveRDS(out, file = rds)
   }
   
@@ -523,67 +523,12 @@ message(paste("Number of top dispersed genes to use for correlation and PCA:", i
 ```
 
 ```{r sample_info}
-# Covariates
-# covars <- fread(params$covars, colClasses = 'character')
-covars <- params$covars
-
-datatable(covars)
-# print(as.data.table(covars))
-```
-
-```{r input}
 # Counts
-counts <- fread(params$cts, colClasses="character")  # prevent any numeric IDs converting a string column to integer
-counts <- unique(counts)         # non-summarized featureCounts have repeated exons from sharing among transcripts.
-xref <- counts[, 1:params$nidcols]
-counts <- as.matrix(counts[, covars$Sample, with=FALSE])    # Order and subset columns
-counts <- matrix(as.numeric(counts), ncol=ncol(counts))
-colnames(counts) <- covars$Sample  # because the type conversion lost them
-counts[is.na(counts)] <- 0
-if (params$createID) {
-  xref[, id := paste0(Geneid, '.', Start, '_', End)]
-  if (any(duplicated(xref$id)))
-    stop()
-  rownames(counts) <- xref$id
-} else {
-  rownames(counts) <- xref[[params$idcol]]
-}
-```
+message(ifelse(params$widths, 'TPM counts', 'RPM counts'))
 
-Correlations and PCA will be based on the TPM values. If no feature lengths were provided, RPM values will be used instead.
-
-```{r tpm}
-# Feature lengths
-if (!is.null(opt$widthsCol)) {
-  featLens <- data.table(ID=rownames(counts),
-                         LEN=as.integer(xref[[opt$widthsCol]]))
-  setkey(featLens, ID)
-} else if (!is.null(opt$widthsFile)) {
-  featLens <- fread(file.path(opt$baseDir, opt$widthsFile), sep="\t", header=TRUE, check.names = FALSE, colClasses=c("character", "numeric"))
-  setkey(featLens, ID)
-} else {
-  featLens <- NULL
-}
-
-tpm <- normscale(counts, featLens)
-TPM <- data.table(id=rownames(tpm), tpm)
-
-widths <- all(is.null(params$widthsFile), is.null(params$widthsCol))
-if (widths) {
-  message('Scaled counts to RPM.')
-} else {
-  message('Scaled counts to TPM.')
-}
-
-setnames(TPM, c('id', paste0(colnames(tpm), ifelse(is.null(widths), '.RPM', '.TPM')) ))
-if (params$loopVal == "default")  # only output a master table, no point repeating subsets of it
-  fwrite(TPM, file=sub(".txt|.tsv", ".scaled.txt", params$cts), quote=FALSE, sep="\t")
-
-
-# fwrite(data.table(id=rownames(counts), 
-#                   mean=rowMeans(counts), max=rowMaxs(counts), signles=rowSums(counts>=params$minSingle), sd=rowSds(counts),
-#                   sdt=rowSds(tpm), cvt=rowSds(tpm)/rowMeans(tpm)),
-#        file="/Volumes/groups/busslinger/Kimon/test.txt", sep="\t", quote=FALSE)
+# Covariates
+datatable(params$covars)
+# print(as.data.table(params$covars))
 ```
 
 
@@ -594,18 +539,18 @@ Genes with mean raw count across all samples below `r params$minMean` are exclud
 ```{r filter}
 # All genes above the count thresholds
 message(paste("Using features that exceed either", params$minMean, "mean count across samples or", params$minSingle, "count in any single sample."))
-n <- nrow(tpm)
+n <- nrow(params$tpm)
 topgenes <- rownames(counts)[(rowMeans(counts) >= params$minMean) | (rowSums(counts >= params$minSingle) > 0)]
 message(paste(n - length(topgenes), "features eliminated, out of", n))
 
 if (!is.null(params$specnorm)) {
   n <- length(topgenes)
-  topgenes <- topgenes[! topgenes %in% rownames(tpm)[grepl(params$specnorm, rownames(tpm), ignore.case=TRUE, perl=TRUE)] ]
+  topgenes <- topgenes[! topgenes %in% rownames(params$tpm)[grepl(params$specnorm, rownames(params$tpm), ignore.case=TRUE, perl=TRUE)] ]
   message(paste("Additionally excluding", n - length(topgenes), "genes by name criteria."))
 }
 
 # Further reduce the above genes to the top most dispersed, as in DESeq2
-cv <- sort(rowSds(tpm[topgenes, ]) / rowMeans(tpm[topgenes, ]), decreasing=TRUE)
+cv <- sort(rowSds(params$tpm[topgenes, ]) / rowMeans(params$tpm[topgenes, ]), decreasing=TRUE)
 topgenes2 <- names(head(cv, n=params$topVars))
 
 # Make it obvious which genes in the TPM-StDev plot where excluded due to raw count.
@@ -626,14 +571,14 @@ Using log-scaled normalised expression values.
 Correlations based on all the genes that meet the count and name criteria.
 
 ```{r corr1, fig.height=15, fig.width=15}
-corels1 <- my_pairwise_internal_corels(log10(tpm[topgenes,]), covars$Sample, method="pearson",
+corels1 <- my_pairwise_internal_corels(log10(params$tpm[topgenes,]), params$covars$Sample, method="pearson",
+                                      minMean = 0, minSingle = 0, loopVal=params$loopVal,
+                                      rds = file.path(params$RDSdir, 
+                                                             sub(".txt|.tsv", paste0("_", params$loopval, "_corrP.RDS"), basename(params$cts))) )
+corels2 <- my_pairwise_internal_corels(log10(params$tpm[topgenes, ]), params$covars$Sample, method="spearman",
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,
                                       rds = file.path(params$RDSdir,
-                                                      sub(".txt|.tsv", "_corrP.RDS", basename(params$cts))))
-corels2 <- my_pairwise_internal_corels(log10(tpm[topgenes, ]), covars$Sample, method="spearman",
-                                      minMean = 0, minSingle = 0, loopVal=params$loopVal,
-                                      rds = file.path(params$RDSdir,
-                                                      sub(".txt|.tsv", "_corrS.RDS", basename(params$cts))))
+                                                             sub(".txt|.tsv", paste0("_", params$loopval, "_corrS.RDS"), basename(params$cts))) )
 
 print( corels1[['frnc']] )
 print( corels2[['frnc']] )
@@ -649,14 +594,14 @@ print( corels2[['drc']] )
 Correlations using the top `r params$topVars` dispersed genes (out of those already filtered).
 
 ```{r corr1b, fig.height=15, fig.width=15}
-corels1b <- my_pairwise_internal_corels(log10(tpm[topgenes2, ]), covars$Sample, method="pearson",
+corels1b <- my_pairwise_internal_corels(log10(params$tpm[topgenes2, ]), params$covars$Sample, method="pearson",
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,
                                       rds = file.path(params$RDSdir,
-                                                      sub(".txt|.tsv", "_corrPtop.RDS", basename(params$cts))))
-corels2b <- my_pairwise_internal_corels(log10(tpm[topgenes2, ]), covars$Sample, method="spearman",
+                                                      sub(".txt|.tsv", paste0("_", params$loopval, "_corrPtop.RDS"), basename(params$cts))) )
+corels2b <- my_pairwise_internal_corels(log10(params$tpm[topgenes2, ]), params$covars$Sample, method="spearman",
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,
                                       rds = file.path(params$RDSdir,
-                                                      sub(".txt|.tsv", "_corrStop.RDS", basename(params$cts))))
+                                                      sub(".txt|.tsv", paste0("_", params$loopval, "_corrStop.RDS"), basename(params$cts))) )
 
 # print( (corels1b[['frnc']] + theme(legend.position="none")) | 
 #          (corels2b[['frnc']] + theme(axis.text.y=element_blank())) )
@@ -679,16 +624,16 @@ For this, the log-scaled expression of the features is further standardized. Thi
 PCA based on all genes that meet the count thresholds.
 
 ```{r pca}
-all_pca <- do_pca(log10(tpm), covars, ntop = params$ntop,
+all_pca <- do_pca(log10(params$tpm), params$covars, ntop = params$ntop,
                   topgenes= topgenes, exclude=exclude,
                   minMean = 0, minSingle = 0,      # prefiltered
                   rds = file.path(params$RDSdir,
-                                  sub(".txt|.tsv", "_pca.RDS", basename(params$cts))))
+                                  sub(".txt$|.tsv$", paste0("_", params$loopval, "_pca.RDS"), basename(params$cts))))
 ```
 
 ### Selection overview
 
-This shows the mean TPM (or RPM) value and standard deviation for the variable features that were selected for the correlation and PCA, against the total of variable features. Non-variable features are not shown, due to log-scaled axes.
+This shows the scaled expression and scaled dispersion for the variable features that were selected for the correlation and PCA, against the total of variable features. Non-variable features are not shown, due to log-scaled axes.
 
 ```{r varmean}
 # Selected features
@@ -734,11 +679,11 @@ print( all_pca$pc2d )
 PCA using the top `r params$topVars` dispersed genes (out of those that already meet the count thresholds).
 
 ```{r pcab}
-all_pcab <- do_pca(log10(tpm), covars, ntop = params$ntop,
+all_pcab <- do_pca(log10(params$tpm), params$covars, ntop = params$ntop,
                   topgenes= topgenes2, exclude=exclude,
                   minMean = 0, minSingle = 0,      # prefiltered
                   rds = file.path(params$RDSdir,
-                                  sub(".txt|.tsv", "_pcatop.RDS", basename(params$cts))))
+                                  sub(".txt|.tsv", paste0("_", params$loopval, "_pcatop.RDS"), basename(params$cts))))
 ```
 
 ### Selection overview
@@ -796,7 +741,7 @@ print( all_pcab$pc2d )
 ## Plots to PDF ##
 pdf(file.path(params$RDSdir,
               sub(".txt|.tsv", "_pca.pdf", basename(params$cts))),
-    width=max(12, ceiling(nrow(covars) / 3)), height=max(12, ceiling(nrow(covars) / 3))) # Scale up when many samples, but don't scale down when few.
+    width=max(12, ceiling(nrow(params$covars) / 3)), height=max(12, ceiling(nrow(params$covars) / 3))) # Scale up when many samples, but don't scale down when few.
 
 # Correlation plots
 print(corels1[['frnc']])
