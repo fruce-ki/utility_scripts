@@ -1,7 +1,9 @@
-Sample.ID	Sample.NAME	Condition	Sample	
-10001	ref1	reference	ref1__10001
-10002	ref2	reference	ref2__10002
-10003	treatA1	treatmentA	treatA1__10003
-10004	treatA2	treatmentA	treatA2__10004
-10005	treatB1	treatmentB	treatB1__10005
-10006	treatB2	treatmentB	treatB2__10006
+Sample.ID	Organ	Condition	State	Type	Replicate	Alignment.DATE	Sample.NAME	Sample
+212442	Spleen	exvivo	exvivo	ctrl	1	20221108	exvivo_ctrl_1	exvivo_ctrl_1__212442
+212443	Spleen	exvivo	exvivo	ctrl	2	20221108	exvivo_ctrl_2	exvivo_ctrl_2__212443
+212444	Spleen	exvivo	exvivo	exp	1	20221108	exvivo_exp_1	exvivo_exp_1__212444
+212445	Spleen	exvivo	exvivo	exp	2	20221108	exvivo_exp_2	exvivo_exp_2__212445
+212446	LN	invitro	steadystate	ctrl	1	20221108	steadystate_ctrl_1	steadystate_ctrl_1__212446
+212447	LN	invitro	steadystate	ctrl	2	20221108	steadystate_ctrl_2	steadystate_ctrl_2__212447
+212448	LN	invitro	steadystate	exp	1	20221108	steadystate_exp_1	steadystate_exp_1__212448
+212449	LN	invitro	steadystate	exp	2	20221108	steadystate_exp_2	steadystate_exp_2__212449

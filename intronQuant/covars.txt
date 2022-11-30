@@ -1,0 +1,9 @@
+Sample	Organ	Condition	State	Type	Replicate
+exvivo_ctrl_1__212442	Spleen	exvivo	exvivo	ctrl	1
+exvivo_ctrl_2__212443	Spleen	exvivo	exvivo	ctrl	2
+exvivo_exp_1__212444	Spleen	exvivo	exvivo	exp	1
+exvivo_exp_2__212445	Spleen	exvivo	exvivo	exp	2
+steadystate_ctrl_1__212446	LN	invitro	steadystate	ctrl	1
+steadystate_ctrl_2__212447	LN	invitro	steadystate	ctrl	2
+steadystate_exp_1__212448	LN	invitro	steadystate	exp	1
+steadystate_exp_2__212449	LN	invitro	steadystate	exp	2

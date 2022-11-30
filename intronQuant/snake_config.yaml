@@ -6,10 +6,10 @@ codeDir: "pro/ject/code"      # UPDATE HERE! I always make a fresh copy for a ne
 
 sampleinfo: "description/sample_info.txt"      # Samples to fetch. UPDATE HERE?
 idcols:        # In sampleinfo above
-  id: 0              # Seqmate sample ID. 0-based.                                 UPDATE HERE maybe?
-  aligndate: 1       # Analysis date from seqmate, to desambiguate re-submissions. UPDATE HERE maybe?
-  name: 11           # Human-friendly sample names. 0-based                        UPDATE HERE!
-idjoin: "__"         # Sample & file name format in the pipeline: <name><idjoin><id>    UPDATE HERE maybe?
+  id: 0              # Seqmate sample ID. 0-based column index.                                              UPDATE HERE maybe?
+  aligndate: 6       # Analysis date from seqmate, to desambiguate re-submissions. 0-based column index.     UPDATE HERE maybe?
+  name: 7           # Human-friendly sample names. 0-based column index.                                    UPDATE HERE!
+idjoin: "__"         # Sample & file name format in the pipeline: <name><idjoin><id>                         UPDATE HERE maybe?
 
 vbcf_alignments_table_url: "https://seqmate-archive.vbc.ac.at/alignments/group/busslinger/text"
 un: "~/vbcf_username.txt"   #  Text file containing only Seqmate username.     UPDATE HERE maybe?
@@ -37,21 +37,22 @@ PCA:
 do_DE: True     # ONLY use for a single simple DE formula applicable to all samples. More complex datasets/requirements should be handled outside the pipeline.
 DE:  # indices are 1-based here
   covars: "description/covars.txt"   # Covariates table. Contents will be used in filenames, so clean them up accordingly.        UPDATE HERE maybe?
-  formula: "~Condition"            # ~variable
-  comparisons: "Condition-1v2, Condition-3v4"    # variable-#v# (ie condition-2v1) where the numbers refer to values of the variable by order of appearance in covars.
-  contexts:    "Cell-1,      Cell-2"         # variable-# (ie Celltype-1) where the number refers to value of the variable by order of appearance in covars.
+  comparisons: "Condition-2v1, Condition-4v3"    # variable-#v# (ie condition-2v1) where the numbers refer to values of the variable by order of appearance in covars.
+  contexts:    "Organ-1,      Organ-2"         # variable-# (ie Celltype-1) where the number refers to value of the variable by order of appearance in covars.
   lfc_thresh: 1           # Minimum LFC, only for labelling purposes in the report.
   p_cut: 0.05             # Significance level for deseq2 and for labelling in the report.
-  minCnt: 0               # Minimum read count, only for labelling purposes in the report.
-  minTPM: 0               # Minimum TPM, only for labelling purposes in the report.
-  ntop: 50                # Top DE features to label in the report.
+  minCnt: 100               # Minimum read count, only for labelling purposes in the report.
+  minTPM: 5               # Minimum TPM, only for labelling purposes in the report.
+  ntop: 100                # Top DE features to label in the report.
   #specialnorm: "'^ENSMUSG|^TCR|^IGHG|^IGHM|^IGH[^GM]'"  # ignore gene ids that match this pattern for calculation of the library size for TPM/RPM normalisation      UPDATE HERE!
   specialnorm: 'NULL'
-  #reduced: "~1"
-  reduced: "NULL"         # Reduced formula for Likelihood Ratio Test.
+  #formula: "~Type"            # Full formula for Likelihood Ratio Test. Also overrides automatic formulas from specifications of Wald test pairwise comparisons.
+  formula: "NULL"
+  #reduced: "~1"         # Reduced formula for Likelihood Ratio Test. Determines if LRT is done at all.
+  reduced: 'NULL'
 
 Spotfire:
-  lfc_thresh: 3                  # Create LFC threshold option at this value.
+  fc_thresh: 3                   # Create FC threshold option at this value (also at 1/fc_thresh).
   p_cut: 0.05                    # Create P-value cutoff option at this value.
   countCap: 500                  # Upper cap for the read count threshold filter range.
   tpmCap: 25                     # Upper cap for the TPM threshold range.

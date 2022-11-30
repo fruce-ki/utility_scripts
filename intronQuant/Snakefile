@@ -1,7 +1,7 @@
 ### snakemake --local-cores 1 --jobs 50 --use-envmodules --latency-wait 30 --restart-times 10 --cluster "sbatch -c {threads} --time={resources.maxtime} --mem={resources.mem} -e ./logdump/slurm-%j.err -o ./logdump/slurm-%j.out" 
 
 configfile: "snake_config.yaml"
-localrules: all, directories, update_alignments_table, extract_relevant_alignment_info, stage_in, multiqc_pre, fix_names_and_stage_out_featureCounts, setup_DE, stage_out_DE, kallisto_rehead, kallisto_stage_out
+localrules: all, directories, update_alignments_table, extract_relevant_alignment_info, stage_in, multiqc_pre, fix_names_and_stage_out_featureCounts, setup_DE, stage_out_DE#, kallisto_rehead, kallisto_stage_out
 
 import os, sys, re
 import pandas as pd
@@ -97,7 +97,8 @@ if config["do_DE"]:
 			HOME + "/process/duprates/duprates.txt",
 			expand(HOME + "/process/featureCounts/{countsfile}.txt", countsfile=FLAVOURS),
 			expand(HOME + "/results/PCA/{countsfile}.default.pca.html", countsfile=FLAVOURS),
-			expand(HOME + "/results/DE/{countsfile}.{dename}.deseq2.nolab.spotfire.txt", countsfile=FLAVOURS, dename=EXPECTED_DE)
+			expand(HOME + "/results/DE/{countsfile}.all.deseq2.spotfire.txt", countsfile=FLAVOURS),
+			expand(HOME + "/results/DE/{countsfile}.{dename}.deseq2.tsv", countsfile=FLAVOURS, dename=EXPECTED_DE)
 		# params:
 		# 	scratch=SCRATCH
 		# shell:
@@ -779,8 +780,8 @@ if config["do_DE"]:
 			counts=SCRATCH + "/process/featureCounts_fixed/{countsfile}.txt",
 			samples=os.path.join(SCRATCH, config["DE"]["covars"])       # listed only to trigger the setup rule
 		output:
-			lab=expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.tsv", dename=EXPECTED_DE, allow_missing=True),  # missing means the rule is ran for every value of {countsfile}
-			nolab=expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.nolab.tsv", dename=EXPECTED_DE, allow_missing=True)
+			vanilla=expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.tsv", dename=EXPECTED_DE, allow_missing=True),  # allow_missing: {dename} takes all the specified values in each run of this rule, while the rule is ran for every value of {countsfile} specified later.
+			custom=expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.custom.tsv", dename=EXPECTED_DE, allow_missing=True)
 			# One table per contrast, but contrasts may get grouped into fewer HTML reports
 		wildcard_constraints:
 			countsfile="[^.]+",
@@ -817,7 +818,7 @@ if config["do_DE"]:
 
 	rule merge_DE_table:
 			input:
-				expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.tsv", dename=EXPECTED_DE, allow_missing=True) # missing means the rule is ran for every value of {countsfile}
+				expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.custom.tsv", dename=EXPECTED_DE, allow_missing=True)   # allow_missing: {dename} takes all the specified values in each run of this rule, while the rule is ran for every value of {countsfile} specified later.
 			output:
 				SCRATCH + "/results/DE/{countsfile}/{countsfile}.all.deseq2.tsv"
 			wildcard_constraints:
@@ -843,10 +844,10 @@ if config["do_DE"]:
 
 	rule prepare_for_Spotfire:
 		input:
-			de=SCRATCH + "/results/DE/{countsfile}/{countsfile}.{denamenl}.tsv",
+			de=SCRATCH + "/results/DE/{countsfile}/{countsfile}.all.deseq2.tsv",
 			cnt=SCRATCH + "/featureCounts/{countsfile}.txt"
 		output:
-			SCRATCH + "/results/DE/{countsfile}/{countsfile}.{denamenl}.spotfire.txt"
+			SCRATCH + "/results/DE/{countsfile}/{countsfile}.all.deseq2.spotfire.txt"
 		wildcard_constraints:
 				countsfile="[^.]+",
 				denamenl="all\.deseq2|.+\.deseq2\.nolab"
@@ -860,7 +861,7 @@ if config["do_DE"]:
 			home=HOME,
 			countCap=config["Spotfire"]["countCap"],
 			tpmCap=config["Spotfire"]["tpmCap"],
-			lfc=config["Spotfire"]["lfc_thresh"],
+			fc=config["Spotfire"]["fc_thresh"],
 			pcut=config["Spotfire"]["p_cut"],
 			urlbase=config["ucsc_session"]
 		group: "spotfire"
@@ -870,17 +871,17 @@ if config["do_DE"]:
 			mem='1G'
 		shell:
 			"""
-			Rscript {params.code}/deseq2_prepare_for_spotfire.R -C {input.cnt} -c {params.countCap} -D {input.de} -f {params.lfc} -p {params.pcut} -s -t {params.tpmCap} -u {params.urlbase}
+			Rscript {params.code}/deseq2_prepare_for_spotfire.R -C {input.cnt} -c {params.countCap} -D {input.de} -f {params.fc} -p {params.pcut} -s -t {params.tpmCap} -u {params.urlbase}
 			"""
 
 
 	rule stage_out_DE:
 		input:
-			spot=expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{denamenl}.spotfire.txt", countsfile=FLAVOURS, denamenl=["all.deseq2", *[x + ".deseq2.nolab" for x in EXPECTED_DE]]), # denamenl -> all the individual contrast tables and the merged table of them
-			vanilla=expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{denamenl}.tsv", countsfile=FLAVOURS, denamenl=["all.deseq2", *[x + ".deseq2.nolab" for x in EXPECTED_DE]])
+			spot=expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.all.deseq2.spotfire.txt", countsfile=FLAVOURS),
+			vanilla=expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.tsv", countsfile=FLAVOURS, dename=EXPECTED_DE),
 		output:
-			spot=expand(HOME + "/results/DE/{countsfile}.{denamenl}.spotfire.txt", countsfile=FLAVOURS, denamenl=["all.deseq2", *[x + ".deseq2.nolab" for x in EXPECTED_DE]]),
-			vanilla=expand(HOME + "/results/DE/{countsfile}.{denamenl}.tsv", countsfile=FLAVOURS, denamenl=["all.deseq2", *[x + ".deseq2.nolab" for x in EXPECTED_DE]])
+			spot=expand(HOME + "/results/DE/{countsfile}.all.deseq2.spotfire.txt", countsfile=FLAVOURS),
+			vanilla=expand(HOME + "/results/DE/{countsfile}.{dename}.deseq2.tsv", countsfile=FLAVOURS, dename=EXPECTED_DE)
 		params:
 			outdir=HOME + "/results/DE/",
 			indir=SCRATCH + "/results/DE/"
