@@ -1,8 +1,6 @@
 #!/usr/bin/env Rscript
 
 library(getopt)
-library(DESeq2)
-library(data.table)
 
 spec = matrix(c(
   'bmF',           'B', 0, "logical",   "Disable baseMean filtering. (False)",
@@ -44,6 +42,13 @@ if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
   q(status=1)
 }
+
+
+
+library(DESeq2)
+library(data.table)
+
+
 
 stopifnot(!is.null(opt$countsFile))
 stopifnot(!is.null(opt$samplesFile))
