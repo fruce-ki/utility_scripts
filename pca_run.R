@@ -155,7 +155,7 @@ for (V in names(subcovars)){
                                 tpm=tpm[, subcovars[[V]]$Sample],
                                 # covars = file.path(opt$baseDir, opt$samplesFile),
                                 covars = subcovars[[V]],
-                                RDSdir = opt$RDSoutdir,
+                                RDSdir = file.path(opt$baseDir, opt$RDSoutdir),
                                 nidcols = opt$nidcols,
                                 idcol = opt$idcol,
                                 minMean = opt$minMean,
