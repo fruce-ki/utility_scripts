@@ -353,7 +353,7 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){
       #   labs(x=paste0(pcxs, " (", round(pcaimp[PC==pcx, Explained], 1), "%)"), 
       #        y=paste0(pcys, " (", round(pcaimp[PC==pcy, Explained], 1), "%)")) +
       #   theme(panel.grid=element_blank(), legend.position='none')
-    )}), ncol = ifelse(nrow(pc) <= 10, 2, 3))
+    )}), ncol = ifelse(length(ig) <= 10, 2, 3))
   
   pc12v <- wrap_plots(lapply(ig, function(varname) {
     return(
@@ -371,7 +371,7 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){
         labs(x=paste0(pcxs, " (", round(pcaimp[PC==pcx, Explained], 1), "%)"), 
              y=paste0(pcys, " (", round(pcaimp[PC==pcy, Explained], 1), "%)")) +
         theme(panel.grid=element_blank())
-    )}), ncol = 2)
+    )}), ncol = ifelse(length(ig) <= 10, 2, 3))
   
   return(list(pc12, pc12v))
 }
@@ -654,7 +654,7 @@ print(all_pca$pimp)
 
 Highlighting the defined experimental variables against the principal components helps make sense of what the components are.
 
-```{r pcs, fig.width=8, fig.height=12}
+```{r pcs, fig.width=12, fig.height=18}
 print( all_pca$pc2d )
 ```
 
