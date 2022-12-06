@@ -11,8 +11,8 @@ output:
       collapsed: false
 params:
   cts: NULL                           # path to counts file
-  tpm: data.frame()                   # values data.table
-  covars: NULL                        # a data.frame
+  tpm: data.frame()                   # TPM data.table
+  covars: data.frame()                # Experimental variables table
   RDSdir: NULL                        # save path for intermediate data
   nidcols: 1                          # how many columns contain alternative IDs, including the col with the row IDs
   idcol: 1                            # column that has the row IDs
@@ -24,6 +24,7 @@ params:
   specnorm: NULL                      # Gene name pattern to exclude genes from TPM and PCA calculation. Like IG genes in plasma cells
   topVars: NULL                       # Number of top dispersed genes to use.
   loopVal: "default"
+  excluded: NULL                      # Features not to be included in PCA
 editor_options:
   chunk_output_type: console
 ---
@@ -471,7 +472,7 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
   genevar[, selected := name %in% colnames(subcmat)]
   genevar[, excluded := name %in% exclude]
   pvar1 <- ggplot() +
-      geom_point(data=genevar[!selected & excluded, ], aes(x=Mean, y=StDev/Mean), shape=16, size=0.8, alpha=0.5, colour='grey70') +
+      geom_point(data=genevar[!selected & excluded, ], aes(x=Mean, y=StDev/Mean), shape=16, size=0.8, alpha=0.5, colour='grey50') +
       geom_point(data=genevar[!selected & !excluded, ],aes(x=Mean, y=StDev/Mean), shape=16, size=0.8, alpha=1, colour='black') +
       geom_point(data=genevar[(selected), ], aes(x=Mean, y=StDev/Mean), shape=16, size=1, alpha=1, colour='red') +
       geom_point(aes(x=NA_real_, y=NA_real_, colour=c('Filtered out','Not used','Used'))) +
@@ -541,20 +542,28 @@ Genes with mean raw count across all samples below `r params$minMean` are exclud
 message(paste("Using features that exceed either", params$minMean, "mean count across samples or", params$minSingle, "count in any single sample."))
 n <- nrow(params$tpm)
 topgenes <- rownames(counts)[(rowMeans(counts) >= params$minMean) | (rowSums(counts >= params$minSingle) > 0)]
-message(paste(n - length(topgenes), "features eliminated, out of", n))
+message(paste(n - length(topgenes), "features discarded, out of", n))
 
+# Genes that were excluded from TPM and will be excluded from PCA.
 if (!is.null(params$specnorm)) {
   n <- length(topgenes)
   topgenes <- topgenes[! topgenes %in% rownames(params$tpm)[grepl(params$specnorm, rownames(params$tpm), ignore.case=TRUE, perl=TRUE)] ]
-  message(paste("Additionally excluding", n - length(topgenes), "genes by name criteria."))
+  message(paste("Additionally", n - length(topgenes), "matched features blocked from library."))
+}
+
+# Genes to exclude from PCA.
+if (!is.null(params$excluded)) {
+  n <- length(topgenes)
+  topgenes <- topgenes[! topgenes %in% params$excluded ]
+  message(paste("Additionally excluding", n - length(topgenes), "listed features."))
 }
 
 # Further reduce the above genes to the top most dispersed, as in DESeq2
-cv <- sort(rowSds(params$tpm[topgenes, ]) / rowMeans(params$tpm[topgenes, ]), decreasing=TRUE)
+cv <- sort(rowSds(params$tpm[topgenes, ]) / rowMeans(params$tpm[topgenes, ]), decreasing=TRUE)   # coefficient of variation
 topgenes2 <- names(head(cv, n=params$topVars))
 
 # Make it obvious which genes in the TPM-StDev plot where excluded due to raw count.
-exclude <- rownames(counts)[(rowMeans(counts) < params$minMean) & (rowSums(counts >= params$minSingle) == 0)]
+lowcnt <- rownames(counts)[(rowMeans(counts) < params$minMean) & (rowSums(counts >= params$minSingle) == 0)]
 ```
 
 
@@ -625,7 +634,7 @@ PCA based on all genes that meet the count thresholds.
 
 ```{r pca}
 all_pca <- do_pca(log10(params$tpm), params$covars, ntop = params$ntop,
-                  topgenes= topgenes, exclude=exclude,
+                  topgenes= topgenes, exclude=lowcnt,
                   minMean = 0, minSingle = 0,      # prefiltered
                   rds = file.path(params$RDSdir,
                                   sub(".txt$|.tsv$", paste0("_", params$loopval, "_pca.RDS"), basename(params$cts))))
@@ -680,7 +689,7 @@ PCA using the top `r params$topVars` dispersed genes (out of those that already 
 
 ```{r pcab}
 all_pcab <- do_pca(log10(params$tpm), params$covars, ntop = params$ntop,
-                  topgenes= topgenes2, exclude=exclude,
+                  topgenes= topgenes2, exclude=lowcnt,
                   minMean = 0, minSingle = 0,      # prefiltered
                   rds = file.path(params$RDSdir,
                                   sub(".txt|.tsv", paste0("_", params$loopval, "_pcatop.RDS"), basename(params$cts))))

@@ -8,7 +8,8 @@ spec = matrix(c(
   'createID',       'C', 0, "logical",   "Non-summarized intron or exon counts by featureCounts. The first column is not unique IDs because genes are repeated. (FALSE)",
   'countsFile',     'f', 1, "character", "Tab-separated table of counts with `row_ID` and all the samples.",
   'forVar',         'F', 1, "character", "Looping variable (ie. carry out the analysis separately for each level of this var).",
-  'specnorm',       'G', 1, "character", "Special normalisation. Gene ids that match this pattern will not be included for calculation of library sizes for TPM/RPM normalisation.",
+  'excludeList',    'g', 1, "character", "Text file with vertical list of feature IDs to exclude from PCA (but not from TPM calculation).",
+  'specnorm',       'G', 1, "character", "Special normalisation. Feature IDs that match this pattern will not be included for calculation of library sizes for TPM/RPM normalisation, and will also not be included in the PCA.",
   'help',           'h', 0, "logical",   "Help",
   'idcol',          'i', 1, "integer",   "ID column to use (1). The others will be removed. See also -I and -F.",
   'nidcols',        'I', 1, "integer",   "Number of non-count columns at the start of the table (1). See also -i and -W.",
@@ -26,7 +27,7 @@ spec = matrix(c(
 
 opt <- getopt(spec)
 
-# opt <- list(baseDir="/Volumes/groups/busslinger/Kimon/tanja/R14425_RNAseq", countsFile="process/featureCounts/intron_genecounts.txt", createID=FALSE, samplesFile="description/covars_pca.txt", resultsDir="results/PCA", idcol=1, nidcols=6, minMean=50, minSingle=100, nhit=15, reportTemplate="/Volumes/groups/busslinger/Kimon/tanja/R14425_RNAseq/code/pca_report_template.Rmd", widthsCol=6, specnorm='^ENSMUSG|^TCR|^IGH', topVars=500, forVar='Design')
+# opt <- list(baseDir="/Volumes/groups/busslinger/Kimon/tanja/whole_lotta_controls", countsFile="process/intron_genecounts_ctr.tsv", createID=FALSE, samplesFile="description/covars.txt", resultsDir="results/PCA", idcol=1, nidcols=2, minMean=100, minSingle=200, nhit=15, reportTemplate="/Volumes/groups/busslinger/Kimon/tanja/whole_lotta_controls/code/pca_report_template.Rmd", widthsCol=2, specnorm='^ENSMUSG|^TCR|^IGH', excludeList="/Volumes/groups/busslinger/Kimon/tanja/whole_lotta_controls/aux/cc_genes.txt", topVars=1000, forVar='NULL')
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -51,7 +52,6 @@ if (is.null(opt$minSingle)) opt$minSingle <- 100L
 if (is.null(opt$nhit))  opt$nhit <- 10L
 if (is.null(opt$topVars))  opt$topVars <- 500L
 if ((!is.null(opt$forVar)) && opt$forVar == "NULL") opt$forVar <- NULL
-
 
 
 dir.create(file.path(opt$baseDir, opt$resultsDir), recursive=TRUE)
@@ -103,7 +103,7 @@ normscale <- function(counts, featLens=NULL, specnorm=opt$specnorm){
   }
   # Scale by sequencing depth
   if (!is.null(specnorm)) {
-    colsums <- colSums(TPMs[!grepl(specnorm, rownames(TPMs), ignore.case=TRUE, perl=TRUE), ], na.rm=TRUE)  # MOUSE only!
+    colsums <- colSums(TPMs[!grepl(specnorm, rownames(TPMs), ignore.case=TRUE, perl=TRUE), ], na.rm=TRUE)
   } else {
     colsums <- colSums(TPMs, na.rm=TRUE)
   }
@@ -117,6 +117,12 @@ TPM <- data.table(id=rownames(tpm), tpm)
 widths <- !all(is.null(opt$widthsFile), is.null(opt$widthsCol))
 setnames(TPM, c('id', paste0(colnames(tpm), ifelse(widths, '.TPM', '.RPM')) ))
 fwrite(TPM, file=sub(".txt$|.tsv$", ".scaled.txt", file.path(opt$baseDir, opt$countsFile)), quote=FALSE, sep="\t")
+
+
+# Genes not to include in PCA. For example, cell cycle.
+exclusion <- NULL
+if (!is.null(opt$excludeList))
+  exclusion <- read.csv(opt$excludeList, header=FALSE)[[1]]
 
 
 # Covariates
@@ -165,6 +171,7 @@ for (V in names(subcovars)){
                                 createID=opt$createID,
                                 specnorm=opt$specnorm,
                                 topVars=opt$topVars,
-                                loopVal=V)
+                                loopVal=V,
+                                excluded=exclusion)
   )
 }
