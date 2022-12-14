@@ -661,12 +661,10 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
   
   # Filter out the uninteresting points, to make it lightweight and ggplotly-friendly
   subfc <- outtab[(meetthresh), ]
-  selcnt <- rpms[head(subfc$name, n=ntop), ]
-  selvst <- regcnt[head(subfc$name, n=ntop), ]
   # Handle freak cases.
   if (nrow(subfc) <= ntop) {
-    subfc <- outtab[abs(log2FoldChange) >= 0.5 & padj < 0.1, ] 
     # Relax thresholds, so there's more context to display in the interactive volcano.
+    subfc <- outtab[abs(log2FoldChange) >= 0.5 & padj < 0.1, ] 
   }
   if (nrow(subfc) < ntop) {
     subfc <- outtab[mlog10p > 0.1, ]
@@ -677,11 +675,16 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
     # Remove thresholds, If subfc is empty, the code breaks. 
     # It's too much hassle to code alternatives for all the places subfc is used.
   }
+  selcnt <- rpms[head(subfc$name, n=ntop), ]
+  selvst <- regcnt[head(subfc$name, n=ntop), ]
+  if (nrow(outtab[(meetthresh), ]) == 0)
+    outtab[, istop := padj < pcutoff]    # Out of principle, no highlight labels for non-sig features.
   
   
   # Increment the 0s so they survive the log-transformation, but in a way they don't mix with non-zero data.
   # If data has been pre-filtered with minMean, there should be no remaining zeros.
   zeros <- min(outtab[refMeanTPM > 0, refMeanTPM], outtab[treatMeanTPM > 0, treatMeanTPM]) / 10
+  zerosb <- min(outtab[refMean > 0, refMean], outtab[treatMean > 0, treatMean]) / 10
   
   ## Volcanos
   
@@ -711,15 +714,15 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
             theme(aspect.ratio=1, legend.position = "none", panel.grid = element_blank())
   
   # Lighter image for interactive plotly. Only points that pass thresholds.
-  pvly <- ggplot(subfc, 
-                aes(x=log2FoldChange, y=mlog10p, label=name, colour=istop)) + 
-            geom_vline(xintercept = lfcthreshold, linetype="dotted",  colour="steelblue1") + 
-            geom_vline(xintercept = -lfcthreshold, linetype="dotted",  colour="steelblue1") + 
-            geom_hline(yintercept = -log10(pcutoff), linetype="dotted",  colour="steelblue1") + 
-            geom_point(alpha=0.5) +
-            scale_colour_manual(values=c("black", "red")) +
-            labs(x='log2( shrunken FC )', y='-log10( Padj )', title=ctrname) +
-            theme(aspect.ratio=1, legend.position = "none", panel.grid = element_blank())
+  # pvly <- ggplot(subfc, 
+  #               aes(x=log2FoldChange, y=mlog10p, label=name, colour=istop)) + 
+  #           geom_vline(xintercept = lfcthreshold, linetype="dotted",  colour="steelblue1") + 
+  #           geom_vline(xintercept = -lfcthreshold, linetype="dotted",  colour="steelblue1") + 
+  #           geom_hline(yintercept = -log10(pcutoff), linetype="dotted",  colour="steelblue1") + 
+  #           geom_point(alpha=0.5) +
+  #           scale_colour_manual(values=c("black", "red")) +
+  #           labs(x='log2( shrunken FC )', y='-log10( Padj )', title=ctrname) +
+  #           theme(aspect.ratio=1, legend.position = "none", panel.grid = element_blank())
   
   ## MA
   
@@ -753,15 +756,15 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
             theme(legend.position = "none", panel.grid = element_blank())
   
   # Lighter image for interactive plotly. Only points that pass thresholds.
-  pmaly <- ggplot(subfc, 
-                aes(x=log10(baseMean), y=log2FoldChange, label=name, colour=istop)) + 
-            geom_hline(yintercept = 0,  colour="grey50") + 
-            geom_point(alpha=0.5) +
-            geom_hline(yintercept = lfcthreshold, linetype="dotted",  colour="steelblue1") + 
-            geom_hline(yintercept = -lfcthreshold, linetype="dotted",  colour="steelblue1") + 
-            scale_colour_manual(values=c("black", "red")) +
-            labs(y='log2( FC )', y='log10( Mean )', title=ctrname) +
-            theme(legend.position = "none", panel.grid = element_blank())
+  # pmaly <- ggplot(subfc, 
+  #               aes(x=log10(baseMean), y=log2FoldChange, label=name, colour=istop)) + 
+  #           geom_hline(yintercept = 0,  colour="grey50") + 
+  #           geom_point(alpha=0.5) +
+  #           geom_hline(yintercept = lfcthreshold, linetype="dotted",  colour="steelblue1") + 
+  #           geom_hline(yintercept = -lfcthreshold, linetype="dotted",  colour="steelblue1") + 
+  #           scale_colour_manual(values=c("black", "red")) +
+  #           labs(y='log2( FC )', y='log10( Mean )', title=ctrname) +
+  #           theme(legend.position = "none", panel.grid = element_blank())
   
   ## Expression heatmap of ntop genes that meet thresholds
   
@@ -836,15 +839,30 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
       labs(title=ctrname, x=paste('reference Mean', PMtype), y=paste('treatment Mean', PMtype)) +
       theme(aspect.ratio=1, panel.grid.minor = element_blank())
   
-  pe1ly <- ggplot(NULL, aes(x=refMeanTPM + zeros, y=treatMeanTPM, label=name, colour=category)) +
+  pe1b <- ggplot(NULL, aes(x=refMean + zerosb, y=treatMean + zerosb, label=name, colour=category)) +
       geom_abline(intercept = 0, slope = 1, colour='black') +
+      geom_point(data=outtab[category == highlight[1], ], alpha=0.4, size=rel(0.8)) +
+      geom_point(data=outtab[category == highlight[2], ], alpha=0.7, size=rel(0.8)) +
       geom_point(data=outtab[category == highlight[3], ], alpha=0.7) +
       geom_point(data=outtab[category == highlight[4], ]) +
+      geom_label_repel(data=outtab[category == highlight[4], ], size=rel(2.5), colour="violet",
+                       segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=10, force_pull=5) +
       scale_x_log10() + 
       scale_y_log10() +
       scale_colour_manual(values=hlcol) +
-      labs(title=ctrname, x=paste('reference Mean', PMtype), y=paste('treatment Mean', PMtype)) +
-      theme(aspect.ratio=1, legend.position = "none", panel.grid.minor = element_blank()) 
+      annotation_logticks(base=10, sides='lrtb') +
+      labs(title=ctrname, x='reference Mean Reads', y='treatment Mean Reads') +
+      theme(aspect.ratio=1, panel.grid.minor = element_blank())
+  
+  # pe1ly <- ggplot(NULL, aes(x=refMeanTPM + zeros, y=treatMeanTPM, label=name, colour=category)) +
+  #     geom_abline(intercept = 0, slope = 1, colour='black') +
+  #     geom_point(data=outtab[category == highlight[3], ], alpha=0.7) +
+  #     geom_point(data=outtab[category == highlight[4], ]) +
+  #     scale_x_log10() + 
+  #     scale_y_log10() +
+  #     scale_colour_manual(values=hlcol) +
+  #     labs(title=ctrname, x=paste('reference Mean', PMtype), y=paste('treatment Mean', PMtype)) +
+  #     theme(aspect.ratio=1, legend.position = "none", panel.grid.minor = element_blank()) 
   
   pe2 <- ggplot(NULL, aes(x=refMeanTPM + zeros, y=refStDev / (refMeanTPM + zeros), label=name, colour=category)) +
       geom_point(data=outtab[category == highlight[1], ], alpha=0.4, size=0.8) +
@@ -889,22 +907,35 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
       labs(title=ctrname, y=paste('reference Mean', PMtype), x='log2( FC )') +
       theme(aspect.ratio=1, legend.position='none',  panel.grid.minor = element_blank())
   
+    pe4b <- ggplot(NULL, aes(y=refMean + zerosb, x=log2FoldChange, label=name, colour=category)) +
+      geom_vline(xintercept = lfcthreshold, linetype="dashed",  colour="steelblue1") + 
+      geom_vline(xintercept = -lfcthreshold, linetype="dashed",  colour="steelblue1") + 
+      geom_point(data=outtab[category == highlight[1], ], alpha=0.4, size=rel(0.8),  colour="black") +
+      geom_point(data=outtab[category == highlight[2], ], alpha=0.7, size=rel(0.8),  colour="black") +
+      geom_point(data=outtab[category == highlight[3], ], alpha=0.7,  colour="black") +
+      geom_point(data=outtab[category == highlight[4], ]) +
+      geom_label_repel(data=outtab[category == highlight[4], ], size=rel(2.5), colour="violet",
+                       segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=10, force_pull=5) +
+      scale_y_log10() + 
+      scale_colour_manual(values=hlcol) +
+      annotation_logticks(base=10, sides='lr') +
+      labs(title=ctrname, y='reference Mean Reads', x='log2( FC )') +
+      theme(aspect.ratio=1, legend.position='none',  panel.grid.minor = element_blank())
   ## Table pt2
   
   hashits <- any(outtab[, meetthresh], na.rm=TRUE)
   setnames(outtab, sub('TPM|RPM', PMtype, names(outtab)))
   
-  # Drop columns I don't need,
-  keep <- c("name", "baseMean", "FC", "pvalue", "padj",
-              names(outtab)[grepl("refMean", names(outtab))], names(outtab)[grepl("treatMean", names(outtab))], # avoid explicitly handling TPM vs RPM
-             "log2FoldChange", "log2FoldChange.shrink",  "mlog10p", "maxCount", "maxScaledCount")     # convenience fields for plotting or filtering
-  outtab <- outtab[, keep, with=FALSE]
-  
-  virgin <- NULL
+  custom <- NULL
   if (addPrefix) {
-    # Pristine copy, without prefixes.
-    virgin <- copy(outtab)
+    # Keep a pristine copy, without prefixes.
+    custom <- copy(outtab)
     
+    # Drop columns I don't need
+    keep <- c("name", "baseMean", "FC", "log2FoldChange", "log2FoldChange.shrink", "pvalue", "padj",  "mlog10p", 
+              "refMean", "treatMean", "maxCount", "refMeanTPM", "treatMeanTPM", "maxScaledCount")
+    custom <- custom[, keep, with=FALSE]
+  
     # Prepare column names for merging the files later
     prefix <- paste(prefix,
                      # paste(sub('[^A-Za-z0-9_\\-.+~]', '-', design(dds), perl=TRUE), collapse=''),
@@ -916,18 +947,20 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
     #                  names(outtab)[2:length(outtab)], sep='.') ) )
     
     # Add as suffix instead. Makes life easier in spotfire
-    setnames(outtab, c(names(outtab)[1],      # keep uniform name across tables for use as joining key
-                       paste(names(outtab)[2:length(outtab)],  prefix, sep='.')) )
+    setnames(custom, c(names(custom)[1],      # keep uniform name across tables for use as joining key
+                       paste(names(custom)[2:length(custom)],  prefix, sep='.')) )
   
   }
   
   return(list(contrast=ctrname, 
               pv1=pv1, pv2=pv2, #pvly=ggplotly(pvly, dynamicTicks = TRUE),
               pma1=pma1, pma2=pma2, #pmaly=ggplotly(pmaly, dynamicTicks = TRUE),
-              pe1=pe1, pe2=pe2, pe3=pe3, pe4=pe4, #pe1ly=ggplotly(pe1ly, dynamicTicks = TRUE),
+              pe1=pe1, pe1b=pe1b, pe2=pe2, pe3=pe3, pe4=pe4, pe4b=pe4b, #pe1ly=ggplotly(pe1ly, dynamicTicks = TRUE),
               ph1=ph1, ph2=ph2, 
               tophits=rn, hashits=hashits,
-              outtab=outtab, virgin=virgin))
+              outtab=outtab[, c("name", "baseMean", "log2FoldChange", "lfcSE", "stat", "pvalue", "padj",
+                                "log2FoldChange.shrink", "lfcSE.shrink", "padj.shrink"), with=FALSE], 
+              custom=custom))
 }
 ##
 
@@ -971,11 +1004,8 @@ for (res in resall) {
   ################
   
   print(res[["pv1"]])
-  # print(res[["pe4"]])
-  print(res[["pe1"]])
-  # print( (res[["pe2"]] + theme(legend.position='none')) | (res[["pe3"]] + theme(legend.position='none')))
-  # print(res[["pma1"]])
-  print(res[["ph2"]])
+  print(res[["pe1b"]])
+  print(res[["pe4"]])
 }
 ```
 
@@ -1070,17 +1100,17 @@ if (!is.null(params$reducedFormula)) {
 
 if (!is.null(params$comparisons)) {
   for (res in resall) {
-    # Drop columns I don't need
+    # res <- resall[[1]]
     fwrite(res$outtab,
            file = file.path(params$baseDir,
                             params$resultsDir,
                             paste(params$prefix, res$contrast, 'deseq2.tsv', sep='.')),
            sep = "\t", quote = FALSE, row.names = FALSE, col.names = TRUE)
     if (params$longlabel)
-      fwrite(res$virgin,
+      fwrite(res$custom,
            file = file.path(params$baseDir,
                             params$resultsDir,
-                            paste(params$prefix, res$contrast, 'deseq2.nolab.tsv', sep='.')),
+                            paste(params$prefix, res$contrast, 'custom.deseq2.tsv', sep='.')),
            sep = "\t", quote = FALSE, row.names = FALSE, col.names = TRUE)
   }
 }

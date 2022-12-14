@@ -97,7 +97,7 @@ if config["do_DE"]:
 			HOME + "/process/duprates/duprates.txt",
 			expand(HOME + "/process/featureCounts/{countsfile}.txt", countsfile=FLAVOURS),
 			expand(HOME + "/results/PCA/{countsfile}.default.pca.html", countsfile=FLAVOURS),
-			expand(HOME + "/results/DE/{countsfile}.all.deseq2.spotfire.txt", countsfile=FLAVOURS),
+			expand(HOME + "/results/DE/{countsfile}.all.custom.deseq2.spotfire.txt", countsfile=FLAVOURS),
 			expand(HOME + "/results/DE/{countsfile}.{dename}.deseq2.tsv", countsfile=FLAVOURS, dename=EXPECTED_DE)
 		# params:
 		# 	scratch=SCRATCH
@@ -121,15 +121,16 @@ else:
 
 
 
-# Set up directories
+# Set up project home.
 rule directories:
 	output:
 		"dirsdone"
 	shell:
 		"""
-		mkdir -p aux data logdump process results
+		mkdir -p aux data logdump process results 
 		touch dirsdone
 		"""
+##
 
 # Obtain data from VBCF
 
@@ -354,10 +355,10 @@ if pairedend:
 			mem='4G'
 		envmodules:
 			sysenv22,
+			rbase,
 			rlibs
 		shell:
 			"""
-			mkdir -p $(dirname {output.table}) &&
 			Rscript {params.code}/dupRadar_run.R -b {input} -g {params.ann} -o {output.table} -p -s {params.stranding} -t {threads}
 			"""
 			
@@ -380,10 +381,10 @@ else:
 			mem='4G'
 		envmodules:
 			sysenv22,
+			rbase,
 			rlibs
 		shell:
 			"""
-			mkdir -p $(dirname {output.table}) &&
 			Rscript {params.code}/dupRadar_run.R -b {input} -g {params.ann} -o {output.table} -s {params.stranding} -t {threads}
 			"""
 #
@@ -781,7 +782,7 @@ if config["do_DE"]:
 			samples=os.path.join(SCRATCH, config["DE"]["covars"])       # listed only to trigger the setup rule
 		output:
 			vanilla=expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.tsv", dename=EXPECTED_DE, allow_missing=True),  # allow_missing: {dename} takes all the specified values in each run of this rule, while the rule is ran for every value of {countsfile} specified later.
-			custom=expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.custom.tsv", dename=EXPECTED_DE, allow_missing=True)
+			custom=expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.custom.deseq2.tsv", dename=EXPECTED_DE, allow_missing=True)
 			# One table per contrast, but contrasts may get grouped into fewer HTML reports
 		wildcard_constraints:
 			countsfile="[^.]+",
@@ -818,9 +819,9 @@ if config["do_DE"]:
 
 	rule merge_DE_table:
 			input:
-				expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.custom.tsv", dename=EXPECTED_DE, allow_missing=True)   # allow_missing: {dename} takes all the specified values in each run of this rule, while the rule is ran for every value of {countsfile} specified later.
+				expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.custom.deseq2.tsv", dename=EXPECTED_DE, allow_missing=True)   # allow_missing: {dename} takes all the specified values in each run of this rule, while the rule is ran for every value of {countsfile} specified later.
 			output:
-				SCRATCH + "/results/DE/{countsfile}/{countsfile}.all.deseq2.tsv"
+				SCRATCH + "/results/DE/{countsfile}/{countsfile}.all.custom.deseq2.tsv"
 			wildcard_constraints:
 				countsfile="[^.]+"
 			envmodules:
@@ -844,10 +845,10 @@ if config["do_DE"]:
 
 	rule prepare_for_Spotfire:
 		input:
-			de=SCRATCH + "/results/DE/{countsfile}/{countsfile}.all.deseq2.tsv",
+			de=SCRATCH + "/results/DE/{countsfile}/{countsfile}.all.custom.deseq2.tsv",
 			cnt=SCRATCH + "/featureCounts/{countsfile}.txt"
 		output:
-			SCRATCH + "/results/DE/{countsfile}/{countsfile}.all.deseq2.spotfire.txt"
+			SCRATCH + "/results/DE/{countsfile}/{countsfile}.all.custom.deseq2.spotfire.txt"
 		wildcard_constraints:
 				countsfile="[^.]+",
 				denamenl="all\.deseq2|.+\.deseq2\.nolab"
@@ -877,10 +878,10 @@ if config["do_DE"]:
 
 	rule stage_out_DE:
 		input:
-			spot=expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.all.deseq2.spotfire.txt", countsfile=FLAVOURS),
+			spot=expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.all.custom.deseq2.spotfire.txt", countsfile=FLAVOURS),
 			vanilla=expand(SCRATCH + "/results/DE/{countsfile}/{countsfile}.{dename}.deseq2.tsv", countsfile=FLAVOURS, dename=EXPECTED_DE),
 		output:
-			spot=expand(HOME + "/results/DE/{countsfile}.all.deseq2.spotfire.txt", countsfile=FLAVOURS),
+			spot=expand(HOME + "/results/DE/{countsfile}.all.custom.deseq2.spotfire.txt", countsfile=FLAVOURS),
 			vanilla=expand(HOME + "/results/DE/{countsfile}.{dename}.deseq2.tsv", countsfile=FLAVOURS, dename=EXPECTED_DE)
 		params:
 			outdir=HOME + "/results/DE/",

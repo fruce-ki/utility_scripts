@@ -35,7 +35,7 @@ spec = matrix(c(
 ), byrow=TRUE, ncol=5)
 
 opt = getopt(spec)
-# opt <- list(createID=FALSE, baseDir='/scratch-cbe/users/kimon.froussios/tanja/R14425_RNAseq', countsFile='process/featureCounts_fixed/exon_spliced_genecounts.txt', resultsDir='results/DE', samplesFile='description/covars.txt', minCount=0, minTPM=0, lfcthreshold=1, nidcols=6, idcol=1, ntop=50, bmF=FALSE, pcutoff=0.05, prescaled=FALSE, prefix='exon_spliced_genecounts', label=FALSE, widthsCol=6, reportTemplate="/groups/busslinger/Kimon/tanja/R14425_RNAseq/code/deseq2_report_template_LR.Rmd", comparisons="TF_type-1v2,TF_type-3v4,TF_type-3v4,TF_type-3v4,TF_type-3v4,TF_type-3v4,TF_type-5v6", contexts="Cell-1,Cell-1,Cell-2,Cell-3,Cell-4,Cell-5,Cell-5", fullFormula="~TF_type", reducedFormula="NULL", specnorm='^ENSMUSG|^TCR|^IGHG|^IGHM|^IGH[^GM]')
+# opt <- list(createID=FALSE, baseDir='/scratch-cbe/users/kimon.froussios/test', countsFile='process/featureCounts_fixed/spliced_genecounts.txt', resultsDir='results/DE', samplesFile='description/covars_R14425.txt', minCount=100, minTPM=5, lfcthreshold=1, nidcols=6, idcol=1, ntop=100, bmF=FALSE, pcutoff=0.05, prescaled=FALSE, prefix='spliced_genecounts', label=TRUE, widthsCol=6, reportTemplate="/groups/busslinger/Kimon/test/code/deseq2_report_template_LR.Rmd", comparisons="TF_type-1v2,TF_type-3v4,TF_type-3v4,TF_type-3v4,TF_type-3v4,TF_type-3v4,TF_type-5v6", contexts="Cell-1,Cell-1,Cell-2,Cell-3,Cell-4,Cell-5,Cell-5", fullFormula="NULL", reducedFormula="NULL", specnorm='^ENSMUSG|^TCR|^IGH')
 
 
 if ( !is.null(opt$help) ) {
@@ -143,7 +143,7 @@ stopifnot(all(rownames(cts) == featLens[[1]]))
 #######################
 ###  Split up data as instructed
 for(y in unique(contexts)) {
-  # y <- unique(contexts)[[3]]
+  # y <- unique(contexts)[[1]]
   
   contvar <- y[1]
   contlev <- unique(covars[[contvar]])[as.integer(y[2])]
@@ -151,7 +151,7 @@ for(y in unique(contexts)) {
   sel <- which(vapply(contexts, function(a, b=y) { a[1] == b[1] && a[2] == b[2] },  logical(1)))
   
   condvars <- NULL
-  treatlev <- NULL
+  treatlevs <- NULL
   reflevs <- NULL
   if (!is.null(opt$comparisons)) {
     selcomps <- comparisons[sel]
@@ -162,9 +162,10 @@ for(y in unique(contexts)) {
     treatlevs <- vapply(selcomps, function(x){ as.character(unique(covars[[x[[1]]]])[x[[2]][1]]) }, character(1))
     reflevs <- vapply(selcomps, function(x){ as.character(unique(covars[[x[[1]]]])[x[[2]][2]]) }, character(1))
     
-    sanity <- vapply(condvars, function(x) { grepl(x, opt$fullFormula, fixed=TRUE) }, logical(1))
-    if (!is.null(opt$fullFormula) && any(!sanity)) {
-      warning(paste(condvars[which(!sanity)], "not in formula", opt$fullFormula))
+    if (!is.null(opt$fullFormula)) {
+      sanity <- vapply(condvars, function(x) { grepl(x, opt$fullFormula, fixed=TRUE) }, logical(1))
+      if (any(!sanity))
+        warning(paste(condvars[which(!sanity)], "not in formula", opt$fullFormula))
     }
   }
   
@@ -238,7 +239,6 @@ for(y in unique(contexts)) {
                                 covars=covars,
                                 widths = featLens,
                                 specnorm=opt$specnorm,
-                                deltaN=deltan,
                                 rlog=!opt$vst,
                                 comparisons=subcomps,
                                 althyp=opt$altHypo,

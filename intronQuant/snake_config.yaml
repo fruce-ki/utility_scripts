@@ -1,58 +1,63 @@
-### snakemake --local-cores 1 --jobs 50 --use-envmodules --latency-wait 30 --restart-times 10 --cluster "sbatch -c {threads} --time={resources.maxtime} --mem={resources.mem} -e ./logdump/slurm-%j.err -o ./logdump/slurm-%j.out"
+### snakemake --configfile snake_config.yaml --local-cores 1 --jobs 50 --use-envmodules --latency-wait 30 --restart-times 10 --cluster "sbatch -c {threads} --time={resources.maxtime} --mem={resources.mem} -e ./logdump/slurm-%j.err -o ./logdump/slurm-%j.out"
 
-projectHome: "pro/ject"      # UPDATE HERE!
-projectScratch: "/scratch-cbe/pro/ject"      # UPDATE HERE!
-codeDir: "pro/ject/code"      # UPDATE HERE! I always make a fresh copy for a new project
+projectHome: "/groups/busslinger/Kimon/test"      # UPDATE HERE!
+projectScratch: "/scratch-cbe/users/kimon.froussios/test"      # UPDATE HERE!
+codeDir: "/groups/busslinger/Kimon/test/code"      # UPDATE HERE! I always make a fresh copy for a new project
 
 sampleinfo: "description/sample_info.txt"      # Samples to fetch. UPDATE HERE?
 idcols:        # In sampleinfo above
-  id: 0              # Seqmate sample ID. 0-based column index.                                              UPDATE HERE maybe?
-  aligndate: 6       # Analysis date from seqmate, to desambiguate re-submissions. 0-based column index.     UPDATE HERE maybe?
-  name: 7           # Human-friendly sample names. 0-based column index.                                    UPDATE HERE!
-idjoin: "__"         # Sample & file name format in the pipeline: <name><idjoin><id>                         UPDATE HERE maybe?
+  id: 0              # Seqmate sample ID. 0-based.                                 UPDATE HERE maybe?
+  aligndate: 1       # Analysis date from seqmate, to desambiguate re-submissions. UPDATE HERE maybe?
+  name: 11           # Human-friendly sample names. 0-based                        UPDATE HERE!
+idjoin: "__"         # Sample & file name format in the pipeline: <name><idjoin><id>    UPDATE HERE maybe?
 
 vbcf_alignments_table_url: "https://seqmate-archive.vbc.ac.at/alignments/group/busslinger/text"
 un: "~/vbcf_username.txt"   #  Text file containing only Seqmate username.     UPDATE HERE maybe?
 pw: "~/vbcf_password.txt"   #  Text file containing only Seqmate password.     UPDATE HERE maybe?
 
-ucsc_session: "NULL"   # UPDATE HERE!
+ucsc_session: "http://ucsc.vbc.ac.at/cgi-bin/hgTracks?hgS_doOtherUser=submit&hgS_otherUserName=kimon.froussios&hgS_otherUserSessionName=R14425_ribominusRNAseq"   # UPDATE HERE!
 
 annotation:      # UPDATE HERE maybe?
-  introns: "special/annotation.gtf"
-  exons: "any/annotation.gtf"
-#  premrna: "special/all-premRNA_plus_multiExon-mRNA.gtf"
-#kallisto_index: "special/rna.flattenedExons_premRNA"
-reference: "any/genome.fa"
+  introns: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.gtf"
+  exons: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.gtf"
+#  firstintron: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.firstIntron_lastExon.gtf"
+#  lastexon: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.firstIntron_lastExon.gtf"
+#  first2introns: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.firstIntrons_lastExons.gtf"
+#  last2exons: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.with_introns.firstIntrons_lastExons.gtf"
+#  premrna: "/groups/busslinger/Kimon/genome_mm10/refGene.mm10.2018_1206.withIgtcr.final.annotation.IMP_IGTCR_only.all-premRNA_plus_multiExon-mRNA.gtf"
+#kallisto_index: "/groups/busslinger/Kimon/genome_mm10/kallisto/GRCm38.mm10.rna.flattenedExons_premRNA"
+reference: "/groups/busslinger/Bioinf/data/genomes/mm10/assembly/GRCm38.mm10.fa"
 
 PCA:
   covars: "description/covars.txt"   # covariates table for highlighting in plots        UPDATE HERE maybe?
   minMean: 50                        # minimum mean count across samples
   minSingle: 100                     # minimum count in a single sample, IF the minimum mean is not met
   ntop: 15                           # top loading genes to report per principal component
-  #loopgroup: "Cell"             # Also create analyses of subsets defined by this variable in covars.        UPDATE HERE!
+  #loopgroup: "Celltype"             # Also create analyses of subsets defined by this variable in covars.        UPDATE HERE!
   loopgroup: 'NULL'
-  #specialnorm: "'^ENSMUSG|^TCR|^IGH'"  # exclude gene ids that match this pattern.      UPDATE HERE?
-  specialnorm: 'NULL'
+  specialnorm: "'^ENSMUSG|^TCR|^IGH'"  # exclude gene ids that match this pattern, from both library size and PCA.      UPDATE HERE?
+  #specialnorm: 'NULL'
 
 do_DE: True     # ONLY use for a single simple DE formula applicable to all samples. More complex datasets/requirements should be handled outside the pipeline.
 DE:  # indices are 1-based here
   covars: "description/covars.txt"   # Covariates table. Contents will be used in filenames, so clean them up accordingly.        UPDATE HERE maybe?
-  comparisons: "Condition-2v1, Condition-4v3"    # variable-#v# (ie condition-2v1) where the numbers refer to values of the variable by order of appearance in covars.
-  contexts:    "Organ-1,      Organ-2"         # variable-# (ie Celltype-1) where the number refers to value of the variable by order of appearance in covars.
+  comparisons: "TF_type-1v2, TF_type-3v4, TF_type-3v4, TF_type-3v4, TF_type-3v4, TF_type-3v4, TF_type-5v6"    # variable-#v# (ie Condition-2v1) where the numbers refer to values of the variable by order of appearance in covars.
+  contexts:    "Cell-1,      Cell-1,      Cell-2,      Cell-3,      Cell-4,      Cell-5,      Cell-5"         # variable-# (ie Celltype-1) where the number refers to value of the variable by order of appearance in covars.
   lfc_thresh: 1           # Minimum LFC, only for labelling purposes in the report.
   p_cut: 0.05             # Significance level for deseq2 and for labelling in the report.
-  minCnt: 100               # Minimum read count, only for labelling purposes in the report.
+  minCnt: 100             # Minimum read count, only for labelling purposes in the report.
   minTPM: 5               # Minimum TPM, only for labelling purposes in the report.
   ntop: 100                # Top DE features to label in the report.
-  #specialnorm: "'^ENSMUSG|^TCR|^IGHG|^IGHM|^IGH[^GM]'"  # ignore gene ids that match this pattern for calculation of the library size for TPM/RPM normalisation      UPDATE HERE!
-  specialnorm: 'NULL'
-  #formula: "~Type"            # Full formula for Likelihood Ratio Test. Also overrides automatic formulas from specifications of Wald test pairwise comparisons.
   formula: "NULL"
-  #reduced: "~1"         # Reduced formula for Likelihood Ratio Test. Determines if LRT is done at all.
-  reduced: 'NULL'
+  #formula: "~TF_type"   # Full formula. Mostly for Likelihood Ratio Test. Will also be used for any Wald tests, if provided. If NULL, the variables from the comparisons will be added together as a Wald formula.
+  reduced: "NULL"
+  #reduced: "~1"         # Reduced formula for Likelihood Ratio Test.
+  ### NOTE: Formulas with more than one component are not tested. Result retrieval or file naming may break.
+  specialnorm: "'^ENSMUSG|^TCR|^IGH'"  # ignore gene ids that match this pattern for calculation of the library size.      UPDATE HERE!
+  #specialnorm: 'NULL'
 
 Spotfire:
-  fc_thresh: 3                   # Create FC threshold option at this value (also at 1/fc_thresh).
+  fc_thresh: 3                  # Create FC threshold option at this value.
   p_cut: 0.05                    # Create P-value cutoff option at this value.
   countCap: 500                  # Upper cap for the read count threshold filter range.
   tpmCap: 25                     # Upper cap for the TPM threshold range.
