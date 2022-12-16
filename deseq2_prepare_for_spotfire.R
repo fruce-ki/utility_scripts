@@ -221,7 +221,7 @@ if (opt$simplify) {
 DE <- merge(DE, CNT, by.x='name', by.y='Geneid', all.x=TRUE, all.y=FALSE)
 
 # Output clustered by content,for easier Spotfire plot duplication.
-fwrite(DE[, sort(names(DE)), with=FALSE], file=sub("txt$|tsv$", "spotfire.txt", opt$de), sep="\t", quote=FALSE, col.names=TRUE)
+fwrite(DE[, c("name", sort(names(DE)[2:(length(DE) - 1)]), "URL"), with=FALSE], file=sub("txt$|tsv$", "spotfire.txt", opt$de), sep="\t", quote=FALSE, col.names=TRUE)
 
 
 # ## Long form count maybe useful for some plots
