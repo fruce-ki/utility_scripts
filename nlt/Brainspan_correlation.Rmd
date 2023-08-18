@@ -1,0 +1,219 @@
+---
+title: "Expression Comparison to Brainspan"
+author: "Kimon Froussios"
+date: "2023-08-14"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: 
+      collapsed: false
+    number_sections: true
+    df_print: paged
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig_width = 10, fig_height = 10)
+
+library(data.table)
+library(rtracklayer)
+library(ggplot2)
+
+setwd("~/Camilla/")
+```
+
+# Preliminaries
+
+## Parse files
+
+```{r data_import}
+cat("Neurolentech data, batches 1-3.\n")
+
+nlt1 <- fread("Neurolentech/counting_summary_batch1/summary_unique.tsv")
+nlt2 <- fread("Neurolentech/counting_summary_batch2/summary_unique.tsv")
+nlt3 <- fread("Neurolentech/counting_summary_batch3/summary_unique.tsv")
+
+cat("Table dimensions:", dim(nlt1), ",", dim(nlt2), ",", dim(nlt3), "\n")
+cat("Number of gene IDs:", length(unique( Reduce(union, list(nlt1$gene_id, nlt2$gene_id, nlt3$gene_id)) )), "\n")
+
+cat("Brainspan data.\n")
+
+BSP <- fread("Brainspan/expression_matrix.csv")
+bspc <- fread("Brainspan/columns_metadata.csv")
+bspr <- fread("Brainspan/rows_metadata.csv")
+
+cat("Table dimensions:", dim(bsp),  "\n")
+cat("Number of gene IDs:", length(unique(bspr[, ensembl_gene_id])), "\n")
+
+
+cat("Gene annotation GRCh.p12/Ensembl.94 import. (Archived version, matching Lexogen's report. Current version is GRCh38.p14/Ensembl.110)\n")
+
+ENSEMBL <- as.data.table( rtracklayer::import("GRCh38.p12_ensembl/Homo_sapiens.GRCh38.94.gtf") )
+cat("Number of gene IDs:", length(unique(ENSEMBL[, gene_id])), "\n")
+
+```
+
+## Restructure data
+
+### Annotation
+
+```{r clean_up_annotation}
+# Keep only gene features.
+cat("Are there 'gene' features for all the 'exon' features?\n")
+cat(all(ENSEMBL[type == "exon", gene_id] %in% ENSEMBL[type == "gene", gene_id]), "\n")
+
+ENSEMBL <- ENSEMBL[type == "gene", ]
+
+cat("Create gene lengths.\n")
+ENSEMBL[, length := (end - start) + 1] # left- and right-closed ranges
+
+cat("Are all computed lengths positive values?\n")
+cat(all(ENSEMBL[, length > 0]), "\n")
+
+setkey(ENSEMBL, gene_id)
+```
+
+### Brainspan
+
+**_NOTE_**: Brainspan data is based on an older genome assembly -- GRCh37 -- and a very old genome annotation -- Ensembl 56. This is in no way directly comparable to the Neurolentech expression data based on the much more recent GRCh38.p12 assembly and Ensembl 94 annotation. Gene IDs are not always maintained across the assemblies, especially when the gene models are significantly altered. Gene IDs can be computationally updated to the "equivalent" modern ones, but the process is not absolute. Some genes on either set have no equivalent in the other, while others may have had their models revised to a degree that could affect their expression quantification. Re-mapping the sequencing data of Brainspan (if available) to the current assembly and re-quantifying with the same annotation version as used for the Neurolentech data would be the ideal way to compare the data, but this is beyond the scope of this report.
+
+```{r brainspan_id_query}
+# Save IDs into file to manually submit to the Ensembl Historical ID Converter. 
+#    https://www.ensembl.org/Homo_sapiens/Tools/IDMapper
+# https://grch37.ensembl.org/Homo_sapiens/Tools/IDMapper
+write(unique(bspr[, ensembl_gene_id]), file="Brainspan/ensembl_ids.txt")
+
+# Import the result
+ensembl_hist37 <- rbind(fread("Brainspan/ensembl_ids_idmapper37.txt", header = FALSE, fill = TRUE, sep = ",",
+                               col.names = c("old", "new", "release", "score")) ) # short titles without spaces
+ensembl_hist38 <- rbind(fread("Brainspan/ensembl_ids_idmapper38.txt", header = FALSE, fill = TRUE, sep = ",",
+                               col.names = c("old", "new", "release", "score")) ) # short titles without spaces
+```
+
+The ID History converter exists two versions. Presumably the GRCh38 version fully supercedes the GRCh37 version of the tool, but query both and decide after some sanity checks.
+
+```{r ensembl_tidy_up}
+# The history table is untidy. Rows are grouped by blank spacer rows and repetition of the row titles.
+# Therefore the table needs to be split up in all the groups and then put back together in a tidy format.
+
+# Identify the rows that repeat the titles. Use that to create a grouping column.
+#  the forst group does not haveits own title as it was consumed by the parser.
+titles <- c(1, which(ensembl_hist37[, grepl("^Old", old)]) )
+for (i in titles) {
+  ensembl_hist37[i:nrow(ensembl_hist37), group := as.character(i)] # terribly inefficient performance, but simple
+}
+titles <- c(1, which(ensembl_hist38[, grepl("^Old", old)]) )
+for (i in titles) {
+  ensembl_hist38[i:nrow(ensembl_hist38), group := as.character(i)] # terribly inefficient performance, but simple
+}
+
+#.Drop the superfluous titles
+ensembl_hist37 <- ensembl_hist37[!grepl("^Old", old), ]
+ensembl_hist38 <- ensembl_hist38[!grepl("^Old", old), ]
+
+# Drop the blank rows. Simply dropping all of them would drop groups for which I have no info. 
+# I want to guarantee every group keeps at least ome row, even if it is a blank one, at least at first.
+ensembl_hist37[, nr := .N, by = group]
+ensembl_hist38[, nr := .N, by = group]
+ensembl_hist37 <- ensembl_hist37[old != '' | (old == '' & nr == 1), ]
+ensembl_hist38 <- ensembl_hist38[old != '' | (old == '' & nr == 1), ]
+
+# IDs here have version suffixes, but in the expression table they do not. Trim off the version suffixes.
+ensembl_hist37[, old_trim := sub("\\.\\d+", "", old)]
+ensembl_hist37[, new_trim := sub("\\.\\d+", "", new)]
+ensembl_hist38[, old_trim := sub("\\.\\d+", "", old)]
+ensembl_hist38[, new_trim := sub("\\.\\d+", "", new)]
+
+# Sanity check
+cat("Are GRCh37 results a subset of GRCh38?\n")
+cat(all(ensembl_hist37[, old_trim] %in% ensembl_hist38[, old_trim]))
+
+cat("IDs in query:\n")
+cat(length(unique(bspr[, ensembl_gene_id])), "\n")
+
+cat("History entries returned by the conversion tool:\n")
+cat(length(unique(ensembl_hist38[, group])), "\n")
+
+cat("History entries that are just blank, no info returned at all, not even to say what the query ID was:\n")
+cat(sum(ensembl_hist38[, old == '']), "\n")
+
+cat("Brainspan gene IDs that are present as 'old' IDs in the history data:\n")
+cat(sum(bspr[, ensembl_gene_id] %in% ensembl_hist38[, old_trim]), "\n")
+
+cat("Brainspan gene IDs that are present as either 'old' or 'new' IDs in the history data:\n")
+cat(sum(bspr[, ensembl_gene_id] %in% ensembl_hist38[, old_trim] | 
+          bspr[, ensembl_gene_id] %in% ensembl_hist38[, new_trim]), "\n")
+
+# Restrict the history to the time between the relevant Ensembl versions.
+ensembl_hist38 <- ensembl_hist38[release > 56 | release <= 94, ]
+
+# Only need the first and last ID, in case of multiple intermediate changes.
+setorder(ensembl_hist38, group, release) # It should already be, but leave nothing to chance
+ensembl_hist38[, oldest := head(.SD[release == min(release), old_trim], 1), by = group]
+ensembl_hist38[, newest := tail(.SD[release == max(release), new_trim], 1), by = group]
+
+# Drop unnecessary fields.
+LOOKUP <- unique(ensembl_hist38[, .(oldest, newest)])
+
+cat("ID's that have not changed:\n")
+cat(sum(LOOKUP[, oldest == newest]), "\n")
+
+cat("ID's that have changed:\n")
+cat(sum(LOOKUP[, oldest != newest]), "\n")
+
+cat("ID's that have changed:\n")
+cat(sum(LOOKUP[, oldest != newest]), "\n")
+
+cat("ID's that have been retired (subset of IDs that changed):\n")
+cat(sum(LOOKUP[, newest == "<retired>"]))
+
+# I don't need a look-up for IDs that have not changed. Lack of change shall be the default assumption.
+LOOKUP <-LOOKUP[oldest != newest, ]
+```
+
+Unfortunately, for about 10K genes, Ensembl does not provide any history information. A quick manual look-up of a few examples showed that these genes are a mix: both protein-coding and small RNAs, both current and retired, both with a preserved or replaced ID. Genes were the ID is preserved will be able to be included in the analysis. Genes were the ID changed will not be able to be matched to their newer ID. Genes that were retired will anyway not be included.
+
+Of the almost 7000 IDs that changed between the two relevant Ensembl releases, the vast majority were completely retired, with no equivalent gene in the later release.
+
+```{r brainspan_row_ids}
+# Avoid numeric accidents with numeric IDs, by making them strings
+BSP[, V1 := as.character(V1)]
+setnames(BSP, c("row_num", names(BSP)[2:ncol(BSP)]))
+setkey(BSP, "row_num")
+
+bspc[, column_num := paste0("V", column_num + 1)] # the first column is a row number/id
+setkey(bspc)
+
+bspr[, row_num := as.character(row_num)]
+setkey(bspr, row_num)
+
+# Apply gene symbols to expression table
+BSP <- merge(bspr[, .(row_num, ensembl_gene_id)], BSP, by="row_num")
+BSP <- BSP[, names(BSP) != "row_num", with=FALSE]
+setkey(BSP, ensembl_gene_id)
+setkey(bspr, ensembl_gene_id)
+
+# Sanity check
+cat("All gene IDs from Brainspan also present in annotation?\n")
+cat(all(BSP$ensembl_gene_id %in% ENSEMBL$gene_id), "\n")
+cat("How many genes from Brainspan are in the annotation?\n")
+sum(BSP$ensembl_gene_id %in% ENSEMBL$gene_id)
+cat("How many genes from Brainspan are not in the annotation?\n")
+sum(! BSP$ensembl_gene_id %in% ENSEMBL$gene_id)
+```
+
+```{r brainspan_to_TPM}
+# RPKM is not comparable across samples
+cat("Re-normalise Brainspan RPKMs to TPMs")
+
+
+bsp_totals <- colSums(BSP[, 2:ncol(BSP)])
+
+
+```
+
+
+
+
+
