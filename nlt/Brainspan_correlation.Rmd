@@ -19,6 +19,8 @@ knitr::opts_chunk$set(echo = TRUE, fig_width = 10, fig_height = 10)
 library(data.table)
 library(rtracklayer)
 library(ggplot2)
+library(ggdendro)
+library(patchwork)
 
 setwd("~/Camilla/")
 ```
@@ -26,8 +28,11 @@ setwd("~/Camilla/")
 # Preliminaries
 
 ```{r functions}
-my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NULL, txs=3, minMean=0, minSingle=0, loopVal="default") {
+my_pairwise_internal_correls <- function(mat, samples = NULL, method = "pearson", minMean=0, minSingle=0) {
   # mat <- params$tpm[topgenes,]; samples <- params$covars$Sample
+  # samples = NULL
+  if (is.null(samples))
+    samples <- colnames(mat)
   
   # Filter
   if (minMean != 0 | minSingle != 0) {
@@ -97,34 +102,177 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     }
   }
   
+  return(list(unord = cormat, unordtri = cormat2, clust = cormat3, clusttri = cormat4, meth = method, dendroR = pd, dendroC = NULL))
+}
+
+
+my_pairwise_external_correls <- function(a, b, method = "pearson", minMean=0, minSingle=0) {
+  # a = BSP; b = NLT; method = "pearson"; minMean = 0; minSingle = 0
+  if ( ! all(rownames(a) == rownames(b)) )
+    stop("The rownames don't match up between the datasets.")
+  
+  # Combine into a single matrix, then use the internal_correls function, then delete rows and columns that correspond to internal correlations of each subset.
+  # Computationally more intensive than it needs to be, but simpler to implement given the pre-existing code, and easier to keep consistent.
+  # mat <- cbind(a, b)
+  # mycors <- my_pairwise_internal_correls(mat, method=method, minMean=minMean, minSingle=minSingle)
+  # 
+  # mycors[1:4] <- lapply(mycors[1:4], function(z){
+  #   # z = mycors[[2]]
+  #   z[rownames(z) %in% colnames(a), colnames(z) %in% colnames(b)]
+  # })
+  # 
+  # return(mycors)
+  
+  # The above method skews the clustering of samples. It does not allow the axes to cluster independently.
+  # Re-implement fully.
+  
+  # Filter. Both datasets must come out with the same surviving rows, in order to remain comparable.
+  if (minMean != 0 | minSingle != 0) {
+    sel <- (rowSums(a >= minSingle) >= 1 | rowMeans(a) >= minMean) |
+           (rowSums(b >= minSingle) >= 1 | rowMeans(b) >= minMean)
+  } else {
+    sel <- rowSums(a) > 0 | 
+           rowSums(b) > 0
+  }
+  a <- a[sel, ]
+  b <- b[sel, ]
+  
+  # Correlations
+  cormat <- cor(a, b, method=method)
+  
+  # Cluster rows
+  hcfitr <- hclust(dist(scale(cormat, center=TRUE)))
+  rn <- rownames(cormat)
+  # Make dendrogram. https://stackoverflow.com/questions/42047896/joining-a-dendrogram-and-a-heatmap
+  dendr <- as.dendrogram(hcfitr)
+  dendr_data <- dendro_data(dendr)
+  # Setup the data, so that the axes are exchanged, instead of using coord_flip()
+  segmentr_data <- with(
+      segment(dendr_data), 
+      data.frame(x = y, y = x, xend = yend, yend = xend))
+  # Use the dendrogram label data to position the sample labels
+  sample_posr_table <- with(
+      dendr_data$labels, 
+      data.frame(y_center = x, Sample = as.character(label), height = 1))
+  # Limits for the vertical axis
+  sample_axisr_limits <- with(
+      sample_posr_table, 
+      c(min(y_center - 0.5 * height), max(y_center + 0.5 * height))
+  ) + 0.1 * c(-1, 1) # extra spacing: 0.1
+  # Dendrogram plot
+  pdr <- ggplot(segmentr_data) + 
+    geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) + 
+    scale_x_reverse(expand = c(0, 0.5),
+                    position = "top") + 
+    scale_y_continuous(position = "right",
+                       breaks = sample_posr_table$y_center, 
+                       labels = sample_posr_table$Sample, 
+                       limits = sample_axisr_limits, 
+                       expand = c(0, 0)) + 
+    labs(x = NULL, y = NULL) +
+    theme_minimal() + 
+    theme(panel.grid = element_blank(),
+          axis.text.y = element_blank(),
+          axis.ticks.y = element_blank())
+
+  # Cluster columns
+  hcfitc <- hclust(dist(scale(t(cormat), center=TRUE)))
+  cn <- colnames(cormat)
+  # Make dendrogram.
+  dendc <- as.dendrogram(hcfitc)
+  dendc_data <- dendro_data(dendc)
+  segmentc_data <- with(
+      segment(dendc_data), 
+      data.frame(x = x, y = y, xend = xend, yend = yend))
+  sample_posc_table <- with(
+      dendc_data$labels, 
+      data.frame(x_center = x, Sample = as.character(label), height = 1))
+  sample_axisc_limits <- with(
+      sample_posc_table, 
+      c(min(x_center - 0.5 * height), max(x_center + 0.5 * height))
+  ) + 0.1 * c(-1, 1) # extra spacing: 0.1
+  pdc <- ggplot(segmentc_data) + 
+    geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) + 
+    scale_y_continuous(expand = c(0, 0.5),
+                       position = "left") + 
+    scale_x_continuous(position = "bottom",
+                       breaks = sample_posc_table$x_center, 
+                       labels = sample_posc_table$Sample, 
+                       limits = sample_axisc_limits, 
+                       expand = c(0, 0)) + 
+    labs(x = NULL, y = NULL) +
+    theme_minimal() + 
+    theme(panel.grid = element_blank(),
+          axis.text.x = element_blank(),
+          axis.ticks.x = element_blank())
+
+  # Create duplicates for different plot styles
+  cormat2 <- cormat                                     # Duplicate in which to delete below the diagonal.
+  cormat3 <- cormat[rn[hcfitr$order], cn[hcfitc$order]]   # Duplicate in clustered order.
+  cormat4 <- cormat3                                    # Duplicate in clustered order in which to delete below the diagonal.
+  # Delete below diagonal half for the numeric labels.
+  for (r in 1:nrow(cormat2)) {
+    for (c in 1:ncol(cormat2)) {
+      if (c <= r) {
+        cormat2[r, c] <- NA_real_
+      }
+    }
+  }
+  for (r in 1:nrow(cormat4)) {
+    for (c in 1:ncol(cormat4)) {
+      if (c <= r) {
+        cormat4[r, c] <- NA_real_
+      }
+    }
+  }
+  
+  return(list(unord = cormat, unordtri = cormat2, clust = cormat3, clusttri = cormat4, meth = method, dendroR = pdr, dendroC = pdc))
+}
+
+
+plot_my_correlations <- function(matlist, rds=NULL, txs=3) {
+  # matlist <- my_pairwise_internal_correls(rawBSP); rds <- NULL; txs <- 3
+  # Extract. Not necessary, but quicker than refactoring the code after separating it from my_pairwise_internal_correls
+  cormat <- matlist[["unord"]]
+  cormat2 <- matlist[["unordtri"]]
+  cormat3 <- matlist[["clust"]]
+  cormat4 <- matlist[["clusttri"]]
+  method <- matlist[["meth"]]
+  denr <- matlist[["dendroR"]]
+  denc <- matlist[["dendroC"]]
+
   # Restructure for plotting.
   rn <- rownames(cormat)
+  cn <- colnames(cormat)
   cormat <- as.data.table(cormat)
   cormat[, observation1 := factor(rn, ordered=TRUE, levels=rn)]
   cormat <- melt(cormat, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
-  cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rn)]
+  cormat[, observation2 := factor(observation2, ordered=TRUE, levels=cn)]
   # cormat <- merge(cormat, sample_pos_table, by.x="observation2", by.y="Sample", all.x=TRUE)
   
   rn2 <- rownames(cormat2)
+  cn2 <- colnames(cormat2)
   cormat2 <- as.data.table(cormat2)
   cormat2[, observation1 := factor(rn2, ordered=TRUE, levels=rn2)]
   cormat2 <- melt(cormat2, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
-  cormat2[, observation2 := factor(observation2, ordered=TRUE, levels=rn2)]
+  cormat2[, observation2 := factor(observation2, ordered=TRUE, levels=cn2)]
   cormat2 <- cormat2[!is.na(Correlation)]
   # cormat2 <- merge(cormat2, sample_pos_table, by.x="observation2", by.y="Sample", all.x=TRUE)
   
   rn3 <- rownames(cormat3)
+  cn3 <- colnames(cormat3)
   cormat3 <- as.data.table(cormat3)
   cormat3[, observation1 := factor(rn3, ordered=TRUE, levels=rn3)]
   cormat3 <- melt(cormat3, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
-  cormat3[, observation2 := factor(observation2, ordered=TRUE, levels=rn3)]
+  cormat3[, observation2 := factor(observation2, ordered=TRUE, levels=cn3)]
   # cormat3 <- merge(cormat3, sample_pos_table, by.x="observation2", by.y="Sample", all.x=TRUE)
   
   rn4 <- rownames(cormat4)
+  cn4 <- colnames(cormat4)
   cormat4 <- as.data.table(cormat4)
   cormat4[, observation1 := factor(rn3, ordered=TRUE, levels=rn4)]
   cormat4 <- melt(cormat4, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
-  cormat4[, observation2 := factor(observation2, ordered=TRUE, levels=rn4)]
+  cormat4[, observation2 := factor(observation2, ordered=TRUE, levels=cn4)]
   cormat4 <- cormat4[!is.na(Correlation)]
   # cormat4 <- merge(cormat4, sample_pos_table, by.x="observation2", by.y="Sample", all.x=TRUE)
   
@@ -135,7 +283,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   
   
   # Square. Custom order. No values. Full range.
-  p1 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+  pfr <- ggplot(cormat, aes(y=observation1, x=observation2)) +
     geom_tile(aes(fill=Correlation)) +
     scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
     scale_x_discrete(position = "top") +
@@ -144,7 +292,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
           panel.grid = element_blank() )
 
   # Square. Custom order. No values. Dynamic range.
-  p1a <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+  pdr <- ggplot(cormat, aes(y=observation1, x=observation2)) +
     geom_tile(aes(fill=Correlation)) +
     scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
     scale_x_discrete(position = "top") +
@@ -153,7 +301,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
           panel.grid = element_blank() )
 
   # # Triangle. Custom order. With values. Full range.
-  # p2 <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
+  # pfrt <- ggplot(cormat2, aes(y=observation1, x=observation2)) +
   #   geom_tile(aes(fill=Correlation)) +
   #   geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
   #   scale_x_discrete(position = "top") +
@@ -164,7 +312,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   #         panel.grid = element_blank() )
   # 
   # # Triangle. Custom order. With values. Dynamic range.
-  # p2a <- ggplot(cormat2, aes(x=observation1, y=observation2)) +
+  # pdrt <- ggplot(cormat2, aes(y=observation1, x=observation2)) +
   #   geom_tile(aes(fill=Correlation)) +
   #   geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
   #   scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "transparent" ) +
@@ -174,49 +322,49 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
   #         panel.grid = element_blank() )
 
-  # # Square. Custom order. With values. Full range.
-  # p12 <- ggplot(cormat, aes(x=observation1, y=observation2)) +
-  #   geom_tile(aes(fill=Correlation)) +
-  #   geom_text(data=cormat2, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
-  #   scale_x_discrete(position = "top") +
-  #   scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
-  #   scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
-  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
-  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-  #         panel.grid = element_blank() )
-  # 
-  # # Square. Custom order. With values. Dyhamic range.
-  # p12a <- ggplot(cormat, aes(x=observation1, y=observation2)) +
-  #   geom_tile(aes(fill=Correlation)) +
-  #   geom_text(data=cormat2, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
-  #   scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "transparent" ) +
-  #   scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
-  #   scale_x_discrete(position = "top") +
-  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
-  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-  #         panel.grid = element_blank() )
-  
+  # Square. Custom order. With values triangle. Full range.
+  pfrv <- ggplot(cormat, aes(y=observation1, x=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(data=cormat2, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
+    scale_x_discrete(position = "top") +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
+    scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+
+  # Square. Custom order. With values triangle. Dynamic range.
+  pdrv <- ggplot(cormat, aes(y=observation1, x=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(data=cormat2, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
+    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "transparent" ) +
+    scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
+    scale_x_discrete(position = "top") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+
   
   # Square. Clustered order. No values. Full range.
-  p3 <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
+  pfrc <- ggplot(cormat3, aes(y=observation1, x=observation2)) +
     geom_tile(aes(fill=Correlation)) +
     scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
     scale_x_discrete(position = "top") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+    labs(x='', y='', caption=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
 
-  # Square. Clustered order. No values. Dyhamic range.
-  p3a <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
+  # Square. Clustered order. No values. Dynamic range.
+  pdrc <- ggplot(cormat3, aes(y=observation1, x=observation2)) +
     geom_tile(aes(fill=Correlation)) +
     scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
     scale_x_discrete(position = "top") +
-    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+    labs(x='', y='', caption=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
 
-  # # Triangle. Clustered order. with values. Full range.
-  # p4 <- ggplot(cormat4, aes(x=observation1, y=observation2)) +
+  # # Triangle. Clustered order. With values. Full range.
+  # pfrtc <- ggplot(cormat4, aes(y=observation1, x=observation2)) +
   #   geom_tile(aes(fill=Correlation)) +
   #   geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
   #   scale_x_discrete(position = "top") +
@@ -226,8 +374,8 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
   #         panel.grid = element_blank() )
   # 
-  # # Triangle. Clustered order. with values. Dyhamic range.
-  # p4a <- ggplot(cormat4, aes(x=observation1, y=observation2)) +
+  # # Triangle. Clustered order. With values. Dynamic range.
+  # pdrtc <- ggplot(cormat4, aes(y=observation1, x=observation2)) +
   #   geom_tile(aes(fill=Correlation)) +
   #   geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
   #   scale_x_discrete(position = "top") +
@@ -237,37 +385,51 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
   #         panel.grid = element_blank() )
 
-  # # Square. Clustered order. With values. Full range.
-  # p34 <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
-  #   geom_tile(aes(fill=Correlation)) +
-  #   geom_text(data=cormat4, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
-  #   scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
-  #   scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
-  #   scale_x_discrete(position = "top") +
-  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-  #         panel.grid = element_blank() )
-  # 
-  # # Square. Clustered order. With values. Dyhamic range.
-  # p34a <- ggplot(cormat3, aes(x=observation1, y=observation2)) +
-  #   geom_tile(aes(fill=Correlation)) +
-  #   geom_text(data=cormat4, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
-  #   scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
-  #   scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
-  #   scale_x_discrete(position = "top") +
-  #   labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
-  #   theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
-  #         panel.grid = element_blank() )
+  # Square. Clustered order. With values triangle. Full range.
+  pfrvc <- ggplot(cormat3, aes(y=observation1, x=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(data=cormat4, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "forestgreen" ) +
+    scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="forestgreen", guide="none") +
+    scale_x_discrete(position = "top") +
+    labs(x='', y='', caption=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+
+  # Square. Clustered order. With values triangle. Dynamic range.
+  pdrvc <- ggplot(cormat3, aes(y=observation1, x=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(data=cormat4, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
+    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "forestgreen" ) +
+    scale_colour_manual(values=c("black", "white"), na.value="transparent", guide="none") +
+    scale_x_discrete(position = "top") +
+    labs(x='', y='', caption=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
   
-  out <- list(corr=dcast(cormat2, observation1 ~ observation2, value.var = "Correlation"),
-              sfrnc=p1, sdrnc=p1a,
-              # tfrnc=p2, tdrnc=p2a,
-              # frnc=p12, drnc=p12a,
-              sfrc=pd + p3, sdrc=pd + p3a#,
-              # tfrc=p4, tdrc=p4a,
-              # frc=pd + p34 + plot_layout(ncol=2, widths=c(1,4)), 
-              # drc=pd + p34a + plot_layout(ncol=2, widths=c(1,4))
-              )
+  if(is.null(denc)){
+    out <- list(corr=dcast(cormat2, observation1 ~ observation2, value.var = "Correlation"),
+                pfr = pfr, pdr = pdr,
+                # pfrt = pfrt, pdrt = pdrt,
+                pfrv = pfrv, pdrv = pdrv,
+                pfrc = denr + pfrc + plot_layout(ncol=2, nrow=1, widths=c(1,4)),
+                pdrc = denr + pdrc + plot_layout(ncol=2, nrow=1, widths=c(1,4)),
+                # pfrtc = pfrtc, pdrtc = pdrtc,
+                pfrvc = denr + pfrvc + plot_layout(ncol=2, nrow=1, widths=c(1,4)),
+                pdrvc = denr + pdrvc + plot_layout(ncol=2, nrow=1, widths=c(1,4))
+                )
+  } else {
+    out <- list(corr=dcast(cormat2, observation1 ~ observation2, value.var = "Correlation"),
+                pfr = pfr, pdr = pdr,
+                # pfrt = pfrt, pdrt = pdrt,
+                pfrv = pfrv, pdrv = pdrv,
+                pfrc = plot_spacer() + denc + denr + pfrc + plot_layout(ncol=2, nrow=2, widths=c(1,4), heights = c(1,7)), 
+                pdrc = plot_spacer() + denc + denr + pdrc + plot_layout(ncol=2, nrow=2, widths=c(1,4), heights = c(1,7)),
+                # pfrtc = pfrtc, pdrtc = pdrtc,
+                pfrvc = plot_spacer() + denc + denr + pfrvc + plot_layout(ncol=2, nrow=2, widths=c(1,4), heights = c(1,7)),
+                pdrvc = plot_spacer() + denc + denr + pdrvc + plot_layout(ncol=2, nrow=2, widths=c(1,4), heights = c(1,7))
+                )
+  }
   
   if (!is.null(rds) && length(rds) > 0) {
     saveRDS(out, file = rds)
@@ -298,55 +460,67 @@ bspr <- fread("Brainspan/rows_metadata.csv")
 
 cat("Table dimensions:", dim(BSP),  "\n")
 cat("Number of gene IDs:", length(unique(bspr[, ensembl_gene_id])), "\n")
-
-
-# cat("Gene annotation GRCh38.p12/Ensembl.94 import. (Archived version, matching Lexogen's report. Current version is GRCh38.p14/Ensembl.110)\n")
-# 
-# ENSEMBL94 <- as.data.table( rtracklayer::import("GRCh38.p12_ensembl94/Homo_sapiens.GRCh38.94.gtf") )
-# cat("Number of gene IDs:", length(unique(ENSEMBL94[, gene_id])), "\n")
-
-# cat("Gene annotation GRCh37.p13/Ensembl.87 import. (Closest available archived version to Brainspan's documentated Ensembl.56).\n")
-# 
-# ENSEMBL87 <- as.data.table( rtracklayer::import("GRCh37.p13_ensembl87/Homo_sapiens.GRCh37.87.gtf") )
-# cat("Number of gene IDs:", length(unique(ENSEMBL87[, gene_id])), "\n")
 ```
 
-## Restructure data
+## Sanity-check correlations
 
-<!-- ### Annotation -->
+This section was added retro-actively, after seeing the correlation results.
 
-<!-- ```{r clean_up_annotation} -->
-<!-- # Keep only gene features. -->
-<!-- cat("Are there 'gene' features for all the 'exon' features?\n") -->
-<!-- # cat("94:", all(ENSEMBL94[type == "exon", gene_id] %in% ENSEMBL94[type == "gene", gene_id], "\n"),  -->
-<!-- cat("87:", all(ENSEMBL87[type == "exon", gene_id] %in% ENSEMBL87[type == "gene", gene_id]), "\n") -->
+Observing how each dataset correlates and clusters internally, before doing any pre-processing, acts as a control against potential errors introduced in restructuring the data. This is necessary in order to interpret the outcome that the correlations of the processed data do not cluster in a way that reflects the available variables.
 
-<!-- # ENSEMBL94 <- ENSEMBL94[type == "gene", ] -->
-<!-- ENSEMBL87 <- ENSEMBL87[type == "gene", ] -->
+```{r raw_internal_correls}
+rawBSP <- as.matrix(BSP[, 2:length(BSP)])
+colnames(rawBSP) <- gsub("\\W", "_", paste(bspc$structure_name, bspc$column_num, bspc$gender, sep="_"))
+rawBSPpearson <- plot_my_correlations(my_pairwise_internal_correls(rawBSP))
+rawBSPspearman <- plot_my_correlations(my_pairwise_internal_correls(rawBSP, method="spearman"))
 
-<!-- cat("Create gene lengths.\n") -->
-<!-- # ranges are left- and right-inclusive, so length is (difference + 1) -->
-<!-- # ENSEMBL94[, length := (end - start) + 1] -->
-<!-- ENSEMBL87[, length := (end - start) + 1] -->
+pdf(file="Brainspan_raw_correlation.pdf", width = 110, height = 110)
+print(rawBSPpearson$pdrc)
+print(rawBSPspearman$pdrc)
+dev.off()
 
-<!-- cat("Are all computed lengths positive values?\n") -->
-<!-- # cat(all(ENSEMBL94[, length > 0]), "\n") -->
-<!-- cat(all(ENSEMBL87[, length > 0]), "\n") -->
+rawNLT <- Reduce(function(x,y){merge(x, y, all=TRUE, by=c("gene", "gene_id"))}, list(nlt1, nlt2, nlt3))
+rawNLT <- rawNLT[, 3:length(rawNLT)]
+colnames(rawNLT) <- gsub("\\W", "_", c(nltmeta[sBatch == 'sBatch1', paste(Type, Timepoint, Construct, Batch, sBatch, 1:.N, Sex, sep = "_")], 
+                      nltmeta[sBatch == 'sBatch2', paste(Type, Timepoint, Construct, Batch, sBatch, 1:.N, Sex, sep = "_")],
+                      nltmeta[sBatch == 'sBatch3', paste(Type, Timepoint, Construct, Batch, sBatch, 1:.N, Sex, sep = "_")]))
 
-<!-- # setkey(ENSEMBL94, gene_id) -->
-<!-- setkey(ENSEMBL87, gene_id) -->
+rawNLTpearson <- plot_my_correlations(my_pairwise_internal_correls(rawNLT))
+rawNLTspearman <- plot_my_correlations(my_pairwise_internal_correls(rawNLT, method="spearman"))
+
+pdf(file="Neurolentech_raw_correlation.pdf", width = 30, height = 30)
+print(rawNLTpearson$pdrc)
+print(rawNLTspearman$pdrc)
+dev.off()
+```
+
+The samples ineither dataset do not appear to cluster in a way that reflects any of the available variables. Therefore, we cannot expect for the processed data to cluster on these variables either.
 
 
-<!-- # Sanity check -->
-<!-- cat("All gene IDs from Brainspan also present in annotation?\n") -->
-<!-- cat(all(bspr$ensembl_gene_id %in% ENSEMBL87$gene_id), "\n") -->
-<!-- cat("How many genes from Brainspan are in the annotation?\n") -->
-<!-- cat(sum(bspr$ensembl_gene_id %in% ENSEMBL87$gene_id), "\n") -->
-<!-- cat("How many genes from Brainspan are not in the annotation?\n") -->
-<!-- cat(sum(! bspr$ensembl_gene_id %in% ENSEMBL87$gene_id), "\n") -->
-<!-- ``` -->
+# Restructure data
 
 ### Brainspan
+
+Reduce Brainspan tissue complexity, after discussion indicating that for this analysis most of the cortex subtypes are considered equivalent. Use the new designations to give more helpful names to the samples.
+
+```{r brainspan_columns_names}
+cat("Brainspan variables\n")
+print(table(bspc[, .(structure_name, gender)]))
+
+bspc[, new_tissue := structure_name]
+# bspc[grepl("cortex", structure_name) & !grepl("amygdaloid|cerebellar", structure_name), new_tissue := "COMBINED cortex"]
+# Combining the cortices didnotlead to sensible grouping
+
+# cat("Brainspan new variables\n")
+# print(table(bspc[, .(new_tissue, gender)]))
+
+# Create more informative column names
+bspc[, new_column := gsub("\\W", "_", paste(new_tissue, column_num, gender, sep="_"))]
+setorder(bspc, column_num) # Should already be, but I'm not leaving it to chance
+
+# Apply the new names
+setnames(BSP, c("row_num", bspc$new_column))
+```
 
 Brainspan data is based on an older genome assembly -- GRCh37 -- and a very old genome annotation -- Ensembl 56. Gene IDs can be computationally updated from Ensembl 56 to the "equivalent" Ensembl 94 ones, but the process is not absolute. Some genes on either set have no equivalent in the other, while others may have had their models revised to a degree that could affect their expression quantification. Re-mapping the sequencing data of Brainspan (if available) to the GRCh38 assembly and re-quantifying with the Ensembl 94 annotation would be the ideal way to compare the datasets, but this is beyond the scope of the requested service.
 
@@ -357,13 +531,13 @@ Brainspan data is based on an older genome assembly -- GRCh37 -- and a very old 
 write(unique(bspr[, ensembl_gene_id]), file="Brainspan/ensembl_ids.txt")
 
 # Import the result
-ensembl_hist37 <- rbind(fread("Brainspan/ensembl_ids_idmapper37.txt", header = FALSE, fill = TRUE, sep = ",",
-                               col.names = c("old", "new", "release", "score")) ) # short titles without spaces
+# ensembl_hist37 <- rbind(fread("Brainspan/ensembl_ids_idmapper37.txt", header = FALSE, fill = TRUE, sep = ",",
+#                                col.names = c("old", "new", "release", "score")) ) # short titles without spaces
 ensembl_hist38 <- rbind(fread("Brainspan/ensembl_ids_idmapper38.txt", header = FALSE, fill = TRUE, sep = ",",
                                col.names = c("old", "new", "release", "score")) ) # short titles without spaces
 ```
 
-The ID History converter exists two versions. Presumably the GRCh38 version fully supercedes the GRCh37 version of the tool, but query both and decide after some sanity checks.
+<!-- The ID History converter exists two versions. Presumably the GRCh38 version fully supercedes the GRCh37 version of the tool, but query both and decide after some sanity checks. -->
 
 ```{r ensembl_tidy_up}
 # The history table is untidy. Rows are grouped by blank spacer rows and repetition of the row titles.
@@ -371,35 +545,35 @@ The ID History converter exists two versions. Presumably the GRCh38 version full
 
 # Identify the rows that repeat the titles. Use that to create a grouping column.
 #  the forst group does not haveits own title as it was consumed by the parser.
-titles <- c(1, which(ensembl_hist37[, grepl("^Old", old)]) )
-for (i in titles) {
-  ensembl_hist37[i:nrow(ensembl_hist37), group := as.character(i)] # terribly inefficient performance, but simple
-}
+# titles <- c(1, which(ensembl_hist37[, grepl("^Old", old)]) )
+# for (i in titles) {
+#   ensembl_hist37[i:nrow(ensembl_hist37), group := as.character(i)] # terribly inefficient performance, but simple
+# }
 titles <- c(1, which(ensembl_hist38[, grepl("^Old", old)]) )
 for (i in titles) {
   ensembl_hist38[i:nrow(ensembl_hist38), group := as.character(i)] # terribly inefficient performance, but simple
 }
 
 #.Drop the superfluous titles
-ensembl_hist37 <- ensembl_hist37[!grepl("^Old", old), ]
+# ensembl_hist37 <- ensembl_hist37[!grepl("^Old", old), ]
 ensembl_hist38 <- ensembl_hist38[!grepl("^Old", old), ]
 
 # Drop the blank rows. Simply dropping all of them would drop groups for which I have no info. 
 # I want to guarantee every group keeps at least ome row, even if it is a blank one, at least at first.
-ensembl_hist37[, nr := .N, by = group]
+# ensembl_hist37[, nr := .N, by = group]
 ensembl_hist38[, nr := .N, by = group]
-ensembl_hist37 <- ensembl_hist37[old != '' | (old == '' & nr == 1), ]
+# ensembl_hist37 <- ensembl_hist37[old != '' | (old == '' & nr == 1), ]
 ensembl_hist38 <- ensembl_hist38[old != '' | (old == '' & nr == 1), ]
 
 # IDs here have version suffixes, but in the expression table they do not. Trim off the version suffixes.
-ensembl_hist37[, old_trim := sub("\\.\\d+", "", old)]
-ensembl_hist37[, new_trim := sub("\\.\\d+", "", new)]
+# ensembl_hist37[, old_trim := sub("\\.\\d+", "", old)]
+# ensembl_hist37[, new_trim := sub("\\.\\d+", "", new)]
 ensembl_hist38[, old_trim := sub("\\.\\d+", "", old)]
 ensembl_hist38[, new_trim := sub("\\.\\d+", "", new)]
 
 # Sanity check
-cat("Are GRCh37 results a subset of GRCh38?\n")
-cat(all(ensembl_hist37[, old_trim] %in% ensembl_hist38[, old_trim]))
+# cat("Are GRCh37 results a subset of GRCh38?\n")
+# cat(all(ensembl_hist37[, old_trim] %in% ensembl_hist38[, old_trim]))
 
 cat("IDs in query:\n")
 cat(length(unique(bspr[, ensembl_gene_id])), "\n")
@@ -462,8 +636,7 @@ Of the almost 7000 IDs that changed between the two relevant Ensembl releases, t
 
 ```{r brainspan_row_ids}
 # Avoid numeric accidents with numeric IDs, by making them strings
-BSP[, V1 := as.character(V1)]
-setnames(BSP, c("row_num", names(BSP)[2:ncol(BSP)]))
+BSP[, row_num := as.character(row_num)]
 setkey(BSP, "row_num")
 
 bspc[, column_num := paste0("V", column_num + 1)] # the first column is a row number/id
@@ -501,18 +674,21 @@ I choose to ignore those genes, they are only few, because I am not confident to
 
 The data is split in 3 tables, so I join them together into one.
 
-```{r neudolentech}
+I'll also assign new sample names based on the variables of interest, as this makes reading the plots easier.
+
+```{r neurolentech_tidy_up}
 cat("The three subsets share the same gene index:\n")
 cat(all(nlt1$gene_id == nlt2$gene_id & nlt1$gene_id == nlt3$gene_id))
 
 # Sanitize sample names to use them as column titles
 nltmeta[, Sample := gsub("\\W", '_',  Sample)]
 
-# Column titles repeat between subsets but do not correspond to the same patient.
 # Take care of column titles.
-setnames(nlt1, c(names(nlt1)[1:2], nltmeta[sBatch == 'sBatch1', Sample]))
-setnames(nlt2, c(names(nlt2)[1:2], nltmeta[sBatch == 'sBatch2', Sample]))
-setnames(nlt3, c(names(nlt3)[1:2], nltmeta[sBatch == 'sBatch3', Sample]))
+nltmeta[, col_num := 1:.N, by = sBatch]
+nltmeta[, new_column := paste(Type, Timepoint, Construct, Batch, sBatch, col_num, Sex, sep = "_")]
+setnames(nlt1, c(names(nlt1)[1:2], nltmeta[sBatch == 'sBatch1', new_column]))
+setnames(nlt2, c(names(nlt2)[1:2], nltmeta[sBatch == 'sBatch2', new_column]))
+setnames(nlt3, c(names(nlt3)[1:2], nltmeta[sBatch == 'sBatch3', new_column]))
 
 cat("Do sBatch1 and sBatch2 still share column names?\n")
 cat(any( names(nlt1)[3:ncol(nlt1)] %in% names(nlt2)[3:ncol(nlt2)] ), "\n")
@@ -565,46 +741,168 @@ rownames(NLT) <- rn
 ```{r rescale}
 # Brainspan
 totals <- colSums(BSP)
-BSP <- sweep(BSP, 2, totals, `/`) + 1e6
+BSP <- sweep(BSP, 2, totals, `/`) * 1e6
 
 totals <- colSums(NLT)
-NLT <- sweep(NLT, 2, totals, `/`) + 1e6
+NLT <- sweep(NLT, 2, totals, `/`) * 1e6
 ```
+
+### Order samples
+
+```{r sort_samples}
+# Sort samples.
+setorder(bspc, gender, new_column)
+BSP <- BSP[, bspc$new_column]
+
+setorder(nltmeta, Sex, new_column)
+NLT <- NLT[, nltmeta$new_column]
+```
+
 
 # Correlations
 
-## Internal Brainspan
+For this, I combine the two datasets and do the pairwise correlations of everything against everything.
+This means I elso get the correlations between samples within a dataset, and enable samples from different datasets to cluster together based on how they correlate to the other samples.
 
-```{r brainspan_categories}
-# Selection vectors
+Because there are over 600 samples in total and a 600 by 600 heatmap would be unwieldy, I subset the two datasets by various factors, in turn. The main factor is gender, and any other factor examined will be split by gender as well.
 
-# cell type group
+```{r categories}
+# Brainspan selection vectors
+cat("Brainspan variables\n")
+print(table(bspc[, .(structure_name, gender)]))
+
+bsp_sex <- unique(bspc$gender)
+bsp_sel_sex <- lapply(bsp_sex, function(x){
+  bspc[, gender == x]
+})
+names(bsp_sel_sex) <- bsp_sex
+
 bsp_tissues <- unique(bspc$structure_name)
 bsp_sel_tis <- lapply(bsp_tissues, function(x){
   bspc[, structure_name == x]
 })
 names(bsp_sel_tis) <- bsp_tissues
 
-# patient gender
-bsp_sex <- unique(bspc$gender)
-bsp_sel_sex <- lapply(bsp_sex, function(x){
-  bspc[, gender == x]
+# Neurolentech selection vectors
+
+cat("Neurolentech variables\n")
+print(table(nltmeta[, .(Construct, Sex)]))
+print(table(nltmeta[, .(Type, Sex)]))
+print(table(nltmeta[, .(Batch, Sex)]))
+print(table(nltmeta[, .(sBatch, Sex)]))
+
+nlt_sex <- unique(nltmeta$Sex)
+nlt_sel_sex <- lapply(nlt_sex, function(x){
+  nltmeta[, Sex == x]
 })
-names(bsp_sel_sex) <- bsp_sex
+names(nlt_sel_sex) <- nlt_sex
+
+nlt_constructs <- unique(nltmeta$Contsruct)
+nlt_sel_cons <- lapply(nlt_constructs, function(x){
+  nltmeta[, Construct == x]
+})
+names(nlt_sel_cons) <- nlt_constructs
+
+
+nlt_batches <- unique(nltmeta$Batch)
+nlt_sel_batch <- lapply(nlt_batches, function(x){
+  nltmeta[, Batch == x]
+})
+names(nlt_sel_batch) <- nlt_batches
+
+nlt_seqBatches <- unique(nltmeta$sBatch)
+nlt_sel_run <- lapply(nlt_seqBatches, function(x){
+  nltmeta[, sBatch == x]
+})
+names(nlt_sel_run) <- nlt_seqBatches
+
+nlt_types <- unique(nltmeta$Type)
+nlt_sel_type <- lapply(nlt_types, function(x){
+  nltmeta[, Type == x]
+})
+names(nlt_sel_type) <- nlt_types
 ```
 
-### Males
+```{r paranoia_pays_off}
+# cat("Verify again that all the genes are in the same order in both datasets.\n")
+# cat(all(rownames(BSP) == rownames(NLT)))
+
+# Fix it
+NLT <- NLT[rownames(BSP), ]
+
+cat("Verify again that all the genes are in the same order in both datasets.\n")
+cat(all(rownames(BSP) == rownames(NLT)))
+```
+
+## All samples together
+
+Due to their required huge resolution to be legible, these plots will be output to PDF files.
+
+```{r all_cor}
+all_pearson <- my_pairwise_external_correls(BSP, NLT, method="pearson")
+all_pearson_plots <- plot_my_correlations(all_pearson)
+
+all_spearman <- my_pairwise_external_correls(BSP, NLT, method="spearman")
+all_spearman_plots <- plot_my_correlations(all_spearman)
+
+pdf(file="Brainspan_correlation_all_unclustered.pdf", width = 25, height = 100)
+print(all_pearson_plots$pfr)
+print(all_spearman_plots$pdr)
+dev.off()
+
+pdf(file="Brainspan_correlation_all_clustered.pdf", width = 35, height = 110)
+print(all_pearson_plots$pfrc)
+print(all_spearman_plots$pdrc)
+dev.off()
+```
+
+The correlations and the clustering do not reveal any systematic relationship between the variables.
+
+# Session Info
+
+```{r session}
+sessionInfo()
+```
+
+<!-- ### Annotation -->
+
+<!-- ```{r clean_up_annotation} -->
+<!-- # cat("Gene annotation GRCh38.p12/Ensembl.94 import. (Archived version, matching Lexogen's report. Current version is GRCh38.p14/Ensembl.110)\n") -->
+<!-- #  -->
+<!-- # ENSEMBL94 <- as.data.table( rtracklayer::import("GRCh38.p12_ensembl94/Homo_sapiens.GRCh38.94.gtf") ) -->
+<!-- # cat("Number of gene IDs:", length(unique(ENSEMBL94[, gene_id])), "\n") -->
+
+<!-- # cat("Gene annotation GRCh37.p13/Ensembl.87 import. (Closest available archived version to Brainspan's documentated Ensembl.56).\n") -->
+<!-- #  -->
+<!-- # ENSEMBL87 <- as.data.table( rtracklayer::import("GRCh37.p13_ensembl87/Homo_sapiens.GRCh37.87.gtf") ) -->
+<!-- # cat("Number of gene IDs:", length(unique(ENSEMBL87[, gene_id])), "\n") -->
+
+<!-- # Keep only gene features. -->
+<!-- cat("Are there 'gene' features for all the 'exon' features?\n") -->
+<!-- # cat("94:", all(ENSEMBL94[type == "exon", gene_id] %in% ENSEMBL94[type == "gene", gene_id], "\n"),  -->
+<!-- cat("87:", all(ENSEMBL87[type == "exon", gene_id] %in% ENSEMBL87[type == "gene", gene_id]), "\n") -->
+
+<!-- # ENSEMBL94 <- ENSEMBL94[type == "gene", ] -->
+<!-- ENSEMBL87 <- ENSEMBL87[type == "gene", ] -->
+
+<!-- cat("Create gene lengths.\n") -->
+<!-- # ranges are left- and right-inclusive, so length is (difference + 1) -->
+<!-- # ENSEMBL94[, length := (end - start) + 1] -->
+<!-- ENSEMBL87[, length := (end - start) + 1] -->
+
+<!-- cat("Are all computed lengths positive values?\n") -->
+<!-- # cat(all(ENSEMBL94[, length > 0]), "\n") -->
+<!-- cat(all(ENSEMBL87[, length > 0]), "\n") -->
+
+<!-- # setkey(ENSEMBL94, gene_id) -->
+<!-- setkey(ENSEMBL87, gene_id) -->
 
 
-### Females
-
-
-
-## Internal Neurolentech
-
-
-
-## Btween the datasets
-
-
-
+<!-- # Sanity check -->
+<!-- cat("All gene IDs from Brainspan also present in annotation?\n") -->
+<!-- cat(all(bspr$ensembl_gene_id %in% ENSEMBL87$gene_id), "\n") -->
+<!-- cat("How many genes from Brainspan are in the annotation?\n") -->
+<!-- cat(sum(bspr$ensembl_gene_id %in% ENSEMBL87$gene_id), "\n") -->
+<!-- cat("How many genes from Brainspan are not in the annotation?\n") -->
+<!-- cat(sum(! bspr$ensembl_gene_id %in% ENSEMBL87$gene_id), "\n") -->
+<!-- ``` -->
