@@ -13,7 +13,7 @@ output:
     code_folding: hide
 ---
 
-```{r setup, include=FALSE}
+```{r setup}
 knitr::opts_chunk$set(echo = TRUE, fig_width = 10, fig_height = 10)
 
 library(data.table)
@@ -22,7 +22,6 @@ library(ggplot2)
 library(ggdendro)
 library(patchwork)
 
-setwd("~/Camilla/")
 ```
 
 # Preliminaries
@@ -37,9 +36,12 @@ my_pairwise_internal_correls <- function(mat, samples = NULL, method = "pearson"
   # Filter
   if (minMean != 0 | minSingle != 0) {
     mat <- mat[rowSums(mat >= minSingle) >= 1 | rowMeans(mat) >= minMean, ]
+    cat("Minimum mean expression across all samples:", minMean, "\n")
+    cat("Minimum expression in any single sample, if the minimum mean is not satsfied:", minSingle, "\n")
   } else {
     mat <- mat[rowSums(mat) > 0, ]
   }
+  cat("Number of eligible features:", nrow(mat), "\n")
   
   # Correlations
   cormat <- cor(mat, method=method)
@@ -106,8 +108,8 @@ my_pairwise_internal_correls <- function(mat, samples = NULL, method = "pearson"
 }
 
 
-my_pairwise_external_correls <- function(a, b, method = "pearson", minMean=0, minSingle=0) {
-  # a = BSP; b = NLT; method = "pearson"; minMean = 0; minSingle = 0
+my_pairwise_external_correls <- function(a, b, method = "pearson", minMean=0, minSingle=0, logged = FALSE) {
+  # a = BSP; b = NLT; method = "pearson"; minMean = 0; minSingle = 0; logged = TRUE
   if ( ! all(rownames(a) == rownames(b)) )
     stop("The rownames don't match up between the datasets.")
   
@@ -130,12 +132,23 @@ my_pairwise_external_correls <- function(a, b, method = "pearson", minMean=0, mi
   if (minMean != 0 | minSingle != 0) {
     sel <- (rowSums(a >= minSingle) >= 1 | rowMeans(a) >= minMean) |
            (rowSums(b >= minSingle) >= 1 | rowMeans(b) >= minMean)
+    cat("Minimum mean expression across all samples in each dataset:", minMean, "\n")
+    cat("Minimum expression in any single sample in each dataset, if the minimum mean is not satisfied:", minSingle, "\n")
   } else {
     sel <- rowSums(a) > 0 | 
            rowSums(b) > 0
   }
   a <- a[sel, ]
   b <- b[sel, ]
+  cat("Number of eligible features:", nrow(a), "\n")
+  
+  if (logged) {
+    # Handle zeros
+    pad <- min(c(a[a>0], b[b>0])) / 10 
+    
+    a <- log10(a)
+    b <- log10(b)
+  }
   
   # Correlations
   cormat <- cor(a, b, method=method)
@@ -444,62 +457,62 @@ plot_my_correlations <- function(matlist, rds=NULL, txs=3) {
 ```{r data_import}
 cat("Neurolentech data, batches 1-3.\n")
 
-nlt1 <- fread("Neurolentech/counting_summary_batch1/summary_unique.tsv")
-nlt2 <- fread("Neurolentech/counting_summary_batch2/summary_unique.tsv")
-nlt3 <- fread("Neurolentech/counting_summary_batch3/summary_unique.tsv")
-nltmeta <- fread("Neurolentech/SampleInfo_Batch_1,2,3.txt")
+nlt1 <- fread("~/Camilla/Neurolentech/counting_summary_batch1/summary_unique.tsv")
+nlt2 <- fread("~/Camilla/Neurolentech/counting_summary_batch2/summary_unique.tsv")
+nlt3 <- fread("~/Camilla/Neurolentech/counting_summary_batch3/summary_unique.tsv")
+nltmeta <- fread("~/Camilla/Neurolentech/SampleInfo_Batch_1,2,3.txt")
 
 cat("Table dimensions:", dim(nlt1), ",", dim(nlt2), ",", dim(nlt3), "\n")
 cat("Number of gene IDs:", length(unique( Reduce(union, list(nlt1$gene_id, nlt2$gene_id, nlt3$gene_id)) )), "\n")
 
 cat("Brainspan data.\n")
 
-BSP <- fread("Brainspan/expression_matrix.csv")
-bspc <- fread("Brainspan/columns_metadata.csv")
-bspr <- fread("Brainspan/rows_metadata.csv")
+BSP <- fread("~/Camilla/Brainspan/expression_matrix.csv")
+bspc <- fread("~/Camilla/Brainspan/columns_metadata.csv")
+bspr <- fread("~/Camilla/Brainspan/rows_metadata.csv")
 
 cat("Table dimensions:", dim(BSP),  "\n")
 cat("Number of gene IDs:", length(unique(bspr[, ensembl_gene_id])), "\n")
 ```
 
-## Sanity-check correlations
+<!-- ## Sanity-check correlations -->
 
-This section was added retro-actively, after seeing the correlation results.
+<!-- This section was added retro-actively, after seeing the correlation results. Due to size/resolution, the heatmaps are sent directly to PDF. -->
 
-Observing how each dataset correlates and clusters internally, before doing any pre-processing, acts as a control against potential errors introduced in restructuring the data. This is necessary in order to interpret the outcome that the correlations of the processed data do not cluster in a way that reflects the available variables.
+<!-- Observing how each dataset correlates and clusters internally, before doing any pre-processing, acts as a control against potential errors introduced in restructuring the data. This is necessary in order to interpret the outcome that the correlations of the processed data do not cluster in a way that reflects the available variables. -->
 
-```{r raw_internal_correls}
-rawBSP <- as.matrix(BSP[, 2:length(BSP)])
-colnames(rawBSP) <- gsub("\\W", "_", paste(bspc$structure_name, bspc$column_num, bspc$gender, sep="_"))
-rawBSPpearson <- plot_my_correlations(my_pairwise_internal_correls(rawBSP))
-rawBSPspearman <- plot_my_correlations(my_pairwise_internal_correls(rawBSP, method="spearman"))
+<!-- ```{r raw_internal_correls} -->
+<!-- rawBSP <- as.matrix(BSP[, 2:length(BSP)]) -->
+<!-- colnames(rawBSP) <- gsub("\\W", "_", paste(bspc$structure_name, bspc$column_num, bspc$gender, sep="_")) -->
+<!-- rawBSPpearson <- plot_my_correlations(my_pairwise_internal_correls(rawBSP)) -->
+<!-- rawBSPspearman <- plot_my_correlations(my_pairwise_internal_correls(rawBSP, method="spearman")) -->
 
-pdf(file="Brainspan_raw_correlation.pdf", width = 110, height = 110)
-print(rawBSPpearson$pdrc)
-print(rawBSPspearman$pdrc)
-dev.off()
+<!-- pdf(file="Brainspan_raw_correlation.pdf", width = 110, height = 110) -->
+<!-- print(rawBSPpearson$pdrc) -->
+<!-- print(rawBSPspearman$pdrc) -->
+<!-- dev.off() -->
 
-rawNLT <- Reduce(function(x,y){merge(x, y, all=TRUE, by=c("gene", "gene_id"))}, list(nlt1, nlt2, nlt3))
-rawNLT <- rawNLT[, 3:length(rawNLT)]
-colnames(rawNLT) <- gsub("\\W", "_", c(nltmeta[sBatch == 'sBatch1', paste(Type, Timepoint, Construct, Batch, sBatch, 1:.N, Sex, sep = "_")], 
-                      nltmeta[sBatch == 'sBatch2', paste(Type, Timepoint, Construct, Batch, sBatch, 1:.N, Sex, sep = "_")],
-                      nltmeta[sBatch == 'sBatch3', paste(Type, Timepoint, Construct, Batch, sBatch, 1:.N, Sex, sep = "_")]))
+<!-- rawNLT <- Reduce(function(x,y){merge(x, y, all=TRUE, by=c("gene", "gene_id"))}, list(nlt1, nlt2, nlt3)) -->
+<!-- rawNLT <- rawNLT[, 3:length(rawNLT)] -->
+<!-- colnames(rawNLT) <- gsub("\\W", "_", c(nltmeta[sBatch == 'sBatch1', paste(Type, Timepoint, Construct, Batch, sBatch, 1:.N, Sex, sep = "_")],  -->
+<!--                       nltmeta[sBatch == 'sBatch2', paste(Type, Timepoint, Construct, Batch, sBatch, 1:.N, Sex, sep = "_")], -->
+<!--                       nltmeta[sBatch == 'sBatch3', paste(Type, Timepoint, Construct, Batch, sBatch, 1:.N, Sex, sep = "_")])) -->
 
-rawNLTpearson <- plot_my_correlations(my_pairwise_internal_correls(rawNLT))
-rawNLTspearman <- plot_my_correlations(my_pairwise_internal_correls(rawNLT, method="spearman"))
+<!-- rawNLTpearson <- plot_my_correlations(my_pairwise_internal_correls(rawNLT)) -->
+<!-- rawNLTspearman <- plot_my_correlations(my_pairwise_internal_correls(rawNLT, method="spearman")) -->
 
-pdf(file="Neurolentech_raw_correlation.pdf", width = 30, height = 30)
-print(rawNLTpearson$pdrc)
-print(rawNLTspearman$pdrc)
-dev.off()
-```
+<!-- pdf(file="Neurolentech_raw_correlation.pdf", width = 30, height = 30) -->
+<!-- print(rawNLTpearson$pdrc) -->
+<!-- print(rawNLTspearman$pdrc) -->
+<!-- dev.off() -->
+<!-- ``` -->
 
-The samples ineither dataset do not appear to cluster in a way that reflects any of the available variables. Therefore, we cannot expect for the processed data to cluster on these variables either.
+<!-- The samples ineither dataset do not appear to cluster in a way that reflects any of the available variables. Therefore, we cannot expect for the processed data to cluster on these variables either. -->
 
 
 # Restructure data
 
-### Brainspan
+## Brainspan
 
 Reduce Brainspan tissue complexity, after discussion indicating that for this analysis most of the cortex subtypes are considered equivalent. Use the new designations to give more helpful names to the samples.
 
@@ -507,19 +520,28 @@ Reduce Brainspan tissue complexity, after discussion indicating that for this an
 cat("Brainspan variables\n")
 print(table(bspc[, .(structure_name, gender)]))
 
-bspc[, new_tissue := structure_name]
-# bspc[grepl("cortex", structure_name) & !grepl("amygdaloid|cerebellar", structure_name), new_tissue := "COMBINED cortex"]
-# Combining the cortices didnotlead to sensible grouping
+setorder(bspc, column_num) # Should already be, but I'm not leaving it to chance
 
-# cat("Brainspan new variables\n")
-# print(table(bspc[, .(new_tissue, gender)]))
+bspc[, age_value := vapply(strsplit(age, "\\s"), function(x){ as.numeric(x[1]) }, numeric(1)) ]
+bspc[, age_unit := factor(vapply(strsplit(age, "\\s"), function(x){ x[2] }, character(1)), levels=c('pcw', 'mos', 'yrs'))]
+
+bspc[, new_tissue := structure_name]
+bspc[grepl("cortex", structure_name) & !grepl("amygdaloid|cerebellar", structure_name), new_tissue := "COMBINED cortex"]
+
+cat("Brainspan new variables\n")
+print(table(bspc[, .(new_tissue, gender)]))
 
 # Create more informative column names
-bspc[, new_column := gsub("\\W", "_", paste(new_tissue, column_num, gender, sep="_"))]
-setorder(bspc, column_num) # Should already be, but I'm not leaving it to chance
+bspc[, new_column := gsub("\\W", "_", paste(age_unit, age_value, new_tissue, gender, column_num, sep="_"))]
 
 # Apply the new names
 setnames(BSP, c("row_num", bspc$new_column))
+
+# Manual order for easier interpretation
+setorder(bspc, age_unit, age_value, new_tissue, structure_acronym)
+BSP <- BSP[, c(0, bspc$column_num) + 1, with = FALSE]
+
+bspc[, age := factor(age, levels=unique(age))]
 ```
 
 Brainspan data is based on an older genome assembly -- GRCh37 -- and a very old genome annotation -- Ensembl 56. Gene IDs can be computationally updated from Ensembl 56 to the "equivalent" Ensembl 94 ones, but the process is not absolute. Some genes on either set have no equivalent in the other, while others may have had their models revised to a degree that could affect their expression quantification. Re-mapping the sequencing data of Brainspan (if available) to the GRCh38 assembly and re-quantifying with the Ensembl 94 annotation would be the ideal way to compare the datasets, but this is beyond the scope of the requested service.
@@ -528,12 +550,12 @@ Brainspan data is based on an older genome assembly -- GRCh37 -- and a very old 
 # Save IDs into file to manually submit to the Ensembl Historical ID Converter. 
 #    https://www.ensembl.org/Homo_sapiens/Tools/IDMapper
 # https://grch37.ensembl.org/Homo_sapiens/Tools/IDMapper
-write(unique(bspr[, ensembl_gene_id]), file="Brainspan/ensembl_ids.txt")
+write(unique(bspr[, ensembl_gene_id]), file="~/Camilla/Brainspan/ensembl_ids.txt")
 
 # Import the result
 # ensembl_hist37 <- rbind(fread("Brainspan/ensembl_ids_idmapper37.txt", header = FALSE, fill = TRUE, sep = ",",
 #                                col.names = c("old", "new", "release", "score")) ) # short titles without spaces
-ensembl_hist38 <- rbind(fread("Brainspan/ensembl_ids_idmapper38.txt", header = FALSE, fill = TRUE, sep = ",",
+ensembl_hist38 <- rbind(fread("~/Camilla/Brainspan/ensembl_ids_idmapper38.txt", header = FALSE, fill = TRUE, sep = ",",
                                col.names = c("old", "new", "release", "score")) ) # short titles without spaces
 ```
 
@@ -636,12 +658,9 @@ Of the almost 7000 IDs that changed between the two relevant Ensembl releases, t
 
 ```{r brainspan_row_ids}
 # Avoid numeric accidents with numeric IDs, by making them strings
+setorder(BSP, row_num)
 BSP[, row_num := as.character(row_num)]
-setkey(BSP, "row_num")
-
-bspc[, column_num := paste0("V", column_num + 1)] # the first column is a row number/id
-setkey(bspc, column_num)
-
+setorder(bspr, row_num)
 bspr[, row_num := as.character(row_num)]
 setkey(bspr, row_num)
 
@@ -670,7 +689,7 @@ cat(nrow(BSP), "\n")
 There are two possible ways to deal with mergers: sum their expressions or leave them out of the analysis.
 I choose to ignore those genes, they are only few, because I am not confident to sum the expressions without first inspecting the gene models.
 
-### Neurolentech
+## Neurolentech
 
 The data is split in 3 tables, so I join them together into one.
 
@@ -685,7 +704,8 @@ nltmeta[, Sample := gsub("\\W", '_',  Sample)]
 
 # Take care of column titles.
 nltmeta[, col_num := 1:.N, by = sBatch]
-nltmeta[, new_column := paste(Type, Timepoint, Construct, Batch, sBatch, col_num, Sex, sep = "_")]
+nltmeta[Timepoint == '6W', Timepoint := 'W6']
+nltmeta[, new_column := paste(Timepoint, Batch, sBatch, Construct, Sex, col_num, sep = "_")]
 setnames(nlt1, c(names(nlt1)[1:2], nltmeta[sBatch == 'sBatch1', new_column]))
 setnames(nlt2, c(names(nlt2)[1:2], nltmeta[sBatch == 'sBatch2', new_column]))
 setnames(nlt3, c(names(nlt3)[1:2], nltmeta[sBatch == 'sBatch3', new_column]))
@@ -695,13 +715,17 @@ cat(any( names(nlt1)[3:ncol(nlt1)] %in% names(nlt2)[3:ncol(nlt2)] ), "\n")
 
 # Combine into singe table
 NLT <- Reduce(function(x,y){merge(x, y, all=TRUE, by=c("gene", "gene_id"))}, list(nlt1, nlt2, nlt3))
-setkey(NLT, gene_id)
+# setkey(NLT, gene_id)
 
 cat("Verify dimensions (ie. everything matched up)\n")
 cat(dim(NLT), "\n")
+
+# Order for convenience
+setorder(nltmeta, Type, Timepoint, Batch, sBatch, Construct)
+NLT <- NLT[, c("gene", "gene_id", nltmeta$new_column), with = FALSE]
 ```
 
-### Match genes between the datasets
+## Match genes between the datasets
 
 ```{r intersect_datasets}
 cat("Number of genes that can be matched between datasets, after all the conversions:\n")
@@ -713,10 +737,10 @@ BSP <- BSP[row_num %in% bspr$row_num, ]
 NLT <- NLT[gene_id %in% isectID, ]
 
 # Finally ready to apply the gene IDs directly to BSP
-BSP <- merge(bspr[, .(row_num, new_ensembl)], BSP, by="row_num")
+BSP <- merge(bspr[, .(row_num, new_ensembl)], BSP, by="row_num", all.y=TRUE)
 ```
 
-### Rescale expressions
+## Rescale expressions
 
 RPKMs can be converted to TPM by simply re-scaling for the sum of RPKMs.
 
@@ -770,6 +794,8 @@ Because there are over 600 samples in total and a 600 by 600 heatmap would be un
 # Brainspan selection vectors
 cat("Brainspan variables\n")
 print(table(bspc[, .(structure_name, gender)]))
+print(table(bspc[, .(age, gender)]))
+print(table(bspc[, .(structure_name, age)]))
 
 bsp_sex <- unique(bspc$gender)
 bsp_sel_sex <- lapply(bsp_sex, function(x){
@@ -787,9 +813,13 @@ names(bsp_sel_tis) <- bsp_tissues
 
 cat("Neurolentech variables\n")
 print(table(nltmeta[, .(Construct, Sex)]))
+print(table(nltmeta[, .(Construct, Type)]))
 print(table(nltmeta[, .(Type, Sex)]))
 print(table(nltmeta[, .(Batch, Sex)]))
+print(table(nltmeta[, .(Batch, Construct)]))
+print(table(nltmeta[, .(Batch, sBatch)]))
 print(table(nltmeta[, .(sBatch, Sex)]))
+print(table(nltmeta[, .(sBatch, Construct)]))
 
 nlt_sex <- unique(nltmeta$Sex)
 nlt_sel_sex <- lapply(nlt_sex, function(x){
@@ -845,18 +875,40 @@ all_pearson_plots <- plot_my_correlations(all_pearson)
 all_spearman <- my_pairwise_external_correls(BSP, NLT, method="spearman")
 all_spearman_plots <- plot_my_correlations(all_spearman)
 
-pdf(file="Brainspan_correlation_all_unclustered.pdf", width = 25, height = 100)
+pdf(file="~/Camilla/CORRELATION/All_unclustered.pdf", width = 25, height = 100)
 print(all_pearson_plots$pfr)
-print(all_spearman_plots$pdr)
+print(all_spearman_plots$pfr)
 dev.off()
 
-pdf(file="Brainspan_correlation_all_clustered.pdf", width = 35, height = 110)
+pdf(file="~/Camilla/CORRELATION/All_clustered.pdf", width = 35, height = 110)
 print(all_pearson_plots$pfrc)
-print(all_spearman_plots$pdrc)
+print(all_spearman_plots$pfrc)
 dev.off()
 ```
 
 The correlations and the clustering do not reveal any systematic relationship between the variables.
+
+
+```{r all_cor_filtered}
+all_pearson_filtered <- my_pairwise_external_correls(BSP, NLT, method="pearson", minMean = 50, minSingle = 100, log = FALSE)
+all_pearson_plots_filtered <- plot_my_correlations(all_pearson_filtered)
+
+all_spearman_filtered <- my_pairwise_external_correls(BSP, NLT, method="spearman", minMean = 50, minSingle = 100, log = FALSE)
+all_spearman_plots_filtered <- plot_my_correlations(all_spearman_filtered)
+
+pdf(file="~/Camilla/CORRELATION/All_filtered_log_unclustered.pdf", width = 25, height = 100)
+print(all_pearson_plots_filtered$pfr)
+print(all_spearman_plots_filtered$pfr)
+dev.off()
+
+pdf(file="~/Camilla/CORRELATION/All_filtered_log_clustered.pdf", width = 35, height = 110)
+print(all_pearson_plots_filtered$pfrc)
+print(all_spearman_plots_filtered$pfrc)
+dev.off()
+```
+
+
+
 
 # Session Info
 
