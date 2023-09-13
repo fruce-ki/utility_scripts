@@ -11,7 +11,8 @@ output:
       collapsed: false
 params:
   cts: NULL                           # path to counts file
-  tpm: data.frame()                   # TPM data.table
+  tpm: matrix()                       # 
+  counts: matrix()                    #
   covars: data.frame()                # Experimental variables table
   RDSdir: NULL                        # save path for intermediate data
   nidcols: 1                          # how many columns contain alternative IDs, including the col with the row IDs
@@ -541,7 +542,7 @@ Genes with mean raw count across all samples below `r params$minMean` are exclud
 # All genes above the count thresholds
 message(paste("Using features that exceed either", params$minMean, "mean count across samples or", params$minSingle, "count in any single sample."))
 n <- nrow(params$tpm)
-topgenes <- rownames(counts)[(rowMeans(counts) >= params$minMean) | (rowSums(counts >= params$minSingle) > 0)]
+topgenes <- rownames(params$counts)[(rowMeans(params$counts) >= params$minMean) | (rowSums(params$counts >= params$minSingle) > 0)]
 message(paste(n - length(topgenes), "features discarded, out of", n))
 
 # Genes that were excluded from TPM and will be excluded from PCA.
@@ -563,7 +564,7 @@ cv <- sort(rowSds(params$tpm[topgenes, ]) / rowMeans(params$tpm[topgenes, ]), de
 topgenes2 <- names(head(cv, n=params$topVars))
 
 # Make it obvious which genes in the TPM-StDev plot where excluded due to raw count.
-lowcnt <- rownames(counts)[(rowMeans(counts) < params$minMean) & (rowSums(counts >= params$minSingle) == 0)]
+lowcnt <- rownames(params$counts)[(rowMeans(params$counts) < params$minMean) & (rowSums(params$counts >= params$minSingle) == 0)]
 ```
 
 
@@ -581,11 +582,11 @@ Correlations based on all the genes that meet the count and name criteria.
 
 ```{r corr1, fig.height=15, fig.width=15}
 corels1 <- my_pairwise_internal_corels(log10(params$tpm[topgenes,]), params$covars$Sample, method="pearson",
-                                      minMean = 0, minSingle = 0, loopVal=params$loopVal,
+                                      minMean = 0, minSingle = 0, loopVal=params$loopVal,   # prefiltered
                                       rds = file.path(params$RDSdir, 
                                                              sub(".txt|.tsv", paste0("_", params$loopval, "_corrP.RDS"), basename(params$cts))) )
 corels2 <- my_pairwise_internal_corels(log10(params$tpm[topgenes, ]), params$covars$Sample, method="spearman",
-                                      minMean = 0, minSingle = 0, loopVal=params$loopVal,
+                                      minMean = 0, minSingle = 0, loopVal=params$loopVal,     # prefiltered
                                       rds = file.path(params$RDSdir,
                                                              sub(".txt|.tsv", paste0("_", params$loopval, "_corrS.RDS"), basename(params$cts))) )
 
@@ -604,11 +605,11 @@ Correlations using the top `r params$topVars` dispersed genes (out of those alre
 
 ```{r corr1b, fig.height=15, fig.width=15}
 corels1b <- my_pairwise_internal_corels(log10(params$tpm[topgenes2, ]), params$covars$Sample, method="pearson",
-                                      minMean = 0, minSingle = 0, loopVal=params$loopVal,
+                                      minMean = 0, minSingle = 0, loopVal=params$loopVal,   # prefiltered
                                       rds = file.path(params$RDSdir,
                                                       sub(".txt|.tsv", paste0("_", params$loopval, "_corrPtop.RDS"), basename(params$cts))) )
 corels2b <- my_pairwise_internal_corels(log10(params$tpm[topgenes2, ]), params$covars$Sample, method="spearman",
-                                      minMean = 0, minSingle = 0, loopVal=params$loopVal,
+                                      minMean = 0, minSingle = 0, loopVal=params$loopVal,    # prefiltered
                                       rds = file.path(params$RDSdir,
                                                       sub(".txt|.tsv", paste0("_", params$loopval, "_corrStop.RDS"), basename(params$cts))) )
 

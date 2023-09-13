@@ -159,7 +159,7 @@ for (V in names(subcovars)){
                     output_dir = file.path(opt$baseDir, opt$resultsDir),
                     params=list(cts = file.path(opt$baseDir, opt$countsFile),
                                 tpm=tpm[, subcovars[[V]]$Sample],
-                                # covars = file.path(opt$baseDir, opt$samplesFile),
+                                counts = counts,
                                 covars = subcovars[[V]],
                                 RDSdir = file.path(opt$baseDir, opt$RDSoutdir),
                                 nidcols = opt$nidcols,
