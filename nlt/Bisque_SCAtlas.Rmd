@@ -1,0 +1,259 @@
+---
+title: "Deconvolution - Bisque & Single Cell Atlas"
+author: "Kimon Froussios"
+date: "2023-09-21"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    collapsed: false
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(data.table)
+library(biomaRt)
+library(AnnotationHub)
+require(ensembldb)
+library(Biobase)
+library(BisqueRNA)
+library(DT)
+
+setwd("I:/Camilla/DECONVOLUTION")
+```
+
+# Input
+
+```{r input_nlt}
+# Annotated with Ensembl 94
+bulk_mtx1 <- fread("I:/Camilla/Neurolentech/counting_summary_batch1/summary_unique.tsv")
+bulk_mtx2 <- fread("I:/Camilla/Neurolentech/counting_summary_batch2/summary_unique.tsv")
+bulk_mtx3 <- fread("I:/Camilla/Neurolentech/counting_summary_batch3/summary_unique.tsv")
+bulk_meta <- fread("I:/Camilla/Neurolentech/SampleInfo_Batch_1,2,3.txt")
+
+# Tidy up
+bulk_meta[Timepoint == '6W', Timepoint := 'W6']
+bulk_meta[, colnum := 1:.N, by= sBatch]
+bulk_meta[, newSample := paste(sBatch, Batch, Sex, Timepoint, Type, Construct, colnum, sep='_')]
+bulk_mtx <- Reduce(function(x,y){ merge(x, y, all=TRUE, by=c("gene_id", "gene")) },
+                   list(bulk_mtx1, bulk_mtx2, bulk_mtx3) )
+setnames(bulk_mtx, c("gene_id", "gene", bulk_meta$newSample))
+bulk_genes <- bulk_mtx[, .(gene_id, gene)]
+bulk_mtx <- as.matrix(bulk_mtx[, 3:ncol(bulk_mtx), with=FALSE])
+rownames(bulk_mtx) <- bulk_genes$gene_id
+
+rm("bulk_mtx1", "bulk_mtx2", "bulk_mtx3")
+
+cat("# of genes in bulk:", length(bulk_genes$gene), "unique:", length(unique(bulk_genes$gene)), "\n")
+cat("# of IDs in bulk:", length(bulk_genes$gene_id), "unique:", length(unique(bulk_genes$gene_id)), "\n")
+# So, different IDs, same names.
+bulk_duplicates <- bulk_genes[duplicated(gene), .(gene, gene_id)]
+```
+
+There are duplicated gene symbols in the bulk data, but they have unique Ensembl IDs. Not sure what to think of that, but the SC data only provides gene symbols, and a one-to-many relationship is a problem for matching up data between the datasets.
+
+```{r input_sc}
+# Annotated with Ensembl 87
+cell_mtx <- fread("I:/Camilla/SC_Atlas/counts_exprMatrix.tsv")
+cell_meta <- fread("I:/Camilla/SC_Atlas/meta.tsv")
+
+cell_genes <- cell_mtx$gene
+cells <- colnames(cell_mtx)[2:ncol(cell_mtx)]
+
+cell_mtx <- as.matrix(cell_mtx[, 2:ncol(cell_mtx), with = FALSE])
+rownames(cell_mtx) <- cell_genes
+
+cat("Cells in the expression matrix that are not in the metadata:", sum(! cells %in% cell_meta$Cell), "\n")
+cat("Cells in the metadata that are not in the matrix:", sum(! cell_meta$Cell %in% cells), "\n")
+
+stopifnot(all(cells == cell_meta$Cell))
+```
+
+```{r input_sanity}
+cat("# of genes in SC:", length(cell_genes), "unique:", length(unique(cell_genes)), "\n" )
+cat("SC genes that match in the bulk gene symbols", sum(cell_genes %in% bulk_genes$gene), "\n")
+cat("SC genes that match in the bulk gene IDs", sum(cell_genes %in% bulk_genes$gene_id), "\n")
+cat("SC genes that are in the duplicated bulk gene symbols", sum(cell_genes %in% bulk_duplicates$gene))
+
+cat("Summary of potential variables to use:\n")
+cat("Area_As_Annotated & Area\n")
+print(knitr::kable(table(cell_meta$Area_As_Annotated, cell_meta$Area)))
+cat("Cluster & Area_As_Annotated\n")
+print(knitr::kable(table(as.character(cell_meta$Cluster), cell_meta$Area_As_Annotated)))
+cat("Cluster & Area\n")
+print(knitr::kable(table(as.character(cell_meta$Cluster), cell_meta$Area)))
+```
+
+```{r db_lookup}
+# From symbols to IDs
+# Way #1
+mart <- useEnsembl("ensembl", "hsapiens_gene_ensembl")
+# listAttributes(mart)
+# listFilters(mart)
+generef1 <- getBM(attributes = c("ensembl_gene_id", "external_gene_name"),
+								 filters = "external_gene_name",
+								 values = cell_genes,
+								 mart = mart)
+cat("Collecting name-ID info from current mart. Found", nrow(generef1), "genes\n")
+names(generef1) <- c("GENEID", "GENENAME")
+cat("Mart info contains duplicate IDs with conflicting names:", sum(duplicated(generef1$GENEID)), "\n")
+cat("Mart info contains duplicate names with conflicting IDs:", sum(duplicated(generef1$GENENAME)), "\n")
+
+# Way #2
+hub <- AnnotationHub()
+# query(hub, c("homo sapiens","ensdb"))
+ensdb <- hub[["AH53211"]]  # Ensembl 87. No idea which release "GRCh38-0.1.2" may refer to but it looks like it should be early version of GRCh38
+generef2 <- select(ensdb, cell_genes, "GENEID", "GENENAME")
+cat("Collecting name-ID info from archived database. Found", nrow(generef2), "genes\n")
+cat("DB info contains duplicate IDs with conflicting names:", sum(duplicated(generef2$GENEID)), "\n")
+cat("DB info contains duplicate names with conflicting IDs:", sum(duplicated(generef2$GENENAME)), "\n")
+
+ref <- unique(as.data.table(rbind(generef1[, c("GENENAME", "GENEID")], generef2[, c("GENENAME", "GENEID")])))
+cat("Combined info:", nrow(ref), "genes\n")
+cat("Combined info contains duplicate IDs with conflicting names:", sum(duplicated(ref$GENEID)), "\n")
+cat("Combined info contains duplicate names with conflicting IDs:", sum(duplicated(ref$GENENAME)), "\n")
+
+ref <- ref[! GENEID %in% ref[duplicated(ref$GENEID) | duplicated(ref$GENENAME), GENEID], ]
+cat("Combined info after removal of ambiguous name-ID mappings:", nrow(ref), "\n")
+
+# X-ref and apply
+cat("SC genes that can be cross-referenced in the database info:", sum(cell_genes %in% ref$GENENAME), "\n")
+cat("Bulk genes that can be cross-referenced in the database info:", sum(bulk_genes$gene_id %in% ref$GENEID), "\n")
+setkey(ref, GENENAME)
+cell_mtx <- cell_mtx[rownames(cell_mtx) %in% ref$GENENAME, ]
+rownames(cell_mtx) <- ref[rownames(cell_mtx), GENEID]
+cell_genes <- rownames(cell_mtx)
+```
+
+```{r match_up}
+# Match genes across datasets
+isect_genes <- intersect(rownames(bulk_mtx),rownames(cell_mtx))
+stopifnot(all(isect_genes %in% rownames(bulk_mtx)))
+stopifnot(all(isect_genes %in% rownames(cell_mtx)))
+cat("Genes matched across both datasets:", length(isect_genes), "\n")
+
+bulk_mtx <- bulk_mtx[isect_genes, ]
+cell_mtx <- cell_mtx[isect_genes, ]
+#bulk_genes <- rownames(bulk_mtx)
+#cell_genes <- rownames(cell_mtx)
+
+cell_problems <- colSums(cell_mtx) == 0 | apply(cell_mtx, MARGIN=2, function(col){any(!is.finite(col))})
+cat("Cells with no expression recorded for any of the remaining genes, or cells with undefined values:", sum(cell_problems), "\n")
+
+cell_mtx <- cell_mtx[, !cell_problems]
+cell_meta <- cell_meta[Cell %in% colnames(cell_mtx)]
+```
+
+Problematic cells will be removed.
+
+# Reference-based decomposition
+
+```{r bulk_convert}
+# Convert to ExpressionSet for Bisque
+bulk_exset <- Biobase::ExpressionSet(assayData = bulk_mtx)
+rm(bulk_mtx)
+```
+
+## "Area"
+
+```{r cell_convert1}
+sc_pdata <- new("AnnotatedDataFrame",
+                data = data.frame(check.names=FALSE, check.rows=FALSE, stringsAsFactors=FALSE,
+                									row.names = cell_meta$Cell,
+                									SubjectName = cell_meta$Individual,
+                									cellType = cell_meta$Area),
+                varMetadata = data.frame(labelDescription=c("SubjectName", "cellType"),
+                											 row.names=c("SubjectName", "cellType")) )
+
+cell_exset <- Biobase::ExpressionSet(assayData = cell_mtx, phenoData = sc_pdata)
+```
+
+
+```{r decomposition1}
+res <- BisqueRNA::ReferenceBasedDecomposition(bulk_exset, cell_exset, 
+																							markers = NULL, # use all available genes
+																							use.overlap = FALSE) # no shared samples between bulk & SC
+
+compositions <- res$bulk.props
+
+### Rounding to any precision
+mround <- function(x, base){
+  base*round(x/base, digits = 0)
+}
+
+fwrite(as.data.frame(mround(t(compositions), 0.0001)), 
+			 file = "I:/Camilla/DECONVOLUTION/Bisque_SCAtlas_compositions_Area.tsv", quote = FALSE, sep = "\t")
+
+knitr::kable(t(compositions), digits = 4)
+```
+
+## "Area_As_Annotated"
+
+```{r cell_convert2}
+sc_pdata <- new("AnnotatedDataFrame",
+                data = data.frame(check.names=FALSE, check.rows=FALSE, stringsAsFactors=FALSE,
+                									row.names = cell_meta$Cell,
+                									SubjectName = cell_meta$Individual,
+                									cellType = cell_meta$Area_As_Annotated),
+                varMetadata = data.frame(labelDescription=c("SubjectName", "cellType"),
+                											 row.names=c("SubjectName", "cellType")) )
+
+cell_exset <- Biobase::ExpressionSet(assayData = cell_mtx, phenoData = sc_pdata)
+```
+
+
+```{r decomposition2}
+res <- BisqueRNA::ReferenceBasedDecomposition(bulk_exset, cell_exset, 
+																							markers = NULL, # use all available genes
+																							use.overlap = FALSE) # no shared samples between bulk & SC
+
+compositions <- res$bulk.props
+
+### Rounding to any precision
+mround <- function(x, base){
+  base*round(x/base, digits = 0)
+}
+
+fwrite(as.data.frame(mround(t(compositions), 0.0001)), 
+			 file = "I:/Camilla/DECONVOLUTION/Bisque_SCAtlas_compositions_AreaAsAnnotated.tsv", quote = FALSE, sep = "\t")
+
+knitr::kable(t(compositions), digits = 4)
+```
+
+## "Cluster"
+
+```{r cell_convert3}
+sc_pdata <- new("AnnotatedDataFrame",
+                data = data.frame(check.names=FALSE, check.rows=FALSE, stringsAsFactors=FALSE,
+                									row.names = cell_meta$Cell,
+                									SubjectName = cell_meta$Individual,
+                									cellType = cell_meta$Cluster),
+                varMetadata = data.frame(labelDescription=c("SubjectName", "cellType"),
+                											 row.names=c("SubjectName", "cellType")) )
+
+cell_exset <- Biobase::ExpressionSet(assayData = cell_mtx, phenoData = sc_pdata)
+```
+
+
+```{r decomposition3}
+res <- BisqueRNA::ReferenceBasedDecomposition(bulk_exset, cell_exset, 
+																							markers = NULL, # use all available genes
+																							use.overlap = FALSE) # no shared samples between bulk & SC
+
+compositions <- res$bulk.props
+
+### Rounding to any precision
+mround <- function(x, base){
+  base*round(x/base, digits = 0)
+}
+
+fwrite(as.data.frame(mround(t(compositions), 0.0001)), 
+			 file = "I:/Camilla/DECONVOLUTION/Bisque_SCAtlas_compositions_Cluster.tsv", quote = FALSE, sep = "\t")
+
+knitr::kable(t(compositions), digits = 4)
+```
