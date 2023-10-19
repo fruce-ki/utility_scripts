@@ -8,10 +8,10 @@
 # output:
 #   html_document:
 #     code_folding: hide
-#     toc: true
-#     toc_float: true
-#     toc_depth: 4
-#     collapsed: false
+#     toc:
+#       toc_float: true
+#       toc_depth: 4
+#       collapsed: false
 # params:
 
 
