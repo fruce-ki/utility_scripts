@@ -11,7 +11,7 @@ output:
     code_folding: hide
     toc: true
     toc_depth: 3
-    toc_float: true
+    toc_float:
       collapsed: false
 editor_options: 
   chunk_output_type: console
