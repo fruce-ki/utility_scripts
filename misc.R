@@ -2,18 +2,22 @@
 # RMarkdown header template
 ###########################
 
-# title: "Report"
-# author: "Kimon Froussios"
-# date: "`r format(Sys.time(), '%d %B, %Y')`"
-# output:
-#   html_document:
-#     code_folding: hide
-#     toc:
-#       toc_float: true
-#       toc_depth: 4
-#       collapsed: false
-# params:
-
+---
+title: "Report"
+author: "Kimon Froussios"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_depth: 3
+    toc_float: true
+      collapsed: false
+editor_options: 
+  chunk_output_type: console
+params:
+  foo: "bar"
+---
 
 
 
