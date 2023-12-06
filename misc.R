@@ -44,8 +44,12 @@ params:
   }
   
   # colourblind palette
-  intensity_colours <- c("#000000", "#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
-  showpalette(intensity_colours)
+  palette_OkabeIto <- c("#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7", "#999999")
+  showpalette(palette_OkabeIto)
+  
+  install.packages("rcartocolor")
+  library(rcartocolor)
+  scales::show_col(carto_pal(12, "Safe"))
   
   ramp_colours <- c(
     "#bb0000", "#eedd00", "#008800", "#00dddd", "#0000ff", "#ff00ff"
@@ -75,6 +79,28 @@ params:
     "#889900", "#88ccff", "#eeeeaa", "#0066aa", "#0099aa"
   )
 
+  c25 <- c(
+    "dodgerblue2", "#E31A1C", # red
+    "green4",
+    "#6A3D9A", # purple
+    "#FF7F00", # orange
+    "black", "gold1",
+    "skyblue2", "#FB9A99", # lt pink
+    "palegreen2",
+    "#CAB2D6", # lt purple
+    "#FDBF6F", # lt orange
+    "gray70", "khaki2",
+    "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+    "darkturquoise", "green1", "yellow4", "yellow3",
+    "darkorange4", "brown"
+  )
+
+  # install.packages("Polychrome")
+  library(Polychrome)
+  
+  # build-in color palette
+  Glasbey = glasbey.colors(32)
+  swatch(Glasbey)
 }
 
 
