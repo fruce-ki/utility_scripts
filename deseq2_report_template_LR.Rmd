@@ -48,6 +48,7 @@ library(patchwork)
 library(ggrepel)
 library(ggdendro)
 library(DT)
+require("ashr")
 
 # ggplot2 base theme
 theme_set(theme_bw())
@@ -84,6 +85,8 @@ normscale <- function(counts, featLens=NULL, specnorm=params$specnorm){
     stopifnot(all(!is.na(featLens[, 2])))  # incomplete lengths
     # Scale by feature size
     TPMs <- sweep(counts, 1, featLens[[2]], `/`)
+  } else {
+    TPMs <- counts
   }
   # Scale by sequencing depth
   if (!is.null(specnorm)) {
@@ -409,7 +412,7 @@ print( corels1s[['sdrc']] )
 ## rlog (or VST)
 
 ```{r correlations3, fig.height=8, fig.width=8}
-corels2p <- my_pairwise_internal_corels(vstmat, colnames(tpm), method="pearson",
+corels2p <- my_pairwise_internal_corels(vstmat, colnames(tpm), method="spearman",
                                        minMean=0, minSingle=0)
 # corels2s <- my_pairwise_internal_corels(vstmat, colnames(tpm), method="spearman",
 #                                        minMean=0, minSingle=0)
@@ -804,10 +807,10 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
     selvst[, sample := factor(sample, ordered=TRUE, levels=cn)]
   }
   
-  ph1 <- ggplot(selcnt, aes(x=sample, y=name, fill=log10(selcnt[["TPM"]]))) +
+  ph1 <- ggplot(selcnt, aes(x=sample, y=name, fill=log10(selcnt[[PMtype]]))) +
             geom_tile() +
             # facet_grid(. ~ type) +
-            scale_fill_gradient(high="yellow2", low="darkgreen", na.value = "black", name="log10(TPM)") +
+            scale_fill_gradient(high="yellow", low="grey10", na.value = "black", name=paste0("log10(",PMtype,")")) +
             coord_equal(ratio=1) +
             labs(title=ctrname) +
             theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
@@ -816,7 +819,7 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
   ph2 <- ggplot(selvst, aes_string(x="sample", y="name", fill=ifelse(rlog, "rlog_count", "VST_count"))) +
             geom_tile() +
             # facet_grid(. ~ type) +
-            scale_fill_gradient(high="yellow2", low="darkgreen", na.value = "black") +
+            scale_fill_gradient(high="yellow", low="grey10", na.value = "black") +
             coord_equal(ratio=1) +
             labs(title=ctrname) +
             theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5),
@@ -892,39 +895,38 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
       labs(title=ctrname, x=paste('treatment Mean', PMtype), y='treatment Variation Coeff.') +
       theme(aspect.ratio=1, panel.grid.minor = element_blank()) 
   
-  pe4 <- ggplot(NULL, aes(y=refMeanTPM + zeros, x=log2FoldChange, label=name, colour=category)) +
-      geom_vline(xintercept = lfcthreshold, linetype="dashed",  colour="steelblue1") + 
-      geom_vline(xintercept = -lfcthreshold, linetype="dashed",  colour="steelblue1") + 
+  pe4 <- ggplot(NULL, aes(x=refMeanTPM + zeros, y=log2FoldChange, label=name, colour=category)) +
+      geom_hline(yintercept = lfcthreshold, linetype="dashed",  colour="steelblue1") + 
+      geom_hline(yintercept = -lfcthreshold, linetype="dashed",  colour="steelblue1") + 
       geom_point(data=outtab[category == highlight[1], ], alpha=0.4, size=rel(0.8),  colour="black") +
       geom_point(data=outtab[category == highlight[2], ], alpha=0.7, size=rel(0.8),  colour="black") +
       geom_point(data=outtab[category == highlight[3], ], alpha=0.7,  colour="black") +
       geom_point(data=outtab[category == highlight[4], ]) +
       geom_label_repel(data=outtab[category == highlight[4], ], size=rel(2.5), colour="violet",
                        segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=10, force_pull=5) +
-      scale_y_log10() + 
+      scale_x_log10() + 
       scale_colour_manual(values=hlcol) +
       annotation_logticks(base=10, sides='lr') +
-      labs(title=ctrname, y=paste('reference Mean', PMtype), x='log2( FC )') +
+      labs(title=ctrname, x=paste('reference Mean', PMtype), y='log2( FC )') +
       theme(aspect.ratio=1, legend.position='none',  panel.grid.minor = element_blank())
   
-    pe4b <- ggplot(NULL, aes(y=refMean + zerosb, x=log2FoldChange, label=name, colour=category)) +
-      geom_vline(xintercept = lfcthreshold, linetype="dashed",  colour="steelblue1") + 
-      geom_vline(xintercept = -lfcthreshold, linetype="dashed",  colour="steelblue1") + 
+  pe4b <- ggplot(NULL, aes(x=refMean + zerosb, y=log2FoldChange, label=name, colour=category)) +
+      geom_hline(yintercept = lfcthreshold, linetype="dashed",  colour="steelblue1") + 
+      geom_hline(yintercept = -lfcthreshold, linetype="dashed",  colour="steelblue1") + 
       geom_point(data=outtab[category == highlight[1], ], alpha=0.4, size=rel(0.8),  colour="black") +
       geom_point(data=outtab[category == highlight[2], ], alpha=0.7, size=rel(0.8),  colour="black") +
       geom_point(data=outtab[category == highlight[3], ], alpha=0.7,  colour="black") +
       geom_point(data=outtab[category == highlight[4], ]) +
       geom_label_repel(data=outtab[category == highlight[4], ], size=rel(2.5), colour="violet",
                        segment.size = 0.3, min.segment.length=0, max.overlaps=1e4, force=10, force_pull=5) +
-      scale_y_log10() + 
+      scale_x_log10() + 
       scale_colour_manual(values=hlcol) +
       annotation_logticks(base=10, sides='lr') +
-      labs(title=ctrname, y='reference Mean Reads', x='log2( FC )') +
+      labs(title=ctrname, x='reference Mean Reads', y='log2( FC )') +
       theme(aspect.ratio=1, legend.position='none',  panel.grid.minor = element_blank())
+  
   ## Table pt2
-  
   hashits <- any(outtab[, meetthresh], na.rm=TRUE)
-  setnames(outtab, sub('TPM|RPM', PMtype, names(outtab)))
   
   custom <- NULL
   if (addPrefix) {
@@ -949,6 +951,7 @@ do_de_plots <- function(contrast, dds = deobj, rpms = tpm, regcnt=vstmat, ntop =
     # Add as suffix instead. Makes life easier in spotfire
     setnames(custom, c(names(custom)[1],      # keep uniform name across tables for use as joining key
                        paste(names(custom)[2:length(custom)],  prefix, sep='.')) )
+    setnames(custom, sub('TPM|RPM', PMtype, names(custom)))
   
   }
   
@@ -1055,7 +1058,7 @@ if (!is.null(params$comparisons)) {
   
   pallexp <- ggplot(allhitdf, aes(y=Feature, x=Sample, fill=log10(RPM))) +
     geom_tile() +
-    scale_fill_gradient(high="gold", low="black", na.value='gray50', paste('log10', colsuffix)) +
+    scale_fill_gradient(high="yellow", low="grey10", na.value='black', paste('log10', colsuffix)) +
     coord_equal(ratio=1) +
     labs(y='', x='') +
     theme(axis.text.x = element_text(angle=90, hjust = 1, vjust = 0.5, size=rel(1)),
@@ -1072,7 +1075,7 @@ if (!is.null(params$comparisons)) {
   pallvst <- ggplot(allhitdf, 
                     aes_string(y="Feature", x="Sample", fill=ifelse(params$rlog, "rlog_count", "VST_count"))) +
     geom_tile() +
-    scale_fill_gradient(high="gold", low="black", na.value='gray50') +
+    scale_fill_gradient(high="yellow", low="grey10", na.value='black') +
     coord_equal(ratio=1) +
     labs(y='', x='') +
     theme(axis.text.x = element_text(angle=90, hjust = 1, vjust = 0.5, size=rel(1)),

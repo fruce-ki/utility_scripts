@@ -1068,7 +1068,7 @@ class FilesList(list):
         # Read new list.
         paths = []
         for myfile in myfiles:
-            with open(myfile, 'rU') as input:
+            with open(myfile, 'r') as input:
                 for line in input:
                     if line == "\n":
                         # Skip empty lines.

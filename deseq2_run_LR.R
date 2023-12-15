@@ -23,19 +23,40 @@ spec = matrix(c(
   'resultsDir',    'o', 1, "character", "Directory in which to save the contrast results. If omitted, only the RDS will be output.",
   'pcutoff',       'p', 1, "numeric",   "P-value cutoff (0.05)",
   'prefix',        'P', 1, "character", "Prefix to add to output file name and column names (''). ",
-  'RDSoutdir',     'r', 1, "character", "Directory in which to save the raw DESeq2 object (./process)",
   'reducedFormula','R', 1, "character", "Reduced formula for LR test.",
-  'samplesFile',   's', 1, "character", "Tab-separated table with `Sample` column followed by the variable columns. Values must NOT contain punctuation other than '_' !!!",
+  'samplesFile',   's', 1, "character", "Tab-separated table with `sample` column followed by the variable columns. Values must NOT contain punctuation other than '_' !!!",
   'reportTemplate','T', 1, "character", "Template Rmd file for DE report.",
   'vst',           'v', 0, "logical",   "Plot VST counts instead of rlog2",
   'widthsFile',    'w', 1, "character", "Full path to table of feature lengths",
   'widthsCol',     'W', 1, "integer",   "Column in the counts file that contains feature lengths. This should be among the non-count columns, see also -I. It is an alternative to providing a separate lengths file.",
   'comparisons',   'x', 1, "character", "Comma separated list indicating which levels of the formula factor to compare, in order of appearance. ie 'Treatment-2v1,Treatment-3v1,Treatment-3v2,Batch-4v5'.",
-  'contexts',      'X', 1, "character", "Comma separated list of covariate-level pairs indicating the context/subset to use for each comparison, ie 'celltype-A,celltype-A,celltype-B,culture-Z"
+  'contexts',      'X', 1, "character", "Comma separated list indicating which levels of which covariate to use as context/subset for each comparison, ie 'celltype-1,celltype-1,celltype-2,culture-7"
 ), byrow=TRUE, ncol=5)
 
+# opt <- list(createID=FALSE,
+#             baseDir='/SCRATCH/PP2023011_SLC13A5',
+#             countsFile='outputs/star_salmon/salmon.merged.gene_counts_length_scaled.tsv',
+#             resultsDir='outputs/diffex2.1',
+#             samplesFile='samplesheet2.differentialabundance.csv',
+#             minCount=10,
+#             minTPM=0,
+#             lfcthreshold=0.5,
+#             nidcols=2,
+#             idcol=2,
+#             ntop=50,
+#             bmF=FALSE,
+#             pcutoff=0.05,
+#             prescaled=FALSE,
+#             prefix='TESS',
+#             label=TRUE,
+#             widthsCol=NULL,
+#             reportTemplate="~/utility_scripts/deseq2_report_template_LR.Rmd",
+#             comparisons="condition-2v1,time2-2v1",
+#             contexts="binary-1,binary-1",
+#             fullFormula="~ time2 + condition",
+#             reducedFormula="NULL",
+#             specnorm="NULL")
 opt = getopt(spec)
-# opt <- list(createID=FALSE, baseDir='/scratch-cbe/users/kimon.froussios/test', countsFile='process/featureCounts_fixed/spliced_genecounts.txt', resultsDir='results/DE', samplesFile='description/covars_R14425.txt', minCount=100, minTPM=5, lfcthreshold=1, nidcols=6, idcol=1, ntop=100, bmF=FALSE, pcutoff=0.05, prescaled=FALSE, prefix='spliced_genecounts', label=TRUE, widthsCol=6, reportTemplate="/groups/busslinger/Kimon/test/code/deseq2_report_template_LR.Rmd", comparisons="TF_type-1v2,TF_type-3v4,TF_type-3v4,TF_type-3v4,TF_type-3v4,TF_type-3v4,TF_type-5v6", contexts="Cell-1,Cell-1,Cell-2,Cell-3,Cell-4,Cell-5,Cell-5", fullFormula="NULL", reducedFormula="NULL", specnorm='^ENSMUSG|^TCR|^IGH')
 
 
 if ( !is.null(opt$help) ) {
@@ -53,13 +74,13 @@ library(data.table)
 stopifnot(!is.null(opt$countsFile))
 stopifnot(!is.null(opt$samplesFile))
 
-if (is.null(opt$reportTemplate))  opt$reportTemplate <- '~/utility_scripts/deseq2_report_template_SF.Rmd'
-if (is.null(opt$createID))  opt$createID <- FALSE 
+if (is.null(opt$reportTemplate))  opt$reportTemplate <- '~/utility_scripts/deseq2_report_template_LR.Rmd'
+if (is.null(opt$createID))  opt$createID <- FALSE
 if (!is.null(opt$specnorm) && opt$specnorm == "NULL") opt$specnorm <- NULL
 if (is.null(opt$prescaled)) opt$prescaled <- FALSE
 if (is.null(opt$label)) opt$label <- FALSE
 if (is.null(opt$baseDir)) opt$baseDir <- '.'
-if (is.null(opt$resultsDir))  opt$resultsDir <- './results' 
+if (is.null(opt$resultsDir))  opt$resultsDir <- './results'
 if (is.null(opt$minCount)) opt$minCount <- 100
 if (is.null(opt$minTPM)) opt$minTPM <- 5
 if (is.null(opt$ntop))  opt$ntop <- 50
@@ -69,7 +90,7 @@ if (is.null(opt$altHypo)) opt$altHypo <- 'greaterAbs'
 if (is.null(opt$nidcols)) opt$nidcols <- 1
 if (is.null(opt$idcol)) opt$idcol <- 1
 if (is.null(opt$bmF)) opt$bmF <- FALSE
-opt$bmF <- !opt$bmF    # Convert -B flag functionality from switch-on to switch-off. 
+opt$bmF <- !opt$bmF    # Convert -B flag functionality from switch-on to switch-off.
 if (is.null(opt$vst)) opt$vst <- FALSE
 if (!is.null(opt$fullFormula) && opt$fullFormula == "NULL") opt$fullFormula <- NULL
 if (!is.null(opt$reducedFormula) && opt$reducedFormula == "NULL") opt$reducedFormula <- NULL
@@ -80,16 +101,16 @@ if (is.null(opt$contexts) | opt$contexts == "NULL") stop("Need at least one cont
 dir.create(file.path(opt$baseDir, opt$resultsDir, opt$prefix), recursive=TRUE)
 
 # Covariates
-covars <- read.csv(file.path(opt$baseDir, opt$samplesFile), sep="\t", row.names="Sample", header=TRUE, check.names = FALSE, colClasses="character")
+covars <- read.csv(file.path(opt$baseDir, opt$samplesFile), sep=",", row.names="sample", header=TRUE, check.names = FALSE, colClasses="character")
 
 # Contrasts
 contexts <- strsplit(gsub(' ', '', opt$contexts), ',')[[1]]
 contexts <- strsplit(contexts , '-')
 if (!is.null(opt$comparisons)) {
   comparisons <- strsplit(gsub(' ', '', opt$comparisons), ',')[[1]]
-  
+
   stopifnot(length(contexts) == length(comparisons))
-  
+
   comparisons <- strsplit(strsplit(opt$comparisons, ',')[[1]], '-')
   comparisons <- lapply(comparisons, function(x){
     # x <- comparisons[[1]]
@@ -144,40 +165,40 @@ stopifnot(all(rownames(cts) == featLens[[1]]))
 ###  Split up data as instructed
 for(y in unique(contexts)) {
   # y <- unique(contexts)[[1]]
-  
+
   contvar <- y[1]
   contlev <- unique(covars[[contvar]])[as.integer(y[2])]
-  
+
   sel <- which(vapply(contexts, function(a, b=y) { a[1] == b[1] && a[2] == b[2] },  logical(1)))
-  
+
   condvars <- NULL
   treatlevs <- NULL
   reflevs <- NULL
   if (!is.null(opt$comparisons)) {
     selcomps <- comparisons[sel]
-    condvars <- vapply(selcomps, function(x){ x[[1]] }, character(1)) 
-    
-    stopifnot(length(unique(condvars)) == 1)
-    
+    condvars <- vapply(selcomps, function(x){ x[[1]] }, character(1))
+
+    # stopifnot(length(unique(condvars)) == 1)
+
     treatlevs <- vapply(selcomps, function(x){ as.character(unique(covars[[x[[1]]]])[x[[2]][1]]) }, character(1))
     reflevs <- vapply(selcomps, function(x){ as.character(unique(covars[[x[[1]]]])[x[[2]][2]]) }, character(1))
-    
+
     if (!is.null(opt$fullFormula)) {
       sanity <- vapply(condvars, function(x) { grepl(x, opt$fullFormula, fixed=TRUE) }, logical(1))
       if (any(!sanity))
         warning(paste(condvars[which(!sanity)], "not in formula", opt$fullFormula))
     }
   }
-  
+
   # Remove unused samples from the counts table,
   # and ensure samples are in the same order as the covariates table.
   subcovars <- covars[ covars[[contvar]] == contlev, ]
-  
+
   if (!is.null(opt$comparisons)) {
     stopifnot(all( vapply(1:length(condvars), function(i) { reflevs[i] %in% subcovars[[condvars[i]]] }, logical(1)) ))
     stopifnot(all( vapply(1:length(condvars), function(i) { treatlevs[i] %in% subcovars[[condvars[i]]] }, logical(1)) ))
   }
-  
+
   cdn <- rownames(subcovars)
   ctsn <- colnames(cts)
   subcts <- cts[, ctsn[match(cdn, ctsn)]]
@@ -191,7 +212,7 @@ for(y in unique(contexts)) {
   DDS <- DESeqDataSetFromMatrix(countData = round(subcts, digits=0),
                                 colData = subcovars,
                                 design = as.formula(designFormula) )
-                                
+
   # To scale or not to scale
   if (opt$prescaled) {
     factors <- rep(1, times=length(cdn))
@@ -199,7 +220,7 @@ for(y in unique(contexts)) {
     sizeFactors(DDS) <- factors
   }
 
-  
+
   # Prepare file name.
   if (opt$prefix == '') {
     # prefix <- paste(paste(contvar, contlev, sep='_'), designFormula, sep='.')
@@ -209,15 +230,15 @@ for(y in unique(contexts)) {
     prefix <- paste(opt$prefix, paste(contvar, contlev, sep='_'), sep='.')
   }
   name <- paste(prefix, 'deseq2.html', sep='.')
-  
+
   #######################
   #######################
-  
+
   subcomps <- NULL
   if (!is.null(opt$comparisons)) {
     subcomps <- lapply(1:length(condvars), function(i){ c(condvars[i], treatlevs[i], reflevs[i]) })
   }
-  
+
   # Fire up an Rmd report
   rmarkdown::render(opt$reportTemplate,
                     output_file = name,
