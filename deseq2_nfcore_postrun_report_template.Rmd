@@ -1,0 +1,158 @@
+---
+title: "Differential Abundance Quick View"
+author: "Kimon Froussios"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float:
+      collapsed: false
+params:
+  comparison: condition_Control.time_W6_vs_W3                # name of a specific comparison for this report
+  da_path: /SCRATCH/PP2023011_SLC13A5/tesslinz_diffex                           # output dir of nf-core/differentialabundance
+  counts: /SCRATCH/PP2023011_SLC13A5/tesslinz.salmon.merged.gene_counts.tsv      # file of raw counts
+  tpm: /SCRATCH/PP2023011_SLC13A5/tesslinz.salmon.merged.gene_tpm.tsv      # file of tpm counts
+  covars: /SCRATCH/PP2023011_SLC13A5/samplesheet_tesslinz.differentialabundance.csv # samplesheet file for nf-core/differentialabundance
+  contrasts: /SCRATCH/PP2023011_SLC13A5/contrasts_tesslinz.differentialabundance.csv # contrasts file for nf-core/differentialabundance
+  interest: /SCRATCH/REFERENCES/custom_genesets/early_onset_systemic_epilepsy.txt # file with custom gene list to query
+  gsea_path: /SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs                         # locatinon o GMT files used for GSEA
+  highlight_n: 50       # number of genes to highlight
+  min_count: 10
+  min_tpm: 5
+  min_lfc: 0.5
+  max_q: 0.05
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, bitmapType='cairo-png')
+```
+
+# Setup
+
+```{r libraries}
+setwd(params$da_path)
+
+library(data.table)
+library(ggplot2)
+library(patchwork)
+library(ggrepel)
+library(ggdendro)
+library(DT)
+# library(plotly)
+# library(htmltools)
+library(stringr)
+
+# ggplot2 base theme
+theme_set(theme_bw())
+
+# data.table::setDTthreads(1L)
+
+options(scipen=200)
+```
+
+```{r load}
+deseq <- fread(file.path(params$da_path, 'tables', 'differential', paste0(params$comparison, '.deseq2.results.tsv')))
+
+counts <- fread(params$counts)
+tpm <- fread(params$tpm)
+vst <- fread(file.path(params$da_path, 'tables', 'processed_abundance', 'all.vst.tsv'))
+normcounts <- fread(file.path(params$da_path, 'tables', 'processed_abundance', 'all.normalised_counts.tsv'))
+
+gsea_categories <- dir(file.path(params$da_path, 'tables', 'gsea', params$comparison))
+gsea_dirs <- file.path(params$da_path, 'tables', 'gsea', params$comparison, gsea_categories)
+gsea_refs <- file.path(params$gsea_path, paste0(gsea_categories, '.gmt'))
+
+covars <- fread(params$covars)
+
+stopifnot(str_detect(params$comparison, '\\w+_\\w+_vs_\\w+'))
+contrast <- str_split(str_extract(params$comparison, '\\w+_\\w+_vs_\\w+'), '_')[[1]]
+mainvar <- contrast[1]
+vartreat <- contrast[2]
+varref <- contrast[4]
+
+subsamples <- covars$sample
+if(str_detect(params$comparison, '\\w+_\\w+\\.\\w+_\\w+_vs_\\w+')) {
+  selection <- str_split(str_extract(params$comparison, '^\\w+_\\w+'), '_')[[1]]
+  selvar <- selection[1]
+  selval <- selection[2]
+  subsamples <- covars$sample[covars[[selvar]] == selval]
+}
+
+# Big table of counts
+DTc <- melt(counts[, names(counts) %in% c('gene_id', 'gene_name', subsamples) , with = FALSE], 
+            id.vars = c('gene_id', 'gene_name'), variable.name = 'sample', value.name = 'raw')
+setkey(DTc, gene_id)
+DTt  <- melt(tpm[, names(tpm) %in% c('gene_id', subsamples) , with = FALSE], 
+            id.vars = c('gene_id'), variable.name = 'sample', value.name = 'tpm')
+setkey(DTt, gene_id)
+DTn <- melt(normcounts[, names(normcounts) %in% c('gene_id', subsamples) , with = FALSE], 
+            id.vars = c('gene_id'), variable.name = 'sample', value.name = 'normalised')
+setkey(DTn, gene_id)
+DTv <- melt(vst[, names(vst) %in% c('gene_id', subsamples) , with = FALSE], 
+            id.vars = c('gene_id'), variable.name = 'sample', value.name = 'vst')
+setkey(DTv, gene_id)
+DT <- Reduce(function(x, y){ merge(x, y, by = c('gene_id', 'sample'), all = TRUE)}, 
+             list(DTc, DTt, DTn, DTv) )
+DT <- melt(DT, id.vars = c('gene_id', 'gene_name', 'sample'), variable.name = 'count_type', value.name = 'abundance')
+
+rm(DTc, DTt, DTn, DTv)
+
+# Add sample metadata
+DT <- merge(DT, covars, by = 'sample', all.x = TRUE)
+# Make generic name for coding ease
+setnames(DT, sub(paste0('^', mainvar, '$'), 'main_var', names(DT), fixed = FALSE))
+DT[main_var == vartreat, main_var := 'target']
+DT[main_var == varref, main_var := 'reference']
+
+## TODO Introduce filters
+
+## TODO Average gene expressions by condition for scatter
+
+# Un-melt on the main variable
+# DTwide <- dcast(DT, formula(paste('... ~', mainvar)), value.var = 'abundance')
+```
+
+# Contrast and Variaibles
+
+```{r name}
+cat(params$comparison)
+
+datatable(covars[sample %in% subsamples,], options = list(pageLength = min(25, nrow(covars))))
+```
+
+# Abundance
+
+```{r expresion_density, fig.height=10, fig.width=15}
+p_dense <- ((ggplot(DT[count_type != 'vst' & main_var == 'reference', ], aes(x = abundance, colour = sample)) +
+              facet_grid(count_type ~ main_var, scales = 'free') +
+              geom_density() +
+              scale_x_log10() +
+              labs(title = 'Abundance distribution') +
+              theme(legend.position = 'left') ) +
+              
+            (ggplot(DT[count_type != 'vst' & main_var == 'target', ], aes(x = abundance, colour = sample)) +
+              facet_grid(count_type ~ main_var, scales = 'free') +
+              geom_density() +
+              scale_x_log10() +
+              labs(title = 'Abundance distribution') +
+              theme(legend.position = 'right') )) /
+
+            ((ggplot(DT[count_type == 'vst' & main_var == 'reference', ], aes(x = abundance, colour = sample)) +
+                facet_grid(count_type ~ main_var, scales = 'free', switch = 'x') +
+                geom_density() +
+                theme(legend.position = 'none') ) |
+               
+            (ggplot(DT[count_type == 'vst' & main_var == 'target', ], aes(x = abundance, colour = sample)) +
+                facet_grid(count_type ~ main_var, scales = 'free', switch = 'x') +
+                geom_density() +
+                theme(legend.position = 'none') )) +
+
+            plot_layout(heights = c(3, 1))
+
+p_dense
+```
+
+```{r expression}
+
+```
