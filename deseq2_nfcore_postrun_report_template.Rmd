@@ -217,12 +217,12 @@ maXY <- unique(DT[mainvar == 'reference', .(gene_id, gene_name, count_type, cond
 p_ma <- ggplot(maXY, aes(x = condGeneMean, y = log2FoldChange, colour = fltr_pass, label = gene_name)) +
   facet_wrap(~ count_type, scales = 'free', ncol = 1) +
   geom_point(data = maXY[(!fltr_pass)], shape = 16, size = rel(0.8), alpha = 0.7) +
-  geom_hline(yintercept = 0, linetype = 'dash') +
+  geom_hline(yintercept = 0, linetype = 'dashed') +
   geom_point(data = maXY[(fltr_pass)], shape = 16, size = rel(1)) +
   geom_label_repel(data = maXY[(mark), ], colour = 'black', min.segment.length = 0, segment.size = 0.3, size = rel(2), force = 2, force_pull = 0.1, max.overlaps = 100) +
   scale_x_log10() +
   scale_colour_manual(values = c('grey50', '#2244FF')) +
-  labs(title = params$comparison, y = 'Reference abundance') +
+  labs(title = params$comparison, x = 'Reference abundance') +
   theme(legend.position = 'bottom')
 
 p_ma
