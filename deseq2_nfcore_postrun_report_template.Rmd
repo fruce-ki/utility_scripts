@@ -22,6 +22,7 @@ params:
   min_tpm: 5
   min_lfc: 0.5
   max_q: 0.05
+  genelist : null
 ---
 
 ```{r setup, include=FALSE}
@@ -65,12 +66,14 @@ gsea_refs <- file.path(params$gsea_path, paste0(gsea_categories, '.gmt'))
 
 covars <- fread(params$covars)
 
+# Contrast
 stopifnot(str_detect(params$comparison, '\\w+_\\w+_vs_\\w+'))
 contrast <- str_split(str_extract(params$comparison, '\\w+_\\w+_vs_\\w+'), '_')[[1]]
 mainvar <- contrast[1]
 vartreat <- contrast[2]
 varref <- contrast[4]
 
+# Relevant samples
 subsamples <- covars$sample
 if(str_detect(params$comparison, '\\w+_\\w+\\.\\w+_\\w+_vs_\\w+')) {
   selection <- str_split(str_extract(params$comparison, '^\\w+_\\w+'), '_')[[1]]
@@ -78,8 +81,41 @@ if(str_detect(params$comparison, '\\w+_\\w+\\.\\w+_\\w+_vs_\\w+')) {
   selval <- selection[2]
   subsamples <- covars$sample[covars[[selvar]] == selval]
 }
+covars <- covars[sample %in% subsamples, ]
 
-# Big table of counts
+# Make generic name for coding ease
+covars[, mainvar := covars[[mainvar]]]
+covars[mainvar == varref, mainvar := 'reference']
+covars[mainvar == vartreat, mainvar := 'target']
+
+# DE filters
+deseq[, fltr_fdr_pass := padj < params$max_q] # this also covers NA (ie genes not tested due to failing deseq filtering)
+deseq[, fltr_lfc_pass := abs(log2FoldChange) >= params$min_lfc]
+deseq[, fltr_de_pass := fltr_fdr_pass & fltr_lfc_pass]
+deseq[, mlog10p := -log10(padj)]
+deseq[, absl2fc := abs(log2FoldChange)]
+## Home-brewed selection of top hits to highlight, by euclidean distance from origin.
+# It mostly works OK, but the selection should not be taken as gospel.
+# Down-weight mlog10p for a more balanced selection not dominated by p value.
+pbias <- 0.75    # bias point selection to prioritize pvalue over fold-change (< 1) or vice verse (> 1)
+ppen <- max(deseq$mlog10p[is.finite(deseq$mlog10p)]) / max(deseq$absl2fc[is.finite(deseq$absl2fc)]) * pbias     # scaling factor determined by axes ranges
+deseq[, radius := sqrt((mlog10p / ppen) ^ 2 + log2FoldChange ^ 2)]
+deseq[, rank := rank(-radius, ties.method = 'average', na.last = TRUE)]
+deseq[(fltr_de_pass), de_rank := rank(-radius, ties.method = 'average', na.last = TRUE)]
+deseq[, absl2fc := NULL]
+deseq[, mlog10p := NULL]
+
+# Which genes to highlight
+if (!is.null(params$genelist)) {
+  markgenes <- fread(params$genelist)[[1]]
+} else {
+  markgenes <- deseq[(de_rank %in% 1:params$highlight_n), gene_id]
+  if (length(markgenes) <= 1) {                                                                       # if there isn't much to show
+    markgenes <- c(markgenes, deseq[(rank %in% 1:(params$highlight_n - length(markgenes))), gene_id]) # add some context of the nearest misses
+  }
+}
+
+# Big table of counts of relevant samples
 DTc <- melt(counts[, names(counts) %in% c('gene_id', 'gene_name', subsamples) , with = FALSE], 
             id.vars = c('gene_id', 'gene_name'), variable.name = 'sample', value.name = 'raw')
 setkey(DTc, gene_id)
@@ -98,53 +134,156 @@ DT <- melt(DT, id.vars = c('gene_id', 'gene_name', 'sample'), variable.name = 'c
 
 rm(DTc, DTt, DTn, DTv)
 
+# Add DE
+DT <- merge(DT, deseq, by = 'gene_id', all.x = TRUE)
 # Add sample metadata
 DT <- merge(DT, covars, by = 'sample', all.x = TRUE)
-# Make generic name for coding ease
-setnames(DT, sub(paste0('^', mainvar, '$'), 'main_var', names(DT), fixed = FALSE))
-DT[main_var == vartreat, main_var := 'target']
-DT[main_var == varref, main_var := 'reference']
 
-## TODO Introduce filters
+## Abundance filters
+DT <- DT[count_type == 'raw' & mainvar == 'reference', condGeneMean := mean(.SD$abundance), by = gene_id]
+DT <- DT[count_type == 'raw' & mainvar == 'target', condGeneMean := mean(.SD$abundance), by = gene_id]
+DT <- DT[count_type == 'tpm' & mainvar == 'reference', condGeneMean := mean(.SD$abundance), by = gene_id]
+DT <- DT[count_type == 'tpm' & mainvar == 'target', condGeneMean := mean(.SD$abundance), by = gene_id]
+DT <- DT[count_type == 'normalised' & mainvar == 'reference', condGeneMean := mean(.SD$abundance), by = gene_id]
+DT <- DT[count_type == 'normalised' & mainvar == 'target', condGeneMean := mean(.SD$abundance), by = gene_id]
+DT <- DT[count_type == 'vst' & mainvar == 'reference', condGeneMean := mean(.SD$abundance), by = gene_id]
+DT <- DT[count_type == 'vst' & mainvar == 'target', condGeneMean := mean(.SD$abundance), by = gene_id]
 
-## TODO Average gene expressions by condition for scatter
+DT <- DT[count_type == 'raw', fltr_geneMean_pass := condGeneMean >= params$min_count]        # separately for each condition and count type
+DT <- DT[count_type == 'tpm', fltr_geneMean_pass := condGeneMean >= params$min_tpm]
+DT <- DT[, fltr_abund_pass := any(.SD[count_type == 'raw', fltr_geneMean_pass]) & any(.SD[count_type == 'tpm', fltr_geneMean_pass]), by = gene_id]  # aggregate: either condition, for both count types
 
-# Un-melt on the main variable
-# DTwide <- dcast(DT, formula(paste('... ~', mainvar)), value.var = 'abundance')
+# Eliminate NAs in booleans
+DT[is.na(fltr_fdr_pass), fltr_fdr_pass := FALSE]                                # Genes that weren't tested due to failing deseq2 abundance filter
+DT[is.na(fltr_lfc_pass), fltr_lfc_pass := FALSE]                                # 
+DT[is.na(fltr_de_pass), fltr_de_pass := FALSE]                                  # still the same genes as above
+
+# Master filter
+DT[, fltr_pass := fltr_abund_pass & fltr_de_pass]
+
+# Add highlight selection
+DT[, mark := gene_id %in% markgenes] 
+
+DT[, count_type := factor(count_type, levels = c('raw', 'tpm', 'normalised', 'vst'), ordered = TRUE)]
+setkey(DT, gene_id, count_type, mainvar, sample)
 ```
 
-# Contrast and Variaibles
+# Contrast and Variables
 
 ```{r name}
-cat(params$comparison)
+cat('Contrast name:\n')
+cat(params$comparison, '\n')
 
+cat('Metadata of the relevant samples:\n')
 datatable(covars[sample %in% subsamples,], options = list(pageLength = min(25, nrow(covars))))
 ```
 
-# Abundance
+# Differential abundance
+
+## FC & significance
+
+`fltr_pass` represents genes that meet all of the criteria: FDR < `r params$max_q` , abs(L2FC) > `r params$min_lfc`, mean raw count in either condition > `r params$min_count`, and mean TPM in either condition > `r params$min_tpm`.
+
+```{r volcano, fig.heigh=15, fig.width=15}
+volcXY <- unique(DT[, .(gene_id, gene_name, padj, log2FoldChange, fltr_abund_pass, fltr_de_pass, fltr_pass, mark)])
+volcXY[, upregulated := log2FoldChange > 0]
+volcXY[log2FoldChange == 0, upregulated := NA] # edge case
+
+desummary <- as.data.table(table(volcXY[, .(fltr_pass, upregulated)]))
+desummary[as.logical(upregulated), DE := 'up']
+desummary[!as.logical(upregulated), DE := 'down']
+desummary[, upregulated := NULL]
+setnames(desummary, c('fltr_pass', 'N_genes', 'Diff'))
+setorder(desummary, fltr_pass)
+
+print(desummary)
+
+p_volcano <- ggplot(volcXY, aes(x = log2FoldChange, y = -log10(padj), colour = fltr_pass, label = gene_name)) +
+  geom_point(data = volcXY[(!fltr_pass)], shape = 16, size = rel(0.8), alpha = 0.7) +
+  geom_point(data = volcXY[(fltr_pass)], shape = 16, size = rel(1)) +
+  geom_label_repel(data = volcXY[(mark), ], colour = 'black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 2, force_pull = 0.1, max.overlaps = 100) +
+  scale_colour_manual(values = c('grey50', '#2244FF')) +
+  labs(title = params$comparison) +
+  theme(legend.position = 'bottom')
+
+p_volcano
+```
+
+## FC & abundance
+
+```{r ma, fig.heigh=30, fig.width=10}
+maXY <- unique(DT[mainvar == 'reference', .(gene_id, gene_name, count_type, condGeneMean, log2FoldChange, fltr_pass, mark)])
+
+p_ma <- ggplot(maXY, aes(x = condGeneMean, y = log2FoldChange, colour = fltr_pass, label = gene_name)) +
+  facet_wrap(~ count_type, scales = 'free', ncol = 1) +
+  geom_point(data = maXY[(!fltr_pass)], shape = 16, size = rel(0.8), alpha = 0.7) +
+  geom_hline(yintercept = 0, linetype = 'dash') +
+  geom_point(data = maXY[(fltr_pass)], shape = 16, size = rel(1)) +
+  geom_label_repel(data = maXY[(mark), ], colour = 'black', min.segment.length = 0, segment.size = 0.3, size = rel(2), force = 2, force_pull = 0.1, max.overlaps = 100) +
+  scale_x_log10() +
+  scale_colour_manual(values = c('grey50', '#2244FF')) +
+  labs(title = params$comparison, y = 'Reference abundance') +
+  theme(legend.position = 'bottom')
+
+p_ma
+```
+
+## Mean abundances
+
+`fltr_pass` represents genes that meet all of the criteria: FDR < `r params$max_q` , abs(L2FC) > `r params$min_lfc`, mean raw count in either condition > `r params$min_count`, and mean TPM in either condition > `r params$min_tpm`.
+
+```{r expression, fig.height=30, fig.width=10}
+abundXY <- dcast(unique(DT[count_type %in% c('raw', 'tpm', 'vst'), .(gene_id, gene_name, count_type, condGeneMean, fltr_abund_pass, fltr_de_pass, fltr_pass, mark, mainvar)]), '... ~ mainvar', value.var = 'condGeneMean')
+
+p_XY <- ggplot(abundXY, aes(x = reference, y = target, label = gene_name, colour = fltr_pass)) +
+  facet_wrap(~ count_type, scales='free', ncol = 1) +
+  geom_point(data = abundXY[!(fltr_pass), ], shape = 16, size = rel(0.8), alpha = 0.7) +
+  geom_abline(slope = 1, intercept = 0, linetype = 'dashed') +
+  geom_point(data = abundXY[(fltr_pass), ], shape = 16, size = rel(1)) +
+  geom_label_repel(data = abundXY[(mark), ], colour = 'black', min.segment.length = 0, segment.size = 0.3, size = rel(2), force = 2, force_pull = 0.01, max.overlaps = 100) +
+  scale_x_log10() +
+  scale_y_log10() +
+  scale_colour_manual(values = c('grey50', '#2244FF')) +
+  labs(title = params$comparison) +
+  theme(legend.position = 'bottom')
+
+p_XY
+```
+
+## Density distributions
+
+The dotted lines represent the abundance thresholds that will be applied in accepting the DE results: mean raw count in either condition > `r params$min_count`, and mean TPM in either condition > `r params$min_tpm`.
 
 ```{r expresion_density, fig.height=10, fig.width=15}
-p_dense <- ((ggplot(DT[count_type != 'vst' & main_var == 'reference', ], aes(x = abundance, colour = sample)) +
-              facet_grid(count_type ~ main_var, scales = 'free') +
+count_thresh <- data.frame(count_type = factor(c('raw', 'tpm'), levels = c('raw', 'tpm', 'normalised', 'vst'), ordered = TRUE), thresh = c(params$min_count, params$min_tpm))
+
+p_dense <- ((ggplot(DT[count_type != 'vst' & mainvar == 'reference', .(sample, abundance, count_type, mainvar)], 
+                    aes(x = abundance, colour = sample)) +
+              facet_grid(count_type ~ mainvar, scales = 'free') +
+              geom_vline(data = count_thresh, aes(xintercept = thresh), linetype = 'dotted') +
               geom_density() +
               scale_x_log10() +
               labs(title = 'Abundance distribution') +
               theme(legend.position = 'left') ) +
               
-            (ggplot(DT[count_type != 'vst' & main_var == 'target', ], aes(x = abundance, colour = sample)) +
-              facet_grid(count_type ~ main_var, scales = 'free') +
+            (ggplot(DT[count_type != 'vst' & mainvar == 'target', .(sample, abundance, count_type, mainvar)], 
+                    aes(x = abundance, colour = sample)) +
+              facet_grid(count_type ~ mainvar, scales = 'free') +
+              geom_vline(data = count_thresh, aes(xintercept = thresh), linetype = 'dotted') +
               geom_density() +
               scale_x_log10() +
               labs(title = 'Abundance distribution') +
               theme(legend.position = 'right') )) /
 
-            ((ggplot(DT[count_type == 'vst' & main_var == 'reference', ], aes(x = abundance, colour = sample)) +
-                facet_grid(count_type ~ main_var, scales = 'free', switch = 'x') +
+            ((ggplot(DT[count_type == 'vst' & mainvar == 'reference', .(sample, abundance, count_type, mainvar)], 
+                     aes(x = abundance, colour = sample)) +
+                facet_grid(count_type ~ mainvar, scales = 'free', switch = 'x') +
                 geom_density() +
                 theme(legend.position = 'none') ) |
                
-            (ggplot(DT[count_type == 'vst' & main_var == 'target', ], aes(x = abundance, colour = sample)) +
-                facet_grid(count_type ~ main_var, scales = 'free', switch = 'x') +
+            (ggplot(DT[count_type == 'vst' & mainvar == 'target', .(sample, abundance, count_type, mainvar)], 
+                    aes(x = abundance, colour = sample)) +
+                facet_grid(count_type ~ mainvar, scales = 'free', switch = 'x') +
                 geom_density() +
                 theme(legend.position = 'none') )) +
 
@@ -153,6 +292,37 @@ p_dense <- ((ggplot(DT[count_type != 'vst' & main_var == 'reference', ], aes(x =
 p_dense
 ```
 
-```{r expression}
+## Selected gene abundances
 
+### Heatmap
+
+The genes are ordered by decreasing fold-change and the samples are grouped by condition.
+
+```{r heatmap, fig.heigh=40, fig.width=15 }
+heatXY <- DT[(mark), .(gene_name, sample, abundance, condGeneMean, count_type, mainvar, log2FoldChange)]
+setorder(heatXY, mainvar, log2FoldChange)
+heatXY[, sample := factor(sample, levels = unique(sample), ordered = TRUE)]
+heatXY[, gene_name := factor(gene_name, levels = unique(gene_name), ordered = TRUE)]
+
+p_heat <- (ggplot(heatXY[count_type == 'tpm', ], aes(x = sample, y = gene_name, fill = log10(abundance))) +
+            facet_wrap(~ count_type, scales = 'free') +
+            geom_tile() +
+            scale_fill_gradient(low = 'black', high = 'yellow') +
+            theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) ) +
+
+          (ggplot(heatXY[count_type == 'normalised', ], aes(x = sample, y = gene_name, fill = log10(abundance))) +
+            facet_wrap(~ count_type, scales = 'free') +
+            geom_tile() +
+            scale_fill_gradient(low = 'black', high = 'yellow') +
+            theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) ) +
+
+            (ggplot(heatXY[count_type == 'vst', ], aes(x = sample, y = gene_name, fill = abundance)) +
+            facet_wrap(~ count_type, scales = 'free') +
+            geom_tile() +
+            scale_fill_gradient(low = 'black', high = 'yellow') +
+            theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) ) +
+    plot_layout(ncol = 1)
+
+p_heat
 ```
+
