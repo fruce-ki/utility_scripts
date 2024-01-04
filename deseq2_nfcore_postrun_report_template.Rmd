@@ -15,14 +15,14 @@ params:
   tpm: /SCRATCH/PP2023011_SLC13A5/tesslinz.salmon.merged.gene_tpm.tsv      # file of tpm counts
   covars: /SCRATCH/PP2023011_SLC13A5/samplesheet_tesslinz.differentialabundance.csv # samplesheet file for nf-core/differentialabundance
   contrasts: /SCRATCH/PP2023011_SLC13A5/contrasts_tesslinz.differentialabundance.csv # contrasts file for nf-core/differentialabundance
-  interest: /SCRATCH/REFERENCES/custom_genesets/early_onset_systemic_epilepsy.txt # file with custom gene list to query
   gsea_path: /SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs                         # locatinon o GMT files used for GSEA
   highlight_n: 50       # number of genes to highlight
   min_count: 10
   min_tpm: 5
   min_lfc: 0.5
   max_q: 0.05
-  genelist : null
+  genelist : null                                                                   # file with custom gene list to highlight instead of DE
+  interest: /SCRATCH/REFERENCES/custom_genesets/early_onset_systemic_epilepsy.txt       # file with custom gene list to query
 ---
 
 ```{r setup, include=FALSE}
@@ -40,6 +40,7 @@ library(patchwork)
 library(ggrepel)
 library(ggdendro)
 library(DT)
+library(DESeq2)
 # library(plotly)
 # library(htmltools)
 library(stringr)
@@ -53,25 +54,22 @@ options(scipen=200)
 ```
 
 ```{r load}
-deseq <- fread(file.path(params$da_path, 'tables', 'differential', paste0(params$comparison, '.deseq2.results.tsv')))
-
-counts <- fread(params$counts)
-tpm <- fread(params$tpm)
-vst <- fread(file.path(params$da_path, 'tables', 'processed_abundance', 'all.vst.tsv'))
-normcounts <- fread(file.path(params$da_path, 'tables', 'processed_abundance', 'all.normalised_counts.tsv'))
-
-gsea_categories <- dir(file.path(params$da_path, 'tables', 'gsea', params$comparison))
-gsea_dirs <- file.path(params$da_path, 'tables', 'gsea', params$comparison, gsea_categories)
-gsea_refs <- file.path(params$gsea_path, paste0(gsea_categories, '.gmt'))
-
-covars <- fread(params$covars)
-
 # Contrast
 stopifnot(str_detect(params$comparison, '\\w+_\\w+_vs_\\w+'))
 contrast <- str_split(str_extract(params$comparison, '\\w+_\\w+_vs_\\w+'), '_')[[1]]
 mainvar <- contrast[1]
 vartreat <- contrast[2]
 varref <- contrast[4]
+
+# DE
+dds <- readRDS(file.path(params$da_path, 'other', 'deseq2', paste0(params$comparison, '.dds.rld.rds')))
+
+# Metadata
+covars <- as.data.table(colData(dds))
+# Make generic name for coding ease
+covars[, mainvar := covars[[mainvar]]]
+covars[mainvar == varref, mainvar := 'reference']
+covars[mainvar == vartreat, mainvar := 'target']
 
 # Relevant samples
 subsamples <- covars$sample
@@ -82,39 +80,41 @@ if(str_detect(params$comparison, '\\w+_\\w+\\.\\w+_\\w+_vs_\\w+')) {
   subsamples <- covars$sample[covars[[selvar]] == selval]
 }
 covars <- covars[sample %in% subsamples, ]
+# Excluded due to sequencing QC or other external reasons
+if ('use' %in% names(covars) && is.logical(covars$use)) {
+  covars <- covars[(use), ]
+}
+subsamples <- covars$sample
 
-# Make generic name for coding ease
-covars[, mainvar := covars[[mainvar]]]
-covars[mainvar == varref, mainvar := 'reference']
-covars[mainvar == vartreat, mainvar := 'target']
+# FC
+deseq <- fread(file.path(params$da_path, 'tables', 'differential', paste0(params$comparison, '.deseq2.results.tsv')))
+shrink <- lfcShrink(dds, type ='ashr', contrast = c(mainvar, vartreat, varref),      # apeglm doesn't like this format of contrast specification
+                    res = results(dds, contrast = c(mainvar, vartreat, varref), alpha = params$max_q, lfcThreshold = 0, independentFiltering = TRUE))
+shrink <- data.table(gene_id = rownames(shrink), shrunkLFC = shrink$log2FoldChange)
+deseq <- merge(deseq, shrink, by = 'gene_id')
+fwrite(deseq, file = file.path(params$da_path, 'tables', 'differential', paste0(params$comparison, '.deseq2.results.csv')), sep=',', col.names = TRUE) # don't want to overwrite, it would complicate reruns
 
 # DE filters
 deseq[, fltr_fdr_pass := padj < params$max_q] # this also covers NA (ie genes not tested due to failing deseq filtering)
 deseq[, fltr_lfc_pass := abs(log2FoldChange) >= params$min_lfc]
 deseq[, fltr_de_pass := fltr_fdr_pass & fltr_lfc_pass]
-deseq[, mlog10p := -log10(padj)]
-deseq[, absl2fc := abs(log2FoldChange)]
 ## Home-brewed selection of top hits to highlight, by euclidean distance from origin.
 # It mostly works OK, but the selection should not be taken as gospel.
 # Down-weight mlog10p for a more balanced selection not dominated by p value.
-pbias <- 0.75    # bias point selection to prioritize pvalue over fold-change (< 1) or vice verse (> 1)
+pbias <- 0.75    # bias the point selection to slightly prioritize pvalue over fold-change (< 1) or vice verse (> 1)
+deseq[, mlog10p := -log10(padj)]
+deseq[, absl2fc := abs(shrunkLFC)]
 ppen <- max(deseq$mlog10p[is.finite(deseq$mlog10p)]) / max(deseq$absl2fc[is.finite(deseq$absl2fc)]) * pbias     # scaling factor determined by axes ranges
-deseq[, radius := sqrt((mlog10p / ppen) ^ 2 + log2FoldChange ^ 2)]
+deseq[, radius := sqrt((mlog10p / ppen) ^ 2 + absl2fc ^ 2)]
 deseq[, rank := rank(-radius, ties.method = 'average', na.last = TRUE)]
-deseq[(fltr_de_pass), de_rank := rank(-radius, ties.method = 'average', na.last = TRUE)]
 deseq[, absl2fc := NULL]
 deseq[, mlog10p := NULL]
 
-# Which genes to highlight
-if (!is.null(params$genelist)) {
-  markgenes <- fread(params$genelist)[[1]]
-} else {
-  markgenes <- deseq[(de_rank %in% 1:params$highlight_n), gene_id]
-  if (length(markgenes) <= 1) {                                                                       # if there isn't much to show
-    markgenes <- c(markgenes, deseq[(rank %in% 1:(params$highlight_n - length(markgenes))), gene_id]) # add some context of the nearest misses
-  }
-}
-
+# Abundances
+counts <- fread(params$counts)
+tpm <- fread(params$tpm)
+vst <- fread(file.path(params$da_path, 'tables', 'processed_abundance', 'all.vst.tsv'))
+normcounts <- fread(file.path(params$da_path, 'tables', 'processed_abundance', 'all.normalised_counts.tsv'))
 # Big table of counts of relevant samples
 DTc <- melt(counts[, names(counts) %in% c('gene_id', 'gene_name', subsamples) , with = FALSE], 
             id.vars = c('gene_id', 'gene_name'), variable.name = 'sample', value.name = 'raw')
@@ -139,6 +139,8 @@ DT <- merge(DT, deseq, by = 'gene_id', all.x = TRUE)
 # Add sample metadata
 DT <- merge(DT, covars, by = 'sample', all.x = TRUE)
 
+rm(deseq, covars)
+
 ## Abundance filters
 DT <- DT[count_type == 'raw' & mainvar == 'reference', condGeneMean := mean(.SD$abundance), by = gene_id]
 DT <- DT[count_type == 'raw' & mainvar == 'target', condGeneMean := mean(.SD$abundance), by = gene_id]
@@ -162,19 +164,34 @@ DT[is.na(fltr_de_pass), fltr_de_pass := FALSE]                                  
 DT[, fltr_pass := fltr_abund_pass & fltr_de_pass]
 
 # Add highlight selection
+if (!is.null(params$genelist)) {
+  markgenes <- fread(params$genelist)[[1]]
+} else {
+  setorder(DT, rank)
+  markgenes <- head(unique(DT[(fltr_pass), gene_id]), params$highlight_n)
+  if (length(markgenes) <= 1) {                                                                       # if there isn't much to show
+    markgenes <- head(unique(DT[, gene_id]), params$highlight_n)         # add some context of the nearest misses
+  }
+}
 DT[, mark := gene_id %in% markgenes] 
 
+# Fix order, for plot facets 
 DT[, count_type := factor(count_type, levels = c('raw', 'tpm', 'normalised', 'vst'), ordered = TRUE)]
 setkey(DT, gene_id, count_type, mainvar, sample)
+
+# GSEA
+gsea_categories <- dir(file.path(params$da_path, 'tables', 'gsea', params$comparison))
+gsea_dirs <- file.path(params$da_path, 'tables', 'gsea', params$comparison, gsea_categories)
+gsea_refs <- file.path(params$gsea_path, paste0(gsea_categories, '.gmt'))
 ```
 
 # Contrast and Variables
 
 ```{r name}
-cat('Contrast name:\n')
+cat('\n###\nContrast name:\n###\n')
 cat(params$comparison, '\n')
 
-cat('Metadata of the relevant samples:\n')
+cat('\n###\nMetadata of the relevant samples:\n###\n')
 datatable(covars[sample %in% subsamples,], options = list(pageLength = min(25, nrow(covars))))
 ```
 
@@ -184,8 +201,8 @@ datatable(covars[sample %in% subsamples,], options = list(pageLength = min(25, n
 
 `fltr_pass` represents genes that meet all of the criteria: FDR < `r params$max_q` , abs(L2FC) > `r params$min_lfc`, mean raw count in either condition > `r params$min_count`, and mean TPM in either condition > `r params$min_tpm`.
 
-```{r volcano, fig.heigh=15, fig.width=15}
-volcXY <- unique(DT[, .(gene_id, gene_name, padj, log2FoldChange, fltr_abund_pass, fltr_de_pass, fltr_pass, mark)])
+```{r volcano, fig.height=15, fig.width=15}
+volcXY <- unique(DT[, .(gene_id, gene_name, padj, log2FoldChange, shrunkLFC, fltr_abund_pass, fltr_de_pass, fltr_pass, mark)])
 volcXY[, upregulated := log2FoldChange > 0]
 volcXY[log2FoldChange == 0, upregulated := NA] # edge case
 
@@ -209,9 +226,22 @@ p_volcano <- ggplot(volcXY, aes(x = log2FoldChange, y = -log10(padj), colour = f
 p_volcano
 ```
 
+```{r shrunkvolcano, fig.height=15, fig.width=15}
+p_shrunkvolcano <- ggplot(volcXY, aes(x = shrunkLFC, y = -log10(padj), colour = fltr_pass, label = gene_name)) +
+  geom_point(data = volcXY[(!fltr_pass)], shape = 16, size = rel(0.8), alpha = 0.7) +
+  geom_point(data = volcXY[(fltr_pass)], shape = 16, size = rel(1)) +
+  geom_label_repel(data = volcXY[(mark), ], colour = 'black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 2, force_pull = 0.1, max.overlaps = 100) +
+  scale_colour_manual(values = c('grey50', '#2244FF')) +
+  labs(title = params$comparison) +
+  theme(legend.position = 'bottom')
+
+p_shrunkvolcano
+```
+
+
 ## FC & abundance
 
-```{r ma, fig.heigh=30, fig.width=10}
+```{r ma, fig.height=30, fig.width=10}
 maXY <- unique(DT[mainvar == 'reference', .(gene_id, gene_name, count_type, condGeneMean, log2FoldChange, fltr_pass, mark)])
 
 p_ma <- ggplot(maXY, aes(x = condGeneMean, y = log2FoldChange, colour = fltr_pass, label = gene_name)) +
@@ -298,7 +328,7 @@ p_dense
 
 The genes are ordered by decreasing fold-change and the samples are grouped by condition.
 
-```{r heatmap, fig.heigh=40, fig.width=15 }
+```{r heatmap, fig.height=40, fig.width=15 }
 heatXY <- DT[(mark), .(gene_name, sample, abundance, condGeneMean, count_type, mainvar, log2FoldChange)]
 setorder(heatXY, mainvar, log2FoldChange)
 heatXY[, sample := factor(sample, levels = unique(sample), ordered = TRUE)]
@@ -326,3 +356,8 @@ p_heat <- (ggplot(heatXY[count_type == 'tpm', ], aes(x = sample, y = gene_name, 
 p_heat
 ```
 
+
+
+# GSEA
+
+## load tables and save RDS for monday
