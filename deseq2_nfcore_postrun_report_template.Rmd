@@ -22,7 +22,6 @@ params:
   min_lfc: 0.5
   max_q: 0.05
   genelist : null                                                                   # file with custom gene list to highlight instead of DE
-  interest: /SCRATCH/REFERENCES/custom_genesets/early_onset_systemic_epilepsy.txt       # file with custom gene list to query
 ---
 
 ```{r setup, include=FALSE}
@@ -54,6 +53,22 @@ options(scipen=200)
 ```
 
 ```{r load}
+
+# munge_DE_tables <- function(dds = readRDS(file.path(params$da_path, 'other', 'deseq2', paste0(params$comparison, '.dds.rld.rds'))),
+#                             counts = fread(params$counts),
+#                             tpm = fread(params$tpm)) {
+#   
+# }
+  
+  
+# DE
+dds <- readRDS(file.path(params$da_path, 'other', 'deseq2', paste0(params$comparison, '.dds.rld.rds')))
+
+# Metadata
+covars <- as.data.table(colData(dds))
+
+
+
 # Contrast
 stopifnot(str_detect(params$comparison, '\\w+_\\w+_vs_\\w+'))
 contrast <- str_split(str_extract(params$comparison, '\\w+_\\w+_vs_\\w+'), '_')[[1]]
@@ -61,11 +76,7 @@ mainvar <- contrast[1]
 vartreat <- contrast[2]
 varref <- contrast[4]
 
-# DE
-dds <- readRDS(file.path(params$da_path, 'other', 'deseq2', paste0(params$comparison, '.dds.rld.rds')))
 
-# Metadata
-covars <- as.data.table(colData(dds))
 # Make generic name for coding ease
 covars[, mainvar := covars[[mainvar]]]
 covars[mainvar == varref, mainvar := 'reference']
@@ -82,12 +93,14 @@ if(str_detect(params$comparison, '\\w+_\\w+\\.\\w+_\\w+_vs_\\w+')) {
 covars <- covars[sample %in% subsamples, ]
 # Excluded due to sequencing QC or other external reasons
 if ('use' %in% names(covars) && is.logical(covars$use)) {
-  covars <- covars[(use), ]
+  subsamples <- covars[(use), sample]
 }
-subsamples <- covars$sample
 
 # FC
 deseq <- fread(file.path(params$da_path, 'tables', 'differential', paste0(params$comparison, '.deseq2.results.tsv')))
+
+
+
 shrink <- lfcShrink(dds, type ='ashr', contrast = c(mainvar, vartreat, varref),      # apeglm doesn't like this format of contrast specification
                     res = results(dds, contrast = c(mainvar, vartreat, varref), alpha = params$max_q, lfcThreshold = 0, independentFiltering = TRUE))
 shrink <- data.table(gene_id = rownames(shrink), shrunkLFC = shrink$log2FoldChange)
@@ -139,7 +152,7 @@ DT <- merge(DT, deseq, by = 'gene_id', all.x = TRUE)
 # Add sample metadata
 DT <- merge(DT, covars, by = 'sample', all.x = TRUE)
 
-rm(deseq, covars)
+rm(deseq)
 
 ## Abundance filters
 DT <- DT[count_type == 'raw' & mainvar == 'reference', condGeneMean := mean(.SD$abundance), by = gene_id]
@@ -166,6 +179,7 @@ DT[, fltr_pass := fltr_abund_pass & fltr_de_pass]
 # Add highlight selection
 if (!is.null(params$genelist)) {
   markgenes <- fread(params$genelist)[[1]]
+  warning('Highlighting a custom list of genes. The quoted selection thresholds do not apply!')
 } else {
   setorder(DT, rank)
   markgenes <- head(unique(DT[(fltr_pass), gene_id]), params$highlight_n)
@@ -185,21 +199,24 @@ gsea_dirs <- file.path(params$da_path, 'tables', 'gsea', params$comparison, gsea
 gsea_refs <- file.path(params$gsea_path, paste0(gsea_categories, '.gmt'))
 ```
 
+
+
 # Contrast and Variables
 
 ```{r name}
-cat('\n###\nContrast name:\n###\n')
-cat(params$comparison, '\n')
+cat('\n###\nContrast name:\n\n', params$comparison, '\n')
 
-cat('\n###\nMetadata of the relevant samples:\n###\n')
+cat('\n###\nMetadata of the relevant samples:\n')
 datatable(covars[sample %in% subsamples,], options = list(pageLength = min(25, nrow(covars))))
 ```
+
+
 
 # Differential abundance
 
 ## FC & significance
 
-`fltr_pass` represents genes that meet all of the criteria: FDR < `r params$max_q` , abs(L2FC) > `r params$min_lfc`, mean raw count in either condition > `r params$min_count`, and mean TPM in either condition > `r params$min_tpm`.
+`fltr_pass` represents genes that meet all of the criteria: FDR < `r params$max_q` , abs(L2FC) > `r params$min_lfc`, mean raw count in at least one condition > `r params$min_count`, and mean TPM in at least one condition > `r params$min_tpm`.
 
 ```{r volcano, fig.height=15, fig.width=15}
 volcXY <- unique(DT[, .(gene_id, gene_name, padj, log2FoldChange, shrunkLFC, fltr_abund_pass, fltr_de_pass, fltr_pass, mark)])
@@ -227,22 +244,21 @@ p_volcano
 ```
 
 ```{r shrunkvolcano, fig.height=15, fig.width=15}
-p_shrunkvolcano <- ggplot(volcXY, aes(x = shrunkLFC, y = -log10(padj), colour = fltr_pass, label = gene_name)) +
-  geom_point(data = volcXY[(!fltr_pass)], shape = 16, size = rel(0.8), alpha = 0.7) +
-  geom_point(data = volcXY[(fltr_pass)], shape = 16, size = rel(1)) +
-  geom_label_repel(data = volcXY[(mark), ], colour = 'black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 2, force_pull = 0.1, max.overlaps = 100) +
-  scale_colour_manual(values = c('grey50', '#2244FF')) +
-  labs(title = params$comparison) +
-  theme(legend.position = 'bottom')
-
-p_shrunkvolcano
+# p_shrunkvolcano <- ggplot(volcXY, aes(x = shrunkLFC, y = -log10(padj), colour = fltr_pass, label = gene_name)) +
+#   geom_point(data = volcXY[(!fltr_pass)], shape = 16, size = rel(0.8), alpha = 0.7) +
+#   geom_point(data = volcXY[(fltr_pass)], shape = 16, size = rel(1)) +
+#   geom_label_repel(data = volcXY[(mark), ], colour = 'black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 2, force_pull = 0.1, max.overlaps = 100) +
+#   scale_colour_manual(values = c('grey50', '#2244FF')) +
+#   labs(title = params$comparison) +
+#   theme(legend.position = 'bottom')
+# 
+# p_shrunkvolcano
 ```
-
 
 ## FC & abundance
 
 ```{r ma, fig.height=30, fig.width=10}
-maXY <- unique(DT[mainvar == 'reference', .(gene_id, gene_name, count_type, condGeneMean, log2FoldChange, fltr_pass, mark)])
+maXY <- unique(DT[mainvar == 'reference' & count_type == 'normalized', .(gene_id, gene_name, count_type, condGeneMean, log2FoldChange, fltr_pass, mark)])
 
 p_ma <- ggplot(maXY, aes(x = condGeneMean, y = log2FoldChange, colour = fltr_pass, label = gene_name)) +
   facet_wrap(~ count_type, scales = 'free', ncol = 1) +
@@ -260,10 +276,10 @@ p_ma
 
 ## Mean abundances
 
-`fltr_pass` represents genes that meet all of the criteria: FDR < `r params$max_q` , abs(L2FC) > `r params$min_lfc`, mean raw count in either condition > `r params$min_count`, and mean TPM in either condition > `r params$min_tpm`.
+`fltr_pass` represents genes that meet all of the criteria: FDR < `r params$max_q` , abs(L2FC) > `r params$min_lfc`, mean raw count in at least one condition > `r params$min_count`, and mean TPM in at least one condition > `r params$min_tpm`.
 
 ```{r expression, fig.height=30, fig.width=10}
-abundXY <- dcast(unique(DT[count_type %in% c('raw', 'tpm', 'vst'), .(gene_id, gene_name, count_type, condGeneMean, fltr_abund_pass, fltr_de_pass, fltr_pass, mark, mainvar)]), '... ~ mainvar', value.var = 'condGeneMean')
+abundXY <- dcast(unique(DT[count_type == 'tpm', .(gene_id, gene_name, count_type, condGeneMean, fltr_abund_pass, fltr_de_pass, fltr_pass, mark, mainvar)]), '... ~ mainvar', value.var = 'condGeneMean')
 
 p_XY <- ggplot(abundXY, aes(x = reference, y = target, label = gene_name, colour = fltr_pass)) +
   facet_wrap(~ count_type, scales='free', ncol = 1) +
@@ -282,7 +298,7 @@ p_XY
 
 ## Density distributions
 
-The dotted lines represent the abundance thresholds that will be applied in accepting the DE results: mean raw count in either condition > `r params$min_count`, and mean TPM in either condition > `r params$min_tpm`.
+The dotted lines represent the abundance thresholds that will be applied in accepting the DE results: mean raw count in at least one condition > `r params$min_count`, and mean TPM in at least one condition > `r params$min_tpm`.
 
 ```{r expresion_density, fig.height=10, fig.width=15}
 count_thresh <- data.frame(count_type = factor(c('raw', 'tpm'), levels = c('raw', 'tpm', 'normalised', 'vst'), ordered = TRUE), thresh = c(params$min_count, params$min_tpm))
@@ -322,25 +338,20 @@ p_dense <- ((ggplot(DT[count_type != 'vst' & mainvar == 'reference', .(sample, a
 p_dense
 ```
 
+
 ## Selected gene abundances
 
 ### Heatmap
 
 The genes are ordered by decreasing fold-change and the samples are grouped by condition.
 
-```{r heatmap, fig.height=40, fig.width=15 }
-heatXY <- DT[(mark), .(gene_name, sample, abundance, condGeneMean, count_type, mainvar, log2FoldChange)]
+```{r heatmap, fig.height=40, fig.width=15}
+heatXY <- DT[(mark) & count %in% c('tpm', 'vst'), .(gene_id, gene_name, sample, abundance, condGeneMean, count_type, mainvar, log2FoldChange)]
 setorder(heatXY, mainvar, log2FoldChange)
 heatXY[, sample := factor(sample, levels = unique(sample), ordered = TRUE)]
 heatXY[, gene_name := factor(gene_name, levels = unique(gene_name), ordered = TRUE)]
 
 p_heat <- (ggplot(heatXY[count_type == 'tpm', ], aes(x = sample, y = gene_name, fill = log10(abundance))) +
-            facet_wrap(~ count_type, scales = 'free') +
-            geom_tile() +
-            scale_fill_gradient(low = 'black', high = 'yellow') +
-            theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) ) +
-
-          (ggplot(heatXY[count_type == 'normalised', ], aes(x = sample, y = gene_name, fill = log10(abundance))) +
             facet_wrap(~ count_type, scales = 'free') +
             geom_tile() +
             scale_fill_gradient(low = 'black', high = 'yellow') +
@@ -356,8 +367,40 @@ p_heat <- (ggplot(heatXY[count_type == 'tpm', ], aes(x = sample, y = gene_name, 
 p_heat
 ```
 
+### Detail
+
+The genes are ordered by decreasing fold-change.
+
+The dotted lines represent the abundance criteria: mean raw count in at least one condition > `r params$min_count`, and mean TPM in at least one condition > `r params$min_tpm`.
+
+```{r details, fig.height=20, fig.width=15}
+cntthresh <- data.frame(count_type = factor(c('raw', 'tpm'), ordered = TRUE, levels = c('raw', 'tpm', 'normalised', 'vst')), abundance = c(params$min_count, params$min_tpm))
+
+p_box <- ggplot(heatXY[count_type != 'normalised', ], aes(y = gene_name, x = abundance, colour = mainvar)) +
+  facet_wrap(~ count_type, nrow = 1, scales = 'free_x') +
+  geom_vline(data = cntthresh, aes(xintercept = abundance), linetype = 'dotted') +
+  geom_jitter(shape = 16, size = rel(1), height = 0.2) +
+  geom_boxplot(fill = 'transparent', outlier.alpha = 0, width = 0.5, linewidth = 0.2) +
+  # scale_x_continuous(trans = 'log2') +
+  # scale_x_continuous(trans = 'sqrt') +
+  scale_x_log10() +
+  scale_colour_manual(values = c('blue', 'red')) + 
+  labs(title = params$comparison) +
+  theme(legend.position = 'bottom', panel.grid.minor.x = element_blank())
+
+p_box
+```
 
 
 # GSEA
 
-## load tables and save RDS for monday
+```{r gsea}
+```
+
+
+# Session
+
+```{r session}
+sessionInfo()
+```
+
