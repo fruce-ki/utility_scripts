@@ -15,22 +15,24 @@ params:
   tpm: /SCRATCH/PP2023011_SLC13A5/tesslinz.salmon.merged.gene_tpm.tsv      # file of tpm counts
   covars: /SCRATCH/PP2023011_SLC13A5/samplesheet_tesslinz.differentialabundance.csv # samplesheet file for nf-core/differentialabundance
   contrasts: /SCRATCH/PP2023011_SLC13A5/contrasts_tesslinz.differentialabundance.csv # contrasts file for nf-core/differentialabundance
-  gsea_path: /SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs                         # locatinon o GMT files used for GSEA
+  genesets: null                        # location of GMT files used for GSEA
   highlight_n: 50       # number of genes to highlight
   min_count: 10
   min_tpm: 5
   min_lfc: 0.5
   max_q: 0.05
   genelist : null                                                                   # file with custom gene list to highlight instead of DE
+  pad: true                    # pad zero counts
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message=FALSE, bitmapType='cairo-png')
+knitr::opts_chunk$set(echo = TRUE, bitmapType='cairo-png')
 ```
 
 # Setup
 
-```{r libraries}
+```{r libraries, message=FALSE}
+
 setwd(params$da_path)
 
 library(data.table)
@@ -40,9 +42,9 @@ library(ggrepel)
 library(ggdendro)
 library(DT)
 library(DESeq2)
-# library(plotly)
-# library(htmltools)
+library(fgsea)
 library(stringr)
+
 
 # ggplot2 base theme
 theme_set(theme_bw())
@@ -154,6 +156,17 @@ DT <- merge(DT, covars, by = 'sample', all.x = TRUE)
 
 rm(deseq)
 
+
+# Pad zeros, in a non-interfering way.
+rawpad <- min(DT[count_type == 'raw' & abundance > 0, abundance], na.rm = TRUE) / 10
+DT[count_type == 'raw', abundance := abundance + rawpad]
+message('Zero-padding the raw counts by ', rawpad)
+tpmpad <- min(DT[count_type == 'tpm' & abundance > 0, abundance], na.rm = TRUE) / 10
+DT[count_type == 'tpm', abundance := abundance + tpmpad]
+message('Zero-padding the TPMs by ', tpmpad)
+message('The pad values are selected sufficiently small to avoid interference with non-zero measurements')
+
+
 ## Abundance filters
 DT <- DT[count_type == 'raw' & mainvar == 'reference', condGeneMean := mean(.SD$abundance), by = gene_id]
 DT <- DT[count_type == 'raw' & mainvar == 'target', condGeneMean := mean(.SD$abundance), by = gene_id]
@@ -192,6 +205,7 @@ DT[, mark := gene_id %in% markgenes]
 # Fix order, for plot facets 
 DT[, count_type := factor(count_type, levels = c('raw', 'tpm', 'normalised', 'vst'), ordered = TRUE)]
 setkey(DT, gene_id, count_type, mainvar, sample)
+
 
 # GSEA
 gsea_categories <- dir(file.path(params$da_path, 'tables', 'gsea', params$comparison))
@@ -258,7 +272,7 @@ p_volcano
 ## FC & abundance
 
 ```{r ma, fig.height=30, fig.width=10}
-maXY <- unique(DT[mainvar == 'reference' & count_type == 'normalized', .(gene_id, gene_name, count_type, condGeneMean, log2FoldChange, fltr_pass, mark)])
+maXY <- unique(DT[mainvar == 'reference' & count_type == 'normalised', .(gene_id, gene_name, count_type, condGeneMean, log2FoldChange, fltr_pass, mark)])
 
 p_ma <- ggplot(maXY, aes(x = condGeneMean, y = log2FoldChange, colour = fltr_pass, label = gene_name)) +
   facet_wrap(~ count_type, scales = 'free', ncol = 1) +
@@ -346,7 +360,7 @@ p_dense
 The genes are ordered by decreasing fold-change and the samples are grouped by condition.
 
 ```{r heatmap, fig.height=40, fig.width=15}
-heatXY <- DT[(mark) & count %in% c('tpm', 'vst'), .(gene_id, gene_name, sample, abundance, condGeneMean, count_type, mainvar, log2FoldChange)]
+heatXY <- DT[(mark) & count_type != 'normalised', .(gene_id, gene_name, sample, abundance, condGeneMean, count_type, mainvar, log2FoldChange)]
 setorder(heatXY, mainvar, log2FoldChange)
 heatXY[, sample := factor(sample, levels = unique(sample), ordered = TRUE)]
 heatXY[, gene_name := factor(gene_name, levels = unique(gene_name), ordered = TRUE)]
@@ -394,8 +408,34 @@ p_box
 
 # GSEA
 
-```{r gsea}
+```{r gsea, fig.height=6, fig.width=10}
+ranks <- unique(DT[is.finite(shrunkLFC), .(gene_name, shrunkLFC)])
+# Some Ensembl IDs map to the same gene symbol. 
+# This is an issue for GSEA.
+# Keep only one of each duplicate, the one with the largest absolute effect
+ranks[, absSLFC := abs(shrunkLFC)]
+setorder(ranks, gene_name, -absSLFC)
+ranks <- ranks[, head(.SD, 1), by = gene_name]
+rn <- ranks$gene_name
+ranks <- ranks$absSLFC     # Up- and down-regulated genes from the same pathway shouldn't work against each other by being at opposite ends of the rank.
+names(ranks) <- rn
+
+gsea <- Reduce(rbind,
+               lapply(c('/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/h.all.v2023.2.Hs.symbols.gmt',
+                        '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c5.all.v2023.2.Hs.symbols.gmt',
+                        '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.all.v2023.2.Hs.symbols.gmt'),
+                      function(gmt) {
+                        pathways <- gmtPathways(gmt)
+                        fgseaRes <- fgsea(pathways, ranks, minSize = 15, maxSize = 500, scoreType = 'pos')
+                        setorder(fgseaRes, padj, NES)
+                        
+                        fwrite(fgseaRes, file = file.path(params$da_path, 'tables', 'gsea', params$comparison, paste0('fgsea_', basename(gmt), '.tsv')),
+                               col.names = TRUE, quote = FALSE, sep = '\t')
+      
+                        fgseaRes
+                      }) )
 ```
+
 
 
 # Session
