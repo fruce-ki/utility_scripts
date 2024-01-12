@@ -9,20 +9,19 @@ output:
     toc_float:
       collapsed: false
 params:
-  comparison: condition_Control.time_W6_vs_W3                # name of a specific comparison for this report
+  comparison: time_W6_vs_W3.conf_condition                # name of a specific comparison for this report
   da_path: /SCRATCH/PP2023011_SLC13A5/tesslinz_diffex                           # output dir of nf-core/differentialabundance
-  counts: /SCRATCH/PP2023011_SLC13A5/tesslinz.salmon.merged.gene_counts.tsv      # file of raw counts
-  tpm: /SCRATCH/PP2023011_SLC13A5/tesslinz.salmon.merged.gene_tpm.tsv      # file of tpm counts
-  covars: /SCRATCH/PP2023011_SLC13A5/samplesheet_tesslinz.differentialabundance.csv # samplesheet file for nf-core/differentialabundance
-  contrasts: /SCRATCH/PP2023011_SLC13A5/contrasts_tesslinz.differentialabundance.csv # contrasts file for nf-core/differentialabundance
-  genesets: null                        # location of GMT files used for GSEA
+  counts: /SCRATCH/PP2023011_SLC13A5/tesslinz.salmon.merged.gene_counts.tsv     # file of raw counts
+  tpm: /SCRATCH/PP2023011_SLC13A5/tesslinz.salmon.merged.gene_tpm.tsv           # file of TPM counts
+  covars: /SCRATCH/PP2023011_SLC13A5/samplesheet_tesslinz.differentialabundance.csv  # samplesheet file for nf-core/differentialabundance
+  genesets: ['/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/h.all.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c5.all.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.all.v2023.2.Hs.symbols.reduced.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c1.all.v2023.2.Hs.symbols.gmt']
   highlight_n: 50       # number of genes to highlight
-  min_count: 10
-  min_tpm: 5
-  min_lfc: 0.5
-  max_q: 0.05
+  min_count: 10         # minimum raw count
+  min_tpm: 5            # minimum TPM
+  min_lfc: 0.5          # minimum log2 fold-change 
+  max_q: 0.05           # FDR level
   genelist : null                                                                   # file with custom gene list to highlight instead of DE
-  pad: true                    # pad zero counts
+  pad: true             # pad zero counts for plots
 ---
 
 ```{r setup, include=FALSE}
@@ -39,7 +38,8 @@ library(data.table)
 library(ggplot2)
 library(patchwork)
 library(ggrepel)
-library(ggdendro)
+library(igraph)
+library(GGally)
 library(DT)
 library(DESeq2)
 library(fgsea)
@@ -369,6 +369,7 @@ p_heat <- (ggplot(heatXY[count_type == 'tpm', ], aes(x = sample, y = gene_name, 
             facet_wrap(~ count_type, scales = 'free') +
             geom_tile() +
             scale_fill_gradient(low = 'black', high = 'yellow') +
+            labs(title = params$comparison) +
             theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) ) +
 
             (ggplot(heatXY[count_type == 'vst', ], aes(x = sample, y = gene_name, fill = abundance)) +
@@ -408,7 +409,11 @@ p_box
 
 # GSEA
 
-```{r gsea, fig.height=6, fig.width=10}
+Gene sets are considered enriched if they meet the criterion: FDR < `r params$max_q`. When multiple gene-set resources are queried, the default multiple-testing correction is inadequate, as it is performed for each resource separately. Therefore a new correction is carried out to encompass the real total number of tests.
+
+The genes are ranked by the shrunken log2 fold-change.
+
+```{r gsea_prep}
 ranks <- unique(DT[is.finite(shrunkLFC), .(gene_name, shrunkLFC)])
 # Some Ensembl IDs map to the same gene symbol. 
 # This is an issue for GSEA.
@@ -416,24 +421,119 @@ ranks <- unique(DT[is.finite(shrunkLFC), .(gene_name, shrunkLFC)])
 ranks[, absSLFC := abs(shrunkLFC)]
 setorder(ranks, gene_name, -absSLFC)
 ranks <- ranks[, head(.SD, 1), by = gene_name]
-rn <- ranks$gene_name
-ranks <- ranks$absSLFC     # Up- and down-regulated genes from the same pathway shouldn't work against each other by being at opposite ends of the rank.
-names(ranks) <- rn
 
-gsea <- Reduce(rbind,
-               lapply(c('/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/h.all.v2023.2.Hs.symbols.gmt',
-                        '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c5.all.v2023.2.Hs.symbols.gmt',
-                        '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.all.v2023.2.Hs.symbols.gmt'),
-                      function(gmt) {
-                        pathways <- gmtPathways(gmt)
-                        fgseaRes <- fgsea(pathways, ranks, minSize = 15, maxSize = 500, scoreType = 'pos')
-                        setorder(fgseaRes, padj, NES)
-                        
-                        fwrite(fgseaRes, file = file.path(params$da_path, 'tables', 'gsea', params$comparison, paste0('fgsea_', basename(gmt), '.tsv')),
-                               col.names = TRUE, quote = FALSE, sep = '\t')
-      
-                        fgseaRes
-                      }) )
+run_fgsea <- function(gmts, x, tail, q, comparison, title) {
+  gsea <- Reduce(rbind, 
+                 lapply(gmts, 
+                        function(gmt) {
+                          pathways <- gmtPathways(gmt)
+                          res <- fgsea(pathways = pathways, stats = x, 
+                                       minSize = 15, maxSize = 500, scoreType = tail, nPermSimple = 1000)
+                          setorder(res, padj, NES)
+                          
+                          fwrite(res, file = file.path(params$da_path, 'tables', 'gsea', comparison, paste0(title, '.fgsea_', tail, '_', sub('.gmt', '', basename(gmt)), '.tsv')),
+                                 col.names = TRUE, quote = FALSE, sep = '\t')
+                          
+                          message(basename(gmt), ' : ', nrow(res[padj < q, ]), ' significant pathways, out of ', nrow(res))
+                          
+                          res[, resource := basename(gmt)]
+                          res[, side := tail]
+                          res
+                        }) )
+  
+  # Querying multiple pathway resources means that the pval were not cocrected for the actual total number of tests. Correct again.
+  if(length(gmts) > 1)
+    message('Applying multiple-testing correction across all the pathway sources combined.')
+  gsea[, padj := p.adjust(pval, 'BH')] # If only one source, this should match padj. But with this redundancy, I don't have to code it separately than having multiple sources..
+}
+
+plot_fgsea <- function(res, title, ncol, n) {
+  res[, absNES := abs(NES)]
+  setorder(res, -absNES)
+  if (any(res$NES < 0)) {
+    res[NES > 0, split := 'NES > 0']
+    res[NES < 0, split := 'NES < 0']
+    
+    p <- ggplot(res, aes(x = NES, y = -log10(padj), label = pathway)) +
+          facet_grid(resource ~ split, scales = 'free') +
+          # geom_vline(xintercept = 0, linetype = 'dashed') + 
+          geom_point(aes(size = size), shape=21, fill='gold', colour = 'darkorange', alpha=0.6) +
+          geom_text_repel(data = res[, head(.SD, floor(n)), by = c('resource', 'side')], 
+                          colour = 'blue', segment.color='black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 20, max.overlaps = 500) +
+          labs(title = title)
+  } else {
+    p <- ggplot(res, aes(x = NES, y = -log10(padj), label = pathway)) +
+          facet_wrap(~ resource, scales = 'free', ncol = ncol) +
+          # geom_vline(xintercept = 0, linetype = 'dashed') + 
+          geom_point(aes(size = size), shape=21, fill='gold', colour = 'darkorange', alpha=0.6) +
+          geom_text_repel(data = res[, head(.SD, floor(n)), by = c('resource', 'side')], 
+                          colour = 'blue', segment.color='black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 20, max.overlaps = 500) +
+          labs(title = title)
+  }
+  
+  p
+}
+```
+
+## Direction-agnostic
+
+The idea is that the same gene-set could have genes that are up-regulated and other genes that are down-regulated. So we are only interested in the fact that they are strongly effected and we are looking only for enrichment of gene-sets containing effected genes.
+
+```{r twotail}
+# Not using the two-tail test, because I am unsure how it will behave if there is a strong asymmetry in the fold-changes.
+
+setorder(ranks, absSLFC)
+rn2 <- ranks$gene_name
+ranks2 <- ranks$absSLFC
+names(ranks2) <- rn2
+
+gsea2 <- run_fgsea(params$genesets, ranks2, 'pos', params$max_q, params$comparison, paste0(params$comparison, '.absLFC'))
+gsea2 <- gsea2[padj < params$max_q, ]
+message(nrow(gsea2), ' candidate gene-sets for differentially regulated genes.')
+
+datatable(gsea2)
+```
+
+```{r twotail_plots, fig.height=40, fig.width=20}
+p_rich2 <- plot_fgsea(gsea2, paste0(params$comparison, '.absLFC'), 1, 50)
+  
+pdf(file = file.path(params$da_path, 'plots', 'gsea', params$comparison, paste0(params$comparison, '.absLFC.fgsea.pdf')), width=20, height=40)
+print(p_rich2)
+dev.off()
+
+p_rich2
+```
+
+## Direction-specific
+
+Looking for gene-sets enriched in either the up-regulated or down-regulated genes.
+
+```{r onetail}
+setorder(ranks, shrunkLFC)
+rn1 <- ranks$gene_name
+ranks1 <- ranks$shrunkLFC
+names(ranks1) <- rn1
+
+gsea1 <- rbind(run_fgsea(params$genesets, ranks1, 'pos', params$max_q, params$comparison, params$comparison),
+               run_fgsea(params$genesets, ranks1, 'neg', params$max_q, params$comparison, params$comparison) )
+# Re-do the multiple-testing correction to encompass the total number of tests.
+gsea1[, padj := p.adjust(pval, method = 'BH')]
+gsea1 <- gsea1[padj < params$max_q, ]
+
+message(nrow(gsea1[side == 'pos', ]), ' candidate gene-sets for the up-regulated genes.')
+message(nrow(gsea1[side == 'neg', ]), ' candidate gene-sets for the down-regulated genes.')
+
+datatable(gsea1)
+```
+
+```{r onetail_plots, fig.height=40, fig.width=20}
+p_rich1 <- plot_fgsea(gsea1, params$comparison, 1, 30)
+
+pdf(file = file.path(params$da_path, 'plots', 'gsea', params$comparison, paste0(params$comparison, '.fgsea.pdf')), width=20, height=40)
+print(p_rich1)
+dev.off()
+
+p_rich1
 ```
 
 
