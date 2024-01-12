@@ -17,8 +17,7 @@ spec = matrix(c(
   'minSingle',      'm', 1, "integer",   "Minimum count in at least one single sample (100).",
   'nhit',           'n', 1, "integer",   "Number of hits to report (10).",
   'resultsDir',     'o', 1, "character", "Directory in which to save the report (.).",
-  'RDSoutdir'    ,  'r', 1, "character", "Directory in which to save the raw computed objects (.).",
-  'samplesFile',    's', 1, "character", "Tab-separated table with `Sample` column followed by the variable columns.",
+  'samplesFile',    's', 1, "character", "Tab-separated table with `sample` column followed by the variable columns.",
   'reportTemplate', 'T', 1, "character", "Full path to template Rmd file (~/utility_scripts/pca_report_template.Rmd).",
   'topVars',        'v', 1, "integer",   "How many genes to use, ranked by descending Coefficient of Variation. (500)",
   'widthsFile',     'w', 1, "character", "Full path to table of feature lengths. 2 columns: feature ID and length.  the IDs must match the count IDs and be unique.",
@@ -27,7 +26,7 @@ spec = matrix(c(
 
 opt <- getopt(spec)
 
-# opt <- list(baseDir="/Volumes/groups/busslinger/Kimon/tanja/whole_lotta_controls", countsFile="process/intron_genecounts_ctr.tsv", createID=FALSE, samplesFile="description/covars.txt", resultsDir="results/PCA", idcol=1, nidcols=2, minMean=100, minSingle=200, nhit=15, reportTemplate="/Volumes/groups/busslinger/Kimon/tanja/whole_lotta_controls/code/pca_report_template.Rmd", widthsCol=2, specnorm='^ENSMUSG|^TCR|^IGH', excludeList="/Volumes/groups/busslinger/Kimon/tanja/whole_lotta_controls/aux/cc_genes.txt", topVars=1000, forVar='NULL')
+# opt <- list(baseDir="/SCRATCH/PP2023011_SLC13A5", countsFile="tesslinz.salmon.merged.gene_tpm.tsv", createID=FALSE, samplesFile="samplesheet_tesslinz.differentialabundance.csv", resultsDir=".", RDSoutdir='.', idcol=1, nidcols=2, minMean=5, minSingle=20, reportTemplate="~/utility_scripts/pca_report_template.Rmd")
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -44,7 +43,7 @@ stopifnot(!is.null(opt$samplesFile))
 
 if (is.null(opt$resultsDir))  opt$resultsDir <- '.'
 if (is.null(opt$createID))  opt$createID <- FALSE
-if ((!is.null(opt$specnorm)) & opt$specnorm == "NULL")  opt$specnorm <- NULL
+if ((!is.null(opt$specnorm)) && opt$specnorm == "NULL")  opt$specnorm <- NULL
 if (is.null(opt$nidcols)) opt$nidcols <- 1L
 if (is.null(opt$idcol)) opt$idcol <- 1L
 if (is.null(opt$minMean)) opt$minMean <- 10L
@@ -55,10 +54,6 @@ if ((!is.null(opt$forVar)) && opt$forVar == "NULL") opt$forVar <- NULL
 
 
 dir.create(file.path(opt$baseDir, opt$resultsDir), recursive=TRUE)
-if (!is.null(opt$RDSoutdir)) {
-  opt$RDSdir <- file.path(opt$baseDir, opt$RDSoutdir)
-  dir.create(opt$RDSoutdir, recursive=TRUE)
-}
 
 
 # Counts
@@ -92,31 +87,37 @@ if (!is.null(opt$widthsCol)) {
 
 
 # TPM/RPM
-normscale <- function(counts, featLens=NULL, specnorm=opt$specnorm){
+normscale <- function(counts, featLens = NULL, specnorm = NULL){
+  # counts <- M
+  TPMs <- NULL
   if (!is.null(featLens)) {
-    # Reorder/subset
-    setkeyv(featLens, names(featLens)[1])
-    featLens <- featLens[rownames(counts)]
-    stopifnot(all(!is.na(featLens[, 2])))  # incomplete lengths
+    stopifnot(all(is.finite(featLens)))
+    stopifnot(length(featLens) == nrow(counts))
     # Scale by feature size
-    TPMs <- sweep(counts, 1, featLens[[2]], `/`)
+    message("Scale to TPM.")
+    TPMs <- sweep(counts, 1, featLens, `/`)
+  } else {
+    message("Scale to RPM.")
+    TPMs <- counts
   }
   # Scale by sequencing depth
   if (!is.null(specnorm)) {
+    message("Scale with special exclusions.")
     colsums <- colSums(TPMs[!grepl(specnorm, rownames(TPMs), ignore.case=TRUE, perl=TRUE), ], na.rm=TRUE)
   } else {
     colsums <- colSums(TPMs, na.rm=TRUE)
   }
   TPMs <- sweep(TPMs, 2, colsums, `/`) * 1e6
-  
+
   return(TPMs)
 }
+
 
 tpm <- normscale(counts, featLens)
 TPM <- data.table(id=rownames(tpm), tpm)
 widths <- !all(is.null(opt$widthsFile), is.null(opt$widthsCol))
 setnames(TPM, c('id', paste0(colnames(tpm), ifelse(widths, '.TPM', '.RPM')) ))
-fwrite(TPM, file=sub(".txt$|.tsv$", ".scaled.txt", file.path(opt$baseDir, opt$countsFile)), quote=FALSE, sep="\t")
+#fwrite(TPM, file=sub(".txt$|.tsv$", ".scaled.txt", file.path(opt$baseDir, opt$countsFile)), quote=FALSE, sep="\t")
 
 
 # Genes not to include in PCA. For example, cell cycle.
@@ -126,18 +127,18 @@ if (!is.null(opt$excludeList))
 
 
 # Covariates
-covars <- read.csv(file.path(opt$baseDir, opt$samplesFile), sep="\t", header=TRUE, check.names = FALSE, colClasses="character")
-counts <- counts[, covars$Sample]    # Order and subset columns
+covars <- read.csv(file.path(opt$baseDir, opt$samplesFile), sep=",", header=TRUE, check.names = FALSE, colClasses="character")
+counts <- counts[, covars$sample]    # Order and subset columns
 
 # Repeat analysis for every level of the looping variable.
 subcovars <- list()
 if (!is.null(opt$forVar)) {
   # in case not all combinations of variables exist
   covars[[opt$forVar]] <- droplevels(as.factor(covars[[opt$forVar]]))  # sometimes it is a factor sometimes it isn,t
-  
+
   subcovars <- lapply(levels(covars[[opt$forVar]]), function(V) {
     # V <- levels(covars[[opt$forVar]])[1]
-    
+
     # Select relevant rows and drop the column
     coldata <- covars[covars[[opt$forVar]] == V, ]
     coldata[opt$forVar] <- NULL
@@ -152,16 +153,16 @@ names(subcovars)[1] <- 'default'
 
 for (V in names(subcovars)){
   # V <- names(subcovars)[1]
-  
+
   # Fire up the Rmd report
   rmarkdown::render(opt$reportTemplate,
                     output_file = sub('.txt|.tsv', paste0('.', gsub('[^A-Za-z0-9]+', '_', V), '.pca.html'), basename(opt$countsFile)),
                     output_dir = file.path(opt$baseDir, opt$resultsDir),
                     params=list(cts = file.path(opt$baseDir, opt$countsFile),
-                                tpm=tpm[, subcovars[[V]]$Sample],
+                                tpm=tpm[, subcovars[[V]]$sample],
                                 counts = counts,
                                 covars = subcovars[[V]],
-                                RDSdir = file.path(opt$baseDir, opt$RDSoutdir),
+                                outdir = file.path(opt$baseDir, opt$resultsDir),
                                 nidcols = opt$nidcols,
                                 idcol = opt$idcol,
                                 minMean = opt$minMean,

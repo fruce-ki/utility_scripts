@@ -14,7 +14,7 @@ params:
   tpm: matrix()                       # 
   counts: matrix()                    #
   covars: data.frame()                # Experimental variables table
-  RDSdir: NULL                        # save path for intermediate data
+  outdir: NULL                        # save path for intermediate data
   nidcols: 1                          # how many columns contain alternative IDs, including the col with the row IDs
   idcol: 1                            # column that has the row IDs
   ntop: 10                            # maximum number of hits to list
@@ -47,7 +47,7 @@ library(ggforce)
 library(ggdendro)
 library(ggrepel)
 
-setDTthreads(1)
+#setDTthreads(1)
 
 options(scipen=2)
 
@@ -57,7 +57,7 @@ theme_set(theme_bw())
 ```{r functions}
 # Correlations
 my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NULL, txs=3, minMean=0, minSingle=0, loopVal="default") {
-  # mat <- params$tpm[topgenes,]; samples <- params$covars$Sample
+  # mat <- params$tpm[topgenes,]; samples <- params$covars$sample
   
   # Filter
   if (minMean != 0 | minSingle != 0) {
@@ -83,7 +83,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   # Use the dendrogram label data to position the sample labels
   sample_pos_table <- with(
       dend_data$labels, 
-      data.frame(y_center = x, Sample = as.character(label), height = 1))
+      data.frame(y_center = x, sample = as.character(label), height = 1))
   # Limits for the vertical axes
   sample_axis_limits <- with(
       sample_pos_table, 
@@ -96,7 +96,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
                     position = "top") + 
     scale_y_continuous(position = "right",
                        breaks = sample_pos_table$y_center, 
-                       labels = sample_pos_table$Sample, 
+                       labels = sample_pos_table$sample, 
                        limits = sample_axis_limits, 
                        expand = c(0, 0)) + 
     labs(x = NULL, y = NULL) +
@@ -133,7 +133,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   cormat[, observation1 := factor(rn, ordered=TRUE, levels=rn)]
   cormat <- melt(cormat, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
   cormat[, observation2 := factor(observation2, ordered=TRUE, levels=rn)]
-  # cormat <- merge(cormat, sample_pos_table, by.x="observation2", by.y="Sample", all.x=TRUE)
+  # cormat <- merge(cormat, sample_pos_table, by.x="observation2", by.y="sample", all.x=TRUE)
   
   rn2 <- rownames(cormat2)
   cormat2 <- as.data.table(cormat2)
@@ -141,14 +141,14 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   cormat2 <- melt(cormat2, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
   cormat2[, observation2 := factor(observation2, ordered=TRUE, levels=rn2)]
   cormat2 <- cormat2[!is.na(Correlation)]
-  # cormat2 <- merge(cormat2, sample_pos_table, by.x="observation2", by.y="Sample", all.x=TRUE)
+  # cormat2 <- merge(cormat2, sample_pos_table, by.x="observation2", by.y="sample", all.x=TRUE)
   
   rn3 <- rownames(cormat3)
   cormat3 <- as.data.table(cormat3)
   cormat3[, observation1 := factor(rn3, ordered=TRUE, levels=rn3)]
   cormat3 <- melt(cormat3, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
   cormat3[, observation2 := factor(observation2, ordered=TRUE, levels=rn3)]
-  # cormat3 <- merge(cormat3, sample_pos_table, by.x="observation2", by.y="Sample", all.x=TRUE)
+  # cormat3 <- merge(cormat3, sample_pos_table, by.x="observation2", by.y="sample", all.x=TRUE)
   
   rn4 <- rownames(cormat4)
   cormat4 <- as.data.table(cormat4)
@@ -156,7 +156,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   cormat4 <- melt(cormat4, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
   cormat4[, observation2 := factor(observation2, ordered=TRUE, levels=rn4)]
   cormat4 <- cormat4[!is.na(Correlation)]
-  # cormat4 <- merge(cormat4, sample_pos_table, by.x="observation2", by.y="Sample", all.x=TRUE)
+  # cormat4 <- merge(cormat4, sample_pos_table, by.x="observation2", by.y="sample", all.x=TRUE)
   
   # Text colour switch for the dynamic range
   m <- min(cormat4$Correlation, na.rm=TRUE)
@@ -359,7 +359,7 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){
   
   pc12v <- wrap_plots(lapply(ig, function(varname) {
     return(
-      ggplot(pc, aes_string(x=pcxs, y=pcys, label="Sample", fill=varname, colour=varname)) +
+      ggplot(pc, aes_string(x=pcxs, y=pcys, label="sample", fill=varname, colour=varname)) +
         geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
         geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
         # geom_mark_hull(alpha=0.1, colour='transparent') +
@@ -382,7 +382,7 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){
 # (scaling and centering of genes to one another, NOT samples to one another)
 do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, topgenes=NULL, exclude=NULL, minMean=0, minSingle=0, ntop=10) {
   # countsmat <- log10(params$tpm); covars <- params$covars
-  # scale = TRUE; center = TRUE; rds = file.path(params$RDSdir, sub(".txt|.tsv", "_corrP.RDS", basename(params$cts))); topgenes=NULL; exclude=NULL; minMean=0; minSingle=0; ntop=10
+  # scale = TRUE; center = TRUE; rds = file.path(params$outdir, sub(".txt|.tsv", "_corrP.RDS", basename(params$cts))); topgenes=NULL; exclude=NULL; minMean=0; minSingle=0; ntop=10
   
   nvars <- nrow(countsmat)
   countsmat <- countsmat[rowSums(countsmat) > 0, ]
@@ -416,8 +416,8 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
   pc <- sweep(pca$x, 2, 1 / (pca$sdev * srn), FUN = '*')   
   dirs <- as.data.table(pca$rotation)
   
-  pc <- cbind(pc, data.frame(Sample = rownames(pc)))
-  pc <- as.data.frame(merge(pc, covars, by="Sample", all = TRUE))
+  pc <- cbind(pc, data.frame(sample = rownames(pc)))
+  pc <- as.data.frame(merge(pc, covars, by="sample", all = TRUE))
   npc <- sum(pca$sdev > 1)
   
   # Screeplot.
@@ -467,7 +467,7 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
   # Coefficient names.
 
   ig <- names(covars)
-  ig <- ig[! ig %in% c('sample', 'Sample', 'name', 'Name', 'sizeFactor')]
+  ig <- ig[! ig %in% c('sample', 'sample', 'name', 'Name', 'sizeFactor')]
 
   # Means and Variances of the selected genes
   genevar[, selected := name %in% colnames(subcmat)]
@@ -581,13 +581,13 @@ Using log-scaled normalised expression values.
 Correlations based on all the genes that meet the count and name criteria.
 
 ```{r corr1, fig.height=15, fig.width=15}
-corels1 <- my_pairwise_internal_corels(log10(params$tpm[topgenes,]), params$covars$Sample, method="pearson",
+corels1 <- my_pairwise_internal_corels(log10(params$tpm[topgenes,]), params$covars$sample, method="pearson",
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,   # prefiltered
-                                      rds = file.path(params$RDSdir, 
+                                      rds = file.path(params$outdir, 
                                                              sub(".txt|.tsv", paste0("_", params$loopval, "_corrP.RDS"), basename(params$cts))) )
-corels2 <- my_pairwise_internal_corels(log10(params$tpm[topgenes, ]), params$covars$Sample, method="spearman",
+corels2 <- my_pairwise_internal_corels(log10(params$tpm[topgenes, ]), params$covars$sample, method="spearman",
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,     # prefiltered
-                                      rds = file.path(params$RDSdir,
+                                      rds = file.path(params$outdir,
                                                              sub(".txt|.tsv", paste0("_", params$loopval, "_corrS.RDS"), basename(params$cts))) )
 
 print( corels1[['frnc']] )
@@ -604,13 +604,13 @@ print( corels2[['drc']] )
 Correlations using the top `r params$topVars` dispersed genes (out of those already filtered).
 
 ```{r corr1b, fig.height=15, fig.width=15}
-corels1b <- my_pairwise_internal_corels(log10(params$tpm[topgenes2, ]), params$covars$Sample, method="pearson",
+corels1b <- my_pairwise_internal_corels(log10(params$tpm[topgenes2, ]), params$covars$sample, method="pearson",
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,   # prefiltered
-                                      rds = file.path(params$RDSdir,
+                                      rds = file.path(params$outdir,
                                                       sub(".txt|.tsv", paste0("_", params$loopval, "_corrPtop.RDS"), basename(params$cts))) )
-corels2b <- my_pairwise_internal_corels(log10(params$tpm[topgenes2, ]), params$covars$Sample, method="spearman",
+corels2b <- my_pairwise_internal_corels(log10(params$tpm[topgenes2, ]), params$covars$sample, method="spearman",
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,    # prefiltered
-                                      rds = file.path(params$RDSdir,
+                                      rds = file.path(params$outdir,
                                                       sub(".txt|.tsv", paste0("_", params$loopval, "_corrStop.RDS"), basename(params$cts))) )
 
 # print( (corels1b[['frnc']] + theme(legend.position="none")) | 
@@ -637,7 +637,7 @@ PCA based on all genes that meet the count thresholds.
 all_pca <- do_pca(log10(params$tpm), params$covars, ntop = params$ntop,
                   topgenes= topgenes, exclude=lowcnt,
                   minMean = 0, minSingle = 0,      # prefiltered
-                  rds = file.path(params$RDSdir,
+                  rds = file.path(params$outdir,
                                   sub(".txt$|.tsv$", paste0("_", params$loopval, "_pca.RDS"), basename(params$cts))))
 ```
 
@@ -692,7 +692,7 @@ PCA using the top `r params$topVars` dispersed genes (out of those that already 
 all_pcab <- do_pca(log10(params$tpm), params$covars, ntop = params$ntop,
                   topgenes= topgenes2, exclude=lowcnt,
                   minMean = 0, minSingle = 0,      # prefiltered
-                  rds = file.path(params$RDSdir,
+                  rds = file.path(params$outdir,
                                   sub(".txt|.tsv", paste0("_", params$loopval, "_pcatop.RDS"), basename(params$cts))))
 ```
 
@@ -749,31 +749,34 @@ print( all_pcab$pc2d )
 
 ```{r pdf}
 ## Plots to PDF ##
-pdf(file.path(params$RDSdir,
+pdf(file.path(params$outdir,
               sub(".txt|.tsv", "_pca.pdf", basename(params$cts))),
     width=max(12, ceiling(nrow(params$covars) / 3)), height=max(12, ceiling(nrow(params$covars) / 3))) # Scale up when many samples, but don't scale down when few.
 
 # Correlation plots
+plot.new()
+text(.5, .5, 'Correlation with all expressed genes')
 print(corels1[['frnc']])
 print(corels1[['drc']])
 print(corels2[['frnc']])
 print(corels2[['drc']])
+plot.new()
+text(.5, .5, 'Correlation with only the most variable genes')
 print(corels1b[['frnc']])
 print(corels1b[['drc']])
 print(corels2b[['frnc']])
 print(corels2b[['drc']])
 
-# PCA plots
+# PCA plotsplot.new()
+plot.new()
+text(.5, .5, 'PCA with all expressed genes')
 print(all_pca$pimp)
-print(all_pca$pcv2d)
-# print(all_pca[["pcor1"]])
-# print(all_pca[["pcor2"]])
+print(all_pca$pc2d)
 print( all_pca$pvar1 )
-
+plot.new()
+text(.5, .5, 'PCA with only the most variable genes')
 print(all_pcab$pimp)
-print(all_pcab$pcv2d)
-# print(all_pcab[["pcor1"]])
-# print(all_pcab[["pcor2"]])
+print(all_pcab$pc2d)
 print( all_pcab$pvar1 )
 
 dev.off()
