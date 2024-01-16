@@ -10,30 +10,24 @@ output:
     toc_float:
       collapsed: false
 params:
-  cts: NULL                           # path to counts file
-  tpm: matrix()                       # 
-  counts: matrix()                    #
-  covars: data.frame()                # Experimental variables table
-  outdir: NULL                        # save path for intermediate data
+  name: ''                            # 
+  tpm: ''                             # values table path
+  covars: ''                          # Experimental variables table
+  outdir: ''                          # save path for intermediate data
   nidcols: 1                          # how many columns contain alternative IDs, including the col with the row IDs
   idcol: 1                            # column that has the row IDs
   ntop: 10                            # maximum number of hits to list
-  minMean: 10                         # Filter out poorly covered genes
-  minSingle: 100                      # Bypass of the above, for genes expressed only in one or few samples
-  widths: False                       # Feature-length normalised.
-  createID: FALSE
-  specnorm: NULL                      # Gene name pattern to exclude genes from TPM and PCA calculation. Like IG genes in plasma cells
-  topVars: NULL                       # Number of top dispersed genes to use.
-  loopVal: "default"
+  minMean: 0                          # Filter out poorly covered genes
+  minSingle: 0                        # Bypass of the above, for genes expressed only in one or few samples
+  topVars: 500                        # Number of top dispersed genes to use.
+  loopVal: "default"                  # default = no looping
   excluded: NULL                      # Features not to be included in PCA
-editor_options:
-  chunk_output_type: console
 ---
 
 \VignetteEngine{knitr::knitr}
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, warning = FALSE, bitmapType='cairo-png')
+knitr::opts_chunk$set(echo = TRUE, bitmapType='cairo-png')
 ```
 
 ```{r message=FALSE, warning=FALSE}
@@ -57,7 +51,7 @@ theme_set(theme_bw())
 ```{r functions}
 # Correlations
 my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NULL, txs=3, minMean=0, minSingle=0, loopVal="default") {
-  # mat <- params$tpm[topgenes,]; samples <- params$covars$sample
+  # mat <- log10(counts[topgenes2, ]);
   
   # Filter
   if (minMean != 0 | minSingle != 0) {
@@ -328,14 +322,16 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){
   lmt <- max( c(abs(pc[[pcxs]]), abs(pc[[pcys]])) )
   
   pc12 <- wrap_plots(lapply(ig, function(varname) {
+    # varname <- ig[3]
+    
     return(
-      # varname <- ig[3]
       
-      ggplot(pc, aes_string(x=pcxs, y=pcys, fill=varname, colour=varname)) +
+      ggplot(pc, aes(x = .data[[pcxs]], y = .data[[pcys]], label = .data[[varname]], fill = .data[[varname]], colour = .data[[varname]])) +
         geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
         geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
         # geom_mark_hull(alpha=0.1, colour='transparent') +
-        geom_text(aes_string(label=varname), size=rel(2.1)) +
+        #   geom_point(shape=16, alpha=0.5) +
+        geom_text(size=rel(2.1)) +
         coord_fixed(ratio=1, xlim=c(-lmt, lmt), ylim=c(-lmt, lmt) ) +
         scale_colour_manual(values=getPalette(length(unique(pc[[varname]])))) +
         scale_fill_manual(values=getPalette(length(unique(pc[[varname]])))) +
@@ -344,29 +340,18 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){
              title=varname) +
         theme(panel.grid=element_blank(), legend.position='none')
       
-      # ggplot(pc, aes_string(x=pcxs, y=pcys, fill=varname, colour=varname)) +
-      #   geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
-      #   geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
-      #   geom_mark_hull(aes_string(label=varname), alpha=0.1, fill='transparent', con.cap=0) +
-      #   geom_point(shape=16, alpha=0.5) +
-      #   coord_fixed(ratio=1) +#, xlim=c(-lmt, lmt), ylim=c(-lmt, lmt) ) +
-      #   scale_colour_manual(values=getPalette(length(unique(pc[[varname]])))) +
-      #   scale_fill_manual(values=getPalette(length(unique(pc[[varname]])))) +
-      #   labs(x=paste0(pcxs, " (", round(pcaimp[PC==pcx, Explained], 1), "%)"), 
-      #        y=paste0(pcys, " (", round(pcaimp[PC==pcy, Explained], 1), "%)")) +
-      #   theme(panel.grid=element_blank(), legend.position='none')
     )}), ncol = ifelse(length(ig) <= 10, 2, 3))
   
   pc12v <- wrap_plots(lapply(ig, function(varname) {
     return(
-      ggplot(pc, aes_string(x=pcxs, y=pcys, label="sample", fill=varname, colour=varname)) +
+      ggplot(pc, aes(x = .data[[pcxs]], y = .data[[pcys]], label = .data[['sample']], fill = .data[[varname]], colour = .data[[varname]])) +
         geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
         geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
         # geom_mark_hull(alpha=0.1, colour='transparent') +
         geom_segment(data=subload, inherit.aes=FALSE, colour='black', arrow=arrow(length=unit(0.1, 'cm')), alpha=0.2,
-                     x=0, y=0, aes_string(xend=pcxs, yend=pcys)) +
+                     x=0, y=0, aes(xend = .data[[pcxs]], yend = .data[[pcys]])) +
         geom_point() +
-        geom_text_repel(data=subload, inherit.aes=FALSE, aes_string(label="rowID", x=pcxs, y=pcys), size=2) +
+        geom_text_repel(data=subload, inherit.aes=FALSE, aes(label = .data[["rowID"]], x = .data[[pcxs]], y = .data[[pcys]]), size=2) +
         coord_fixed(ratio=1, xlim=c(-lmt, lmt), ylim=c(-lmt, lmt) ) +
         scale_colour_manual(values=getPalette(length(unique(pc[[varname]])))) +
         scale_fill_manual(values=getPalette(length(unique(pc[[varname]])))) +
@@ -382,7 +367,7 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){
 # (scaling and centering of genes to one another, NOT samples to one another)
 do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, topgenes=NULL, exclude=NULL, minMean=0, minSingle=0, ntop=10) {
   # countsmat <- log10(params$tpm); covars <- params$covars
-  # scale = TRUE; center = TRUE; rds = file.path(params$outdir, sub(".txt|.tsv", "_corrP.RDS", basename(params$cts))); topgenes=NULL; exclude=NULL; minMean=0; minSingle=0; ntop=10
+  # scale = TRUE; center = TRUE; rds = file.path(params$outdir, sub(".txt|.tsv", "_corrP.RDS", basename(params$name))); topgenes=NULL; exclude=NULL; minMean=0; minSingle=0; ntop=10
   
   nvars <- nrow(countsmat)
   countsmat <- countsmat[rowSums(countsmat) > 0, ]
@@ -515,22 +500,43 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
 # Input
 
 ```{r parameters}
-message(paste("Counts file:", params$cts))
+message(paste("Name:", params$name))
 message(paste("Minimum mean count across samples:", params$minMean))
-message(paste("Minimum count in a single sample, if the minimum mean is not met:", params$minSingle))
+# message(paste("Minimum count in a single sample, if the minimum mean is not met:", params$minSingle))
 message(paste("Number of features to report per Principle Component:", params$ntop))
-message(paste("Feature lengths provided for count normalization:", !is.null(params$widthsFile) | !is.null(params$widthsCol)))
 message(paste("Genes to exclude from library size calculations and PCA:", params$specnorm))
 message(paste("Number of top dispersed genes to use for correlation and PCA:", ifelse(is.null(params$topVars),'all that meet the count thresholds', params$topVars)))
 ```
 
 ```{r sample_info}
 # Counts
-message(ifelse(params$widths, 'TPM counts', 'RPM counts'))
+if (!is.matrix(params$tpm)) {
+  counts <- fread(params$tpm, colClasses="character")  # prevent any numeric IDs converting a string column to integer
+  xref <- counts[, 1:params$nidcols]
+  samples <- names(counts)[(params$nidcols + 1):length(counts)]
+  counts <- matrix(as.numeric(as.matrix(counts[, c(params$nidcols+1):length(counts), with=FALSE])), ncol=length(counts) - params$nidcols )
+  colnames(counts) <- samples  # because the type conversion lost them
+  counts[is.na(counts)] <- 0
+  rownames(counts) <- xref[[params$idcol]]
+} else {
+  counts <- params$tpm
+}
 
 # Covariates
+if (!is.data.frame(params$covars)) {
+  covars <- fread(params$covars, header = TRUE)
+} else {
+  covars <- params$covars
+}
+
+# Samples
+if ('use' %in% names(covars)) {
+  covars <- covars[as.logical(use), ]
+}
+samples <- covars$sample
+counts <- counts[, samples]
+
 datatable(params$covars)
-# print(as.data.table(params$covars))
 ```
 
 
@@ -540,17 +546,12 @@ Genes with mean raw count across all samples below `r params$minMean` are exclud
 
 ```{r filter}
 # All genes above the count thresholds
-message(paste("Using features that exceed either", params$minMean, "mean count across samples or", params$minSingle, "count in any single sample."))
-n <- nrow(params$tpm)
-topgenes <- rownames(params$counts)[(rowMeans(params$counts) >= params$minMean) | (rowSums(params$counts >= params$minSingle) > 0)]
+# message(paste("Using features that exceed either", params$minMean, "mean count across samples or", params$minSingle, "count in any single sample."))
+message(paste("Using features that exceed", params$minMean, "mean count across samples."))
+n <- nrow(counts)
+# topgenes <- rownames(counts)[(rowMeans(counts) >= params$minMean) | (rowSums(counts >= params$minSingle) > 0)]
+topgenes <- rownames(counts)[(rowMeans(counts) >= params$minMean)]
 message(paste(n - length(topgenes), "features discarded, out of", n))
-
-# Genes that were excluded from TPM and will be excluded from PCA.
-if (!is.null(params$specnorm)) {
-  n <- length(topgenes)
-  topgenes <- topgenes[! topgenes %in% rownames(params$tpm)[grepl(params$specnorm, rownames(params$tpm), ignore.case=TRUE, perl=TRUE)] ]
-  message(paste("Additionally", n - length(topgenes), "matched features blocked from library."))
-}
 
 # Genes to exclude from PCA.
 if (!is.null(params$excluded)) {
@@ -559,14 +560,23 @@ if (!is.null(params$excluded)) {
   message(paste("Additionally excluding", n - length(topgenes), "listed features."))
 }
 
+
 # Further reduce the above genes to the top most dispersed, as in DESeq2
-cv <- sort(rowSds(params$tpm[topgenes, ]) / rowMeans(params$tpm[topgenes, ]), decreasing=TRUE)   # coefficient of variation
+cv <- sort(rowSds(counts[topgenes, ]) / rowMeans(counts[topgenes, ]), decreasing = TRUE, na.last = TRUE)   # coefficient of variation
 topgenes2 <- names(head(cv, n=params$topVars))
 
-# Make it obvious which genes in the TPM-StDev plot where excluded due to raw count.
-lowcnt <- rownames(params$counts)[(rowMeans(params$counts) < params$minMean) & (rowSums(params$counts >= params$minSingle) == 0)]
+
+# Make it obvious which genes in the TPM-StDev plot were excluded due to low count.
+# lowcnt <- rownames(counts)[(rowMeans(counts) < params$minMean) | (rowSums(counts >= params$minSingle) == 0)]
+lowcnt <- rownames(counts)[(rowMeans(counts) < params$minMean)]
 ```
 
+```{r pad}
+# Pad zeros, so I can correlate the log abundance, which is more linear than the plain abundance.
+pad <- min(counts[counts > 0], na.rm = TRUE) / 5
+message('Padding counts by ', pad, ' to enable log-scaling.')
+counts <- counts + pad
+```
 
 # Correlations
 
@@ -578,17 +588,17 @@ Using log-scaled normalised expression values.
 
 ## All eligible features
 
-Correlations based on all the genes that meet the count and name criteria.
+Correlations based on all the genes that meet the count and name criteria. The analysis is performed on the log-transformed padded counts.
 
 ```{r corr1, fig.height=15, fig.width=15}
-corels1 <- my_pairwise_internal_corels(log10(params$tpm[topgenes,]), params$covars$sample, method="pearson",
+corels1 <- my_pairwise_internal_corels(log10(counts[topgenes,]), samples, method="pearson",
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,   # prefiltered
                                       rds = file.path(params$outdir, 
-                                                             sub(".txt|.tsv", paste0("_", params$loopval, "_corrP.RDS"), basename(params$cts))) )
-corels2 <- my_pairwise_internal_corels(log10(params$tpm[topgenes, ]), params$covars$sample, method="spearman",
+                                                             sub(".txt|.tsv", paste0("_", params$loopval, "_corrP.RDS"), basename(params$name))) )
+corels2 <- my_pairwise_internal_corels(log10(counts[topgenes, ]), samples, method="spearman",
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,     # prefiltered
                                       rds = file.path(params$outdir,
-                                                             sub(".txt|.tsv", paste0("_", params$loopval, "_corrS.RDS"), basename(params$cts))) )
+                                                             sub(".txt|.tsv", paste0("_", params$loopval, "_corrS.RDS"), basename(params$name))) )
 
 print( corels1[['frnc']] )
 print( corels2[['frnc']] )
@@ -604,14 +614,14 @@ print( corels2[['drc']] )
 Correlations using the top `r params$topVars` dispersed genes (out of those already filtered).
 
 ```{r corr1b, fig.height=15, fig.width=15}
-corels1b <- my_pairwise_internal_corels(log10(params$tpm[topgenes2, ]), params$covars$sample, method="pearson",
+corels1b <- my_pairwise_internal_corels(log10(counts[topgenes2, ]), samples, method="pearson",
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,   # prefiltered
                                       rds = file.path(params$outdir,
-                                                      sub(".txt|.tsv", paste0("_", params$loopval, "_corrPtop.RDS"), basename(params$cts))) )
-corels2b <- my_pairwise_internal_corels(log10(params$tpm[topgenes2, ]), params$covars$sample, method="spearman",
+                                                      sub(".txt|.tsv", paste0("_", params$loopval, "_corrPtop.RDS"), basename(params$name))) )
+corels2b <- my_pairwise_internal_corels(log10(counts[topgenes2, ]), samples, method="spearman",
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,    # prefiltered
                                       rds = file.path(params$outdir,
-                                                      sub(".txt|.tsv", paste0("_", params$loopval, "_corrStop.RDS"), basename(params$cts))) )
+                                                      sub(".txt|.tsv", paste0("_", params$loopval, "_corrStop.RDS"), basename(params$name))) )
 
 # print( (corels1b[['frnc']] + theme(legend.position="none")) | 
 #          (corels2b[['frnc']] + theme(axis.text.y=element_blank())) )
@@ -631,14 +641,14 @@ For this, the log-scaled expression of the features is further standardized. Thi
 
 ## All eligible features
 
-PCA based on all genes that meet the count thresholds.
+PCA based on all genes that meet the count thresholds. The analysis is performed on the log-transformed padded counts.
 
 ```{r pca}
-all_pca <- do_pca(log10(params$tpm), params$covars, ntop = params$ntop,
+all_pca <- do_pca(log10(counts), covars, ntop = params$ntop,
                   topgenes= topgenes, exclude=lowcnt,
                   minMean = 0, minSingle = 0,      # prefiltered
                   rds = file.path(params$outdir,
-                                  sub(".txt$|.tsv$", paste0("_", params$loopval, "_pca.RDS"), basename(params$cts))))
+                                  sub(".txt$|.tsv$", paste0("_", params$loopval, "_pca.RDS"), basename(params$name))))
 ```
 
 ### Selection overview
@@ -689,11 +699,11 @@ print( all_pca$pc2d )
 PCA using the top `r params$topVars` dispersed genes (out of those that already meet the count thresholds).
 
 ```{r pcab}
-all_pcab <- do_pca(log10(params$tpm), params$covars, ntop = params$ntop,
+all_pcab <- do_pca(log10(counts), covars, ntop = params$ntop,
                   topgenes= topgenes2, exclude=lowcnt,
                   minMean = 0, minSingle = 0,      # prefiltered
                   rds = file.path(params$outdir,
-                                  sub(".txt|.tsv", paste0("_", params$loopval, "_pcatop.RDS"), basename(params$cts))))
+                                  sub(".txt|.tsv", paste0("_", params$loopval, "_pcatop.RDS"), basename(params$name))))
 ```
 
 ### Selection overview
@@ -750,7 +760,7 @@ print( all_pcab$pc2d )
 ```{r pdf}
 ## Plots to PDF ##
 pdf(file.path(params$outdir,
-              sub(".txt|.tsv", "_pca.pdf", basename(params$cts))),
+              sub(".txt|.tsv", "_pca.pdf", basename(params$name))),
     width=max(12, ceiling(nrow(params$covars) / 3)), height=max(12, ceiling(nrow(params$covars) / 3))) # Scale up when many samples, but don't scale down when few.
 
 # Correlation plots
