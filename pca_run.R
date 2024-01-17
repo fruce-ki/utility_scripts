@@ -6,25 +6,25 @@ library(data.table)
 spec = matrix(c(
   'baseDir',        'b', 1, "character", "Full path to base directory of the project. All other paths relative from here.",
   'countsFile',     'f', 1, "character", "Salmon -like counts table with all the samples.",
-  'forVar',         'F', 1, "character", "Looping variable (ie. carry out the analysis separately for each level of this var).",
-  'excludeList',    'g', 1, "character", "Text file with vertical list of feature IDs to exclude from PCA (but not from TPM calculation).",
-  'specnorm',       'G', 1, "character", "Special normalisation. Feature IDs that match this pattern will not be included for calculation of library sizes for TPM/RPM normalisation, and will also not be included in the PCA.",
+  'excludeList',    'e', 1, "character", "Text file with vertical list of feature IDs to exclude from PCA.",
   'help',           'h', 0, "logical",   "Help",
   'idcol',          'i', 1, "integer",   "ID column to use (1). The others will be removed. See also -I and -F.",
   'nidcols',        'I', 1, "integer",   "Number of non-count columns at the start of the table (1). See also -i and -W.",
   'minMean',        'M', 1, "integer",   "Minimum mean count across all samples (10).",
   # 'minSingle',      'm', 1, "integer",   "Minimum count in at least one single sample (100).",
-  'nhit',           'n', 1, "integer",   "Number of hits to report (10).",
   'resultsDir',     'o', 1, "character", "Directory in which to save the report, relative to baseDir (.).",
   'samplesFile',    's', 1, "character", "Tab-separated table with `sample` column followed by the variable columns.",
   'sortVar',        'S', 1, "character", " a variable by which to order the samples. Otherwise the samplesFile order will be used.",
+  'forVar',         'F', 1, "character", "Looping variable (ie. carry out the analysis separately for each level of this var).",
   'reportTemplate', 'T', 1, "character", "Full path to template Rmd file (~/utility_scripts/pca_report_template.Rmd).",
+  'nhit',           'n', 1, "integer",   "Number of hits to report (10).",
   'topVars',        'v', 1, "integer",   "How many genes to use, ranked by descending Coefficient of Variation. (500)"
 ), byrow=TRUE, ncol=5)
 
 opt <- getopt(spec)
 
 # opt <- list(baseDir="/SCRATCH/PP2023011_SLC13A5", countsFile="tesslinz.salmon.merged.gene_tpm.tsv", samplesFile="samplesheet_tesslinz.differentialabundance.csv", resultsDir="tesslinz_diffex/PCA", sortVar = 'time', idcol=1, nidcols=2, minMean=5, minSingle=20, reportTemplate="~/utility_scripts/pca_report_template.Rmd")
+# opt <- list(baseDir="C:/Users/jack_/Downloads/", countsFile="tesslinz.salmon.merged.gene_tpm.tsv", samplesFile="samplesheet_tesslinz.differentialabundance.csv", resultsDir="tesslinz_diffex/PCA", sortVar = 'time', idcol=1, nidcols=2, minMean=5, minSingle=20, reportTemplate="D:/Documents/GitHub/utility_scripts/pca_report_template.Rmd")
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -40,7 +40,6 @@ stopifnot(!is.null(opt$countsFile))
 stopifnot(!is.null(opt$samplesFile))
 
 if (is.null(opt$resultsDir))  opt$resultsDir <- '.'
-if ((!is.null(opt$specnorm)) && opt$specnorm == "NULL")  opt$specnorm <- NULL
 if (is.null(opt$nidcols)) opt$nidcols <- 1L
 if (is.null(opt$idcol)) opt$idcol <- 1L
 if (is.null(opt$minMean)) opt$minMean <- 10L
@@ -48,6 +47,7 @@ if (is.null(opt$minSingle)) opt$minSingle <- 100L
 if (is.null(opt$nhit))  opt$nhit <- 10L
 if (is.null(opt$topVars))  opt$topVars <- 500L
 if ((!is.null(opt$forVar)) && opt$forVar == "NULL") opt$forVar <- NULL
+if ((!is.null(opt$groupVar)) && opt$groupVar == "NULL") opt$groupVar <- NULL
 
 
 dir.create(file.path(opt$baseDir, opt$resultsDir), recursive=TRUE)
@@ -83,12 +83,6 @@ if (!is.null(opt$forVar)) {
 subcovars <- c(list(covars), subcovars)
 names(subcovars)[1] <- 'default'
 
-if (!is.null(opt$sortVar))
-  for (x in names(subcovars)) {
-    setorderv(subcovars[[x]], opt$sortVar)
-  }
-
-
 
 for (V in names(subcovars)){
   # V <- names(subcovars)[1]
@@ -97,17 +91,18 @@ for (V in names(subcovars)){
   rmarkdown::render(opt$reportTemplate,
                     output_file = sub('.txt|.tsv', paste0('.', gsub('[^A-Za-z0-9]+', '_', V), '.pca.html'), opt$countsFile),
                     output_dir = file.path(opt$baseDir, opt$resultsDir),
-                    params=list(name = file.path(opt$baseDir, opt$countsFile),
-                                tpm = file.path(opt$baseDir, opt$countsFile),
-                                covars = subcovars[[V]],
-                                outdir = file.path(opt$baseDir, opt$resultsDir),
-                                nidcols = opt$nidcols,
-                                idcol = opt$idcol,
-                                minMean = opt$minMean,
-                                # minSingle = opt$minSingle,
-                                ntop = opt$nhit,
-                                topVars=opt$topVars,
-                                loopVal=V,
-                                excluded=exclusion)
+                    params = list(name = file.path(opt$baseDir, opt$countsFile),
+                                  tpm = file.path(opt$baseDir, opt$countsFile),
+                                  covars = subcovars[[V]],
+                                  outdir = file.path(opt$baseDir, opt$resultsDir),
+                                  nidcols = opt$nidcols,
+                                  idcol = opt$idcol,
+                                  minMean = opt$minMean,
+                                  # minSingle = opt$minSingle,
+                                  ntop = opt$nhit,
+                                  topVars=opt$topVars,
+                                  loopVal=V,
+                                  excluded=exclusion,
+                                  groupvar=opt$sortVar)
   )
 }
