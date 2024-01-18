@@ -1,0 +1,275 @@
+---
+title: "GSEA"
+author: "Kimon"
+date: "10/14/2022"
+output:
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_float:
+      collapsed: false
+params:
+  selfname: "gsea.html"
+  resultsDir: "./results/GSEA"
+  gsdb: "/Volumes/groups/busslinger/Bioinf/src/cbe/broad/msigdb_v7.5.1_files_to_download_locally/msigdb_v7.5.1_GMTs/c5.go.mf.v7.5.1.symbols.gmt"
+  xorg: "/Volumes/groups/busslinger/Bioinf/src/cbe/broad/Mouse_Gene_Symbol_Remapping_Human_Orthologs_MSigDB.v7.5.1.chip"
+  de: '/Volumes/groups/busslinger/Kimon/tanja/R13870_RNAseq_timecourse/results/DE/exon_genecounts.CellType_actB.Condition_Ikaros_00_5phIAA_vs_Aiolos_00_5phIAA.deseq2.nolab.spotfire.txt'
+  alpha: 0.05
+  fx: "log2FoldChange"
+  p: NULL
+  pcut: 0.05
+---
+
+# Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(fgsea)
+library(grid)
+library(ggplot2)
+library(data.table)
+
+
+message(paste("DE file:", params$de))
+message(paste("Gene-set file:", params$gsdb))
+message(paste("Alpha:", params$alpha))
+message(paste("Ranking values:", params$fx))
+```
+
+
+
+```{r prepare}
+# Import gene sets
+GSDB <- fgsea::gmtPathways(params$gsdb)
+
+
+# DESeq2 data (with shrunken LFCs)
+DE <- fread(params$de)
+DE <- DE[!is.na(DE[[params$fx]]), ]
+if (!is.null(params$p))
+	DE <- DE[!is.na(DE[[params$p]]) & DE[[params$p]] < params$pcut, ]
+setorderv(DE, cols=params$fx, order=-1)
+genes.rnk <- DE[[params$fx]]
+
+message(paste("Number of genes:", length(genes.rnk)))
+
+if (!is.null(params$xorg)) {
+	# Convert gene names to species orthologs
+	XREF <- fread(params$xorg)
+	setnames(XREF, old=names(XREF)[1:2], new=c('from', 'to'))
+	setkey(XREF, from)
+	names(genes.rnk) <- XREF[DE$name, to]
+	names(genes.rnk)[is.na(names(genes.rnk))] <- DE$name[is.na(names(genes.rnk))]
+} else {
+	names(genes.rnk) <- DE$name
+}
+```
+
+
+# GSEA
+
+Genes are ordered and ranked by shrunken log-fold-change. Genes that are at a tie (same shrunken LFC) will be ranked in arbitrary order, which may affect the order of some gene-sets relative to one another.
+
+```{r gsea, warning=FALSE}
+# Wrapper for {fgsea}, https://bioinformaticsbreakdown.com/how-to-gsea/
+GSEA = function(gene_list, myGO, pval=params$alpha) {
+	set.seed(54321)
+	library(dplyr)
+	library(fgsea)
+	
+	if ( any( duplicated(names(gene_list)) )  ) {
+		warning("Duplicates in gene names")
+		gene_list = gene_list[!duplicated(names(gene_list))]
+	}
+	if  ( !all( order(gene_list, decreasing = TRUE) == 1:length(gene_list)) ){
+		warning("Gene list not sorted")
+		gene_list = sort(gene_list, decreasing = TRUE)
+	}
+	
+	fgRes <- fgsea::fgsea(pathways = myGO,
+												stats = gene_list,
+												minSize=15, ## minimum gene set size
+												maxSize=400 ) %>% # , ## maximum gene set size
+												# nperm=10000) %>%
+		as.data.frame() %>% 
+		dplyr::filter(padj < !!pval) %>% 
+		arrange(desc(NES))
+	message(paste("Number of signficant gene sets =", nrow(fgRes)))
+	
+	message("Collapsing Pathways -----")
+	concise_pathways = collapsePathways(data.table::as.data.table(fgRes),
+																			pathways = myGO,
+																			stats = gene_list)
+	fgRes = fgRes[fgRes$pathway %in% concise_pathways$mainPathways, ]
+	message(paste("Number of gene sets after collapsing =", nrow(fgRes)))
+	
+	fgRes$Enrichment = ifelse(fgRes$NES > 0, "Up-regulated", "Down-regulated")
+	filtRes = rbind(head(fgRes, n = 10),
+									tail(fgRes, n = 10 ))
+	
+	total_up = sum(fgRes$Enrichment == "Up-regulated")
+	total_down = sum(fgRes$Enrichment == "Down-regulated")
+	header = paste0("Top 10 (Total pathways: Up=", total_up,", Down=",    total_down, ")")
+	
+	colos = setNames(c("firebrick2", "dodgerblue2"),
+									 c("Up-regulated", "Down-regulated"))
+	
+	g1= ggplot(filtRes, aes(reorder(pathway, NES), NES)) +
+		geom_point( aes(fill = Enrichment, size = size), shape=21) +
+		scale_fill_manual(values = colos ) +
+		scale_size_continuous(range = c(2,10)) +
+		geom_hline(yintercept = 0) +
+		coord_flip() +
+		labs(x="Pathway", y="Normalized Enrichment Score",
+				 title=header)
+	
+	output = list("Results" = fgRes, "Plot" = g1)
+	return(output)
+}
+
+
+# GSEA
+res <- GSEA(genes.rnk, GSDB)
+res$Results <- as.data.table(res$Results)
+```
+
+## Top gene sets
+
+Top 10 each enriched and depleted gene-sets.
+
+```{r sets, fig.height=10, fig.width=10}
+print(res$Plot)
+```
+
+## Clustering of overlapping gene sets
+
+Cluster gene-sets based on shared genes.
+
+```{r clusters}
+# Cluster gene sets, https://bioinformaticsbreakdown.com/how-to-gsea/
+plot_geneset_clusters = function(gs_results, myGO, min.sz = 4, main="GSEA clusters"){
+	library(ggplot2)
+	library(ggrepel)
+	library(stringr)
+	
+	df = matrix(nrow=nrow(gs_results), ncol = nrow(gs_results), data = 0)
+	rownames(df) = colnames(df) = gs_results$pathway
+	
+	for ( i in 1:nrow(gs_results)) {
+		genesI =  unlist(myGO[names(myGO) == gs_results$pathway[i] ])
+		for (j in 1:nrow(gs_results)) {
+			genesJ = unlist(myGO[names(myGO) == gs_results$pathway[j] ])
+			## Jaccards distance  1 - (intersection / union )
+			overlap = sum(!is.na(match(genesI, genesJ )))
+			jaccards = overlap / length(unique(c(genesI, genesJ) ))
+			df[i,j] = 1-jaccards
+		}
+	}
+	
+	## Cluster nodes using dynamic tree cut, for colors
+	distMat = as.dist(df)
+	dendro = hclust(distMat, method = "average" )
+	clust = dynamicTreeCut::cutreeDynamicTree( dendro, minModuleSize = min.sz )
+	## Note: in dynamicTreeCut, cluster 0, is a garbage cluster for things that dont cluster, so we remove it
+	gs_results$Cluster = clust
+	gs_results = gs_results[gs_results$Cluster != 0, ]
+	
+	## select gene sets to label for each clusters
+	bests = gs_results %>%  
+		group_by( Cluster ) %>% 
+		top_n(wt = abs(size), n = 1) %>% 
+		.$pathway
+	## determine cluster order for plotting
+	clust_ords = gs_results %>% 
+		group_by( Cluster ) %>% 
+		summarise("Average" = NES ) %>% 
+		arrange(desc(Average)) %>% 
+		.$Cluster %>% 
+		unique
+	
+	gs_results$Cluster = factor(gs_results$Cluster, levels = clust_ords)
+	
+	gs_results$Label = ""
+	gs_results$Label[gs_results$pathway %in% bests ] = gs_results$pathway[gs_results$pathway %in% bests ]
+	gs_results$Label = str_remove(gs_results$Label, "GO_")
+	gs_results$Label = tolower(gs_results$Label)
+	
+	g1 = ggplot(gs_results, aes(x = Cluster, y = NES, label = Label )) +
+		geom_jitter( aes(color = Cluster,  size = size), alpha = 0.8, height = 0, width = 0.2 ) +
+		scale_size_continuous(range = c(0.5,5)) +
+		geom_text_repel( force = 2, max.overlaps = Inf) +
+		ggtitle(main)
+	
+	return(g1)
+}
+
+
+print( plot_geneset_clusters( gs_results = res$Results[res$Results$NES > 0, ], GSDB,
+											 main = "Up-regulated GSEA clusters (min 4)",
+											 min.sz = min(4, nrow(res$Results[res$Results$NES > 0, ]) - 1) ) )
+
+print( plot_geneset_clusters( gs_results = res$Results[res$Results$NES > 0, ], GSDB,
+											 main = "Up-regulated GSEA clusters (min 2)",
+											 min.sz = min(2, nrow(res$Results[res$Results$NES > 0, ]) - 1) ) )
+
+
+print( plot_geneset_clusters( gs_results = res$Results[res$Results$NES < 0, ], GSDB,
+											 main = "Down-regulated GSEA clusters (min 4)",
+											 min.sz = min(4, nrow(res$Results[res$Results$NES < 0, ]) - 1) ) )
+
+print( plot_geneset_clusters( gs_results = res$Results[res$Results$NES < 0, ], GSDB,
+											 main = "Down-regulated GSEA clusters (min 2)",
+											 min.sz = min(2, nrow(res$Results[res$Results$NES < 0, ]) - 1) ) )
+```
+
+## Gene ranks in the top gene-sets
+
+### All enriched sets
+
+```{r ranks1, fig.height=15, fig.width=10}
+# Table of enrichment plots
+topPathwaysUp <- res$Results[ES > 0, ][head(order(pval), n=25), pathway]
+topPathwaysDown <- res$Results[ES < 0, ][head(order(pval), n=25), pathway]
+topPathways <- c(topPathwaysUp, rev(topPathwaysDown))
+
+grid.newpage(); par(mfg=c(1,1)) # Prevent overlay with whatever previous plot
+print( plotGseaTable(GSDB[topPathways], genes.rnk, res$Results, gseaParam=0.5) )
+```
+
+<!-- ### Collapsed overlaps -->
+
+<!-- ```{r ranks2, fig.height=10} -->
+<!-- # Select only independent pathways -->
+<!-- collapsedPathways <- collapsePathways(res$Results[order(pval)][padj < 0.01], GSDB, genes.rnk) -->
+<!-- mainPathways <- res$Results[pathway %in% collapsedPathways$mainPathways][order(-NES), pathway] -->
+
+<!-- grid.newpage(); par(mfg=c(1,1)) # Prevent overlay with whatever previous plot -->
+<!-- print( plotGseaTable(GSDB[mainPathways], genes.rnk, res$Results, gseaParam = 0.3) ) -->
+<!-- ``` -->
+
+### Enrichment per set
+
+```{r ranks3, fig.height=2.5, fig.width=8}
+for(gs in res$Results$pathway) {
+	# Enrichment plot of one cluster
+	print( plotEnrichment(GSDB[[gs]], genes.rnk) + 
+				 	labs(title=gs) )
+}
+```
+
+
+# File out
+
+```{r out}
+fwrite(res$Results, file=file.path(params$resultsDir, sub('html$', 'txt', params$selfname)))
+```
+
+
+# Session info
+
+```{r}
+sessionInfo()
+```
+
+
