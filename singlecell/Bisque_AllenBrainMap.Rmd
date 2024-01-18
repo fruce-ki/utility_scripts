@@ -1,0 +1,305 @@
+---
+title: "Deconvolution - Bisque & Allen Brain Map"
+author: "Kimon Froussios"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document: 
+    code_folding: hide
+    toc: yes
+    toc_float:
+      collapsed: no
+    fig_width: 10
+    fig_height: 6
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+if (!require("data.table", quietly = TRUE))
+  install.packages("data.table")
+library(data.table)
+
+if (!require("biomaRt", quietly = TRUE))
+  BiocManager::install("biomaRt")
+library(biomaRt)
+
+if (!require("AnnotationHub", quietly = TRUE))
+  BiocManager::install("AnnotationHub")
+library(AnnotationHub)
+
+if (!require("ensembldb", quietly = TRUE))
+  BiocManager::install("ensembldb")
+require(ensembldb)
+
+if (!require("Biobase", quietly = TRUE))
+  BiocManager::install("Biobase")
+library(Biobase)
+
+if (!require("BisqueRNA", quietly = TRUE))
+  BiocManager::install("BisqueRNA")
+library(BisqueRNA)
+
+if (!require("DT", quietly = TRUE))
+  install.packages("DT")
+library(DT)
+
+if(!require("ggplot2", quietly = TRUE))
+  install.packages("ggplot2")
+library(ggplot2)
+
+options(mc.cores=1)
+BiocParallel::register(BiocParallel::MulticoreParam(4))
+
+### Rounding to any precision
+mround <- function(x, base){
+  base*round(x/base, digits = 0)
+}
+
+barplotify <- function(x){
+  rn <- rownames(x)
+  DT <- as.data.table(x)
+  DT[, rowid := rn]
+  categories <- names(DT)[1:(ncol(DT) - 1)]
+  
+  for (category in categories) {
+    # category <- types[1]
+    print(
+      ggplot(DT, 
+             aes(x = rowid, y = .data[[category]])) +
+        geom_bar(stat = "identity") +
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+    )
+  }
+}
+```
+
+# Input
+
+```{r input_nlt}
+# Annotated with Ensembl 94
+bulk_mtx <- fread("/DROPBOX/Neurolentech Dropbox/NEUROLENTECH/BIOINFORMATICS/RNA_sequencing/Other_Analyses/Batches_1.2.3_Decompositions_Correlations/data/Neurolentech/tesslinz.salmon.merged.gene_tpm.tsv")
+bulk_meta <- fread("/DROPBOX/Neurolentech Dropbox/NEUROLENTECH/BIOINFORMATICS/RNA_sequencing/Other_Analyses/Batches_1.2.3_Decompositions_Correlations/data/Neurolentech/samplesheet_tesslinz.differentialabundance.csv")
+
+# Tidy up
+bulk_genes <- bulk_mtx[, .(gene_id, gene_name)]
+bulk_mtx <- as.matrix(bulk_mtx[, 3:ncol(bulk_mtx), with=FALSE])
+rownames(bulk_mtx) <- bulk_genes$gene_id
+
+cat("# of genes in bulk:", length(bulk_genes$gene_name), "unique:", length(unique(bulk_genes$gene_name)), "\n")
+cat("# of IDs in bulk:", length(bulk_genes$gene_id), "unique:", length(unique(bulk_genes$gene_id)), "\n")
+# So, different IDs, same names.
+bulk_duplicates <- bulk_genes[duplicated(gene_name), .(gene_name, gene_id)]
+```
+
+There are duplicated gene symbols in the bulk data, but they have unique Ensembl IDs. Not sure what to think of that, but the SC data only provides gene symbols, and a one-to-many relationship is a problem for matching up data between the datasets.
+
+```{r input_sc}
+cell_mtx <- fread("/DROPBOX/Neurolentech Dropbox/NEUROLENTECH/BIOINFORMATICS/RNA_sequencing/Other_Analyses/Batches_1.2.3_Decompositions_Correlations/data/SC_PMC6906116/allen_brain_map_human_cortex/exprMatrix.tsv.gz.tmp")
+cell_meta <- fread("/DROPBOX/Neurolentech Dropbox/NEUROLENTECH/BIOINFORMATICS/RNA_sequencing/Other_Analyses/Batches_1.2.3_Decompositions_Correlations/data/SC_PMC6906116/allen_brain_map_human_cortex/meta.tsv")
+
+cell_genes <- cell_mtx$gene
+cells <- colnames(cell_mtx)[2:ncol(cell_mtx)]
+
+cell_mtx <- as.matrix(cell_mtx[, 2:ncol(cell_mtx), with = FALSE])
+rownames(cell_mtx) <- cell_genes
+
+cat("Cells in the expression matrix that are not in the metadata:", sum(! cells %in% cell_meta$sample_name), "\n")
+cat("Cells in the metadata that are not in the matrix:", sum(! cell_meta$sample_name %in% cells), "\n")
+
+stopifnot(all(cells == cell_meta$Cell))
+```
+
+```{r input_sanity}
+cat("# of genes in SC:", length(cell_genes), "unique:", length(unique(cell_genes)), "\n" )
+cat("SC genes that match in the bulk gene symbols", sum(cell_genes %in% bulk_genes$gene_name), "\n")
+cat("SC genes that match in the bulk gene IDs", sum(cell_genes %in% bulk_genes$gene_id), "\n")
+cat("SC genes that are in the duplicated bulk gene symbols", sum(cell_genes %in% bulk_duplicates$gene_name))
+
+cat("Summary of potential variables to use:\n")
+cat("class_label & region_label\n")
+print(knitr::kable(table(as.character(cell_meta$class_label), cell_meta$region_label)))
+cat("subclass_label & region_label\n")
+print(knitr::kable(table(as.character(cell_meta$subclass_label), cell_meta$region_label)))
+cat("subclass_label & class_label\n")
+print(knitr::kable(table(as.character(cell_meta$subclass_label), cell_meta$class_label)))
+```
+
+```{r db_lookup}
+# From symbols to IDs
+# Way #1
+mart <- useEnsembl("ensembl", "hsapiens_gene_ensembl")
+# listAttributes(mart)
+# listFilters(mart)
+generef1 <- getBM(attributes = c("ensembl_gene_id", "external_gene_name"),
+								 filters = "external_gene_name",
+								 values = cell_genes,
+								 mart = mart)
+cat("Collecting name-ID info from current mart. Found", nrow(generef1), "genes\n")
+names(generef1) <- c("GENEID", "GENENAME")
+cat("Mart info contains duplicate IDs with conflicting names:", sum(duplicated(generef1$GENEID)), "\n")
+cat("Mart info contains duplicate names with conflicting IDs:", sum(duplicated(generef1$GENENAME)), "\n")
+
+# Way #2
+hub <- AnnotationHub()
+# query(hub, c("homo sapiens","ensdb"))
+ensdb <- hub[["AH53211"]]  # Ensembl 87. GRCh38.p2 is not available in the archive. GRCh38.p7/Ensembl87 is the closest.
+generef2 <- select(ensdb, cell_genes, "GENEID", "GENENAME")
+cat("Collecting name-ID info from archived database. Found", nrow(generef2), "genes\n")
+cat("DB info contains duplicate IDs with conflicting names:", sum(duplicated(generef2$GENEID)), "\n")
+cat("DB info contains duplicate names with conflicting IDs:", sum(duplicated(generef2$GENENAME)), "\n")
+
+ref <- unique(as.data.table(rbind(generef1[, c("GENENAME", "GENEID")], generef2[, c("GENENAME", "GENEID")])))
+cat("Combined info:", nrow(ref), "genes\n")
+cat("Combined info contains duplicate IDs with conflicting names:", sum(duplicated(ref$GENEID)), "\n")
+cat("Combined info contains duplicate names with conflicting IDs:", sum(duplicated(ref$GENENAME)), "\n")
+
+ref <- ref[! GENEID %in% ref[duplicated(ref$GENEID) | duplicated(ref$GENENAME), GENEID], ]
+cat("Combined info after removal of ambiguous name-ID mappings:", nrow(ref), "\n")
+
+# X-ref and apply
+cat("SC genes that can be cross-referenced in the database info:", sum(cell_genes %in% ref$GENENAME), "\n")
+cat("Bulk genes that can be cross-referenced in the database info:", sum(bulk_genes$gene_id %in% ref$GENEID), "\n")
+setkey(ref, GENENAME)
+cell_mtx <- cell_mtx[rownames(cell_mtx) %in% ref$GENENAME, ]
+rownames(cell_mtx) <- ref[rownames(cell_mtx), GENEID]
+cell_genes <- rownames(cell_mtx)
+```
+
+```{r match_up}
+# Match genes across datasets
+isect_genes <- intersect(rownames(bulk_mtx),rownames(cell_mtx))
+stopifnot(all(isect_genes %in% rownames(bulk_mtx)))
+stopifnot(all(isect_genes %in% rownames(cell_mtx)))
+cat("Genes matched across both datasets:", length(isect_genes), "\n")
+
+bulk_mtx <- bulk_mtx[isect_genes, ]
+cell_mtx <- cell_mtx[isect_genes, ]
+#bulk_genes <- rownames(bulk_mtx)
+#cell_genes <- rownames(cell_mtx)
+
+cell_problems <- colSums(cell_mtx) == 0 | apply(cell_mtx, MARGIN=2, function(col){any(!is.finite(col))})
+cat("Cells with no expression recorded for any of the remaining genes, or cells with undefined values:", sum(cell_problems), "\n")
+
+if (any(cell_problems)) {
+	cell_mtx <- cell_mtx[, !cell_problems]
+	cell_meta <- cell_meta[Cell %in% colnames(cell_mtx)]
+}
+```
+
+Problematic cells will be removed.
+
+# Reference-based decomposition
+
+```{r bulk_convert}
+# Convert to ExpressionSet for Bisque
+bulk_exset <- Biobase::ExpressionSet(assayData = bulk_mtx)
+rm(bulk_mtx)
+```
+
+## "region_label"
+
+```{r cell_convert1}
+sc_pdata <- new("AnnotatedDataFrame",
+                data = data.frame(check.names=FALSE, check.rows=FALSE, stringsAsFactors=FALSE,
+                									row.names = cell_meta$sample_name,
+                									SubjectName = cell_meta$external_donor_name_label,
+                									cellType = cell_meta$region_label),
+                varMetadata = data.frame(labelDescription=c("SubjectName", "cellType"),
+                											 row.names=c("SubjectName", "cellType")) )
+
+cell_exset <- Biobase::ExpressionSet(assayData = cell_mtx, phenoData = sc_pdata)
+
+gc()
+```
+
+```{r decomposition1}
+res <- BisqueRNA::ReferenceBasedDecomposition(bulk_exset, cell_exset, 
+																							markers = NULL, # use all available genes
+																							use.overlap = FALSE) # no shared samples between bulk & SC
+
+compositions <- t(res$bulk.props)
+
+rm(res)
+gc()
+
+fwrite(as.data.frame(compositions, 0.01), 
+			 file = "/DROPBOX/Neurolentech Dropbox/NEUROLENTECH/BIOINFORMATICS/RNA_sequencing/Other_Analyses/Batches_1.2.3_Decompositions_Correlations/output/Bisque_AllenBrainMap_compositions_region.tsv", 
+			 quote = FALSE, sep = "\t", col.names = TRUE, row.names = TRUE)
+```
+
+```{r plot1, fig.height=6, fig.width=10}
+barplotify(compositions)
+```
+
+## "class_label"
+
+```{r cell_convert2}
+sc_pdata <- new("AnnotatedDataFrame",
+                data = data.frame(check.names=FALSE, check.rows=FALSE, stringsAsFactors=FALSE,
+                									row.names = cell_meta$sample_name,
+                									SubjectName = cell_meta$external_donor_name_label,
+                									cellType = cell_meta$class_label),
+								varMetadata = data.frame(labelDescription=c("SubjectName", "cellType"),
+                											 row.names=c("SubjectName", "cellType")) )
+
+cell_exset <- Biobase::ExpressionSet(assayData = cell_mtx, phenoData = sc_pdata)
+
+gc()
+```
+
+```{r decomposition2}
+res <- BisqueRNA::ReferenceBasedDecomposition(bulk_exset, cell_exset, 
+																							markers = NULL, # use all available genes
+																							use.overlap = FALSE) # no shared samples between bulk & SC
+
+compositions <- t(res$bulk.props)
+
+rm(res)
+gc()
+
+fwrite(as.data.frame(compositions), 
+			 file = "/DROPBOX/Neurolentech Dropbox/NEUROLENTECH/BIOINFORMATICS/RNA_sequencing/Other_Analyses/Batches_1.2.3_Decompositions_Correlations/output/Bisque_AllenBrainMap_compositions_class.tsv", 
+			 quote = FALSE, sep = "\t", col.names = TRUE, row.names = TRUE)
+```
+
+```{r plot2, fig.height=6, fig.width=10}
+barplotify(compositions)
+```
+
+## "subclass_label"
+
+```{r cell_convert3}
+sc_pdata <- new("AnnotatedDataFrame",
+                data = data.frame(check.names=FALSE, check.rows=FALSE, stringsAsFactors=FALSE,
+                									row.names = cell_meta$sample_name,
+                									SubjectName = cell_meta$external_donor_name_label,
+                									cellType = cell_meta$subclass_label),
+                varMetadata = data.frame(labelDescription=c("SubjectName", "cellType"),
+                											 row.names=c("SubjectName", "cellType")) )
+
+cell_exset <- Biobase::ExpressionSet(assayData = cell_mtx, phenoData = sc_pdata)
+
+gc()
+```
+
+```{r decomposition3}
+res <- BisqueRNA::ReferenceBasedDecomposition(bulk_exset, cell_exset, 
+																							markers = NULL, # use all available genes
+																							use.overlap = FALSE) # no shared samples between bulk & SC
+
+compositions <- t(res$bulk.props)
+
+rm(res)
+gc()
+
+fwrite(as.data.frame(compositions), 
+			 file = "/DROPBOX/Neurolentech Dropbox/NEUROLENTECH/BIOINFORMATICS/RNA_sequencing/Other_Analyses/Batches_1.2.3_Decompositions_Correlations/output/Bisque_AllenBrainMap_compositions_subclass.tsv", 
+			 quote = FALSE, sep = "\t", col.names = TRUE, row.names = TRUE)
+```
+
+```{r plot3, fig.height=6, fig.width=10}
+barplotify(compositions)
+```
