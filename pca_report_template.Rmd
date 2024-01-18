@@ -154,8 +154,8 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   
 
   # Text colour switch for the dynamic range
-  m <- min(cormat4$Correlation, na.rm=TRUE)
-  M <- max(cormat4$Correlation, na.rm=TRUE)
+  m <- min(cormat_ctv$Correlation, na.rm=TRUE)
+  M <- max(cormat_ctv$Correlation, na.rm=TRUE)
   colourswitch <- c( m + 0.49 * (M-m),  m + 0.51 * (M-m) )
   
   
@@ -296,13 +296,13 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     # geom_violin()+ #(draw_quantiles = c(0.25, 0.5, 0.75)) +
     geom_boxplot(outlier.alpha = 0, width = 0.5, fill = 'grey95', colour = 'black') +
     # geom_jitter(width = 0, height = 0.2) +
-    geom_beeswarm(groupOnX = FALSE) +
+    geom_beeswarm() +
     # scale_x_continuous(limits = c(-1, 1)) +
     scale_colour_brewer(palette = 'Set1') +
     labs(title = paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Summary"), x = "Pairwise Correlation", y = "Pairs") +
     theme(legend.position = 'none')
     
-  out <- list(corr=dcast(cormat2, observation1 ~ observation2, value.var = "Correlation"),
+  out <- list(corr=dcast(cormat_t, observation1 ~ observation2, value.var = "Correlation"),
               sonf=p_sonf, #sond=p_sond,
               sovf=p_sovf, #sovd=p_sovd,
               scnf=pd + p_scnf + plot_layout(ncol=2, widths=c(1,4)), #scnd=pd + p_scnd + plot_layout(ncol=2, widths=c(1,4)),
@@ -549,18 +549,9 @@ if (!is.data.frame(params$covars)) {
   covars <- params$covars
 }
 
-if (!is.null(params$groupvar))
-  setorderv(covars, c(params$groupvar, 'sample'))
-
-# Samples
-if ('use' %in% names(covars)) {
-  covars <- covars[as.logical(use), ]
-}
-samples <- covars$sample
-
 # Grouping
 setkey(covars, sample)
-G <- as.data.table(expand.grid(samples, samples))
+G <- as.data.table(expand.grid(covars$sample, covars$sample))
 setnames(G, c('observation1','observation2'))
 
 G[, observation1 := as.character(observation1)]
@@ -575,6 +566,10 @@ if (!is.null(params$groupvar)) {
   G[, group := 'NA']
 }
 
+# Samples
+if (!is.null(params$groupvar))
+  setorderv(covars, c(params$groupvar, 'sample'))
+samples <- covars[as.logical(use), sample]
 
 datatable(params$covars)
 ```
@@ -582,7 +577,7 @@ datatable(params$covars)
 
 # Filter
 
-Genes with mean raw count across all samples below `r params$minMean` are excluded, unless any of the samples has raw count of at least `r params$minSingle`. For PCA, all genes are given equal weight, but low expression genes are proportionally more variable, so filtering them in advance reduces noise.
+Genes with mean count across all samples below `r params$minMean` are excluded. For PCA, all genes are given equal weight, but low expression genes are proportionally more variable, so filtering them in advance reduces noise.
 
 ```{r filter}
 # All genes above the count thresholds
@@ -590,8 +585,8 @@ Genes with mean raw count across all samples below `r params$minMean` are exclud
 message(paste("Using features that exceed", params$minMean, "mean count across samples."))
 n <- nrow(counts)
 # topgenes <- rownames(counts)[(rowMeans(counts) >= params$minMean) | (rowSums(counts >= params$minSingle) > 0)]
-topgenes <- rownames(counts)[(rowMeans(counts) >= params$minMean)]
-message(paste(n - length(topgenes), "features discarded, out of", n))
+topgenes <- rownames(counts)[(rowSums(counts[, samples]) > 0) & (rowMeans(counts[, samples]) >= params$minMean)]
+message(length(topgenes), " features are expressed in at least one sample and meet the count threshold, out of ", n)
 
 # Genes to exclude from PCA.
 if (!is.null(params$excluded)) {
@@ -600,25 +595,25 @@ if (!is.null(params$excluded)) {
   message(paste("Additionally excluding", n - length(topgenes), "listed features."))
 }
 
-
 # Further reduce the above genes to the top most dispersed, as in DESeq2
-cv <- sort(rowSds(counts[topgenes, ]) / rowMeans(counts[topgenes, ]), decreasing = TRUE, na.last = TRUE)   # coefficient of variation
+cv <- sort(rowSds(log10(counts[topgenes, samples])) / rowMeans(log10(counts[topgenes, samples])), decreasing = TRUE, na.last = TRUE)   # coefficient of variation
 topgenes2 <- names(head(cv, n=params$topVars))
 
 
 # Make it obvious which genes in the TPM-StDev plot were excluded due to low count.
 # lowcnt <- rownames(counts)[(rowMeans(counts) < params$minMean) | (rowSums(counts >= params$minSingle) == 0)]
-lowcnt <- rownames(counts)[(rowMeans(counts) < params$minMean)]
+lowcnt <- rownames(counts)[(rowMeans(counts[, samples]) < params$minMean) | (rowSums(counts[, samples]) == 0)]
 ```
 
-Padding of zeroes, for the purpose of log-scaling, was done with a value smaller than any non-zero value.
+Padding of zeroes, for the purpose of log-scaling, is done with a value smaller than any non-zero value.
 
 ```{r pad}
 # Pad zeros, so I can correlate the log abundance, which is more linear than the plain abundance.
-pad <- min(counts[counts > 0], na.rm = TRUE) / 5
-message('Padding counts by ', pad, ' to enable log-scaling.')
-counts <- counts + pad
+pad <- min(counts[counts > 0], na.rm = TRUE) / 10
+message('Padding zeros by ', pad, ' to enable log-scaling.')
+counts[counts == 0] <- counts[counts == 0] + pad
 ```
+
 
 # Correlations
 
@@ -626,18 +621,19 @@ The *Pearson* correlation coefficient between samples X and Y measures how much 
 
 The *Spearman* correlation coefficient does the same for the rank of the observations instead of their values. Perfect SCC is any monotonic line between X and Y values (straight, curved, or zigzag).
 
-Using log-scaled normalised expression values.
+Using log-scaled counts.
+
 
 ## All eligible features
 
 Correlations based on all the genes that meet the count and name criteria. The analysis is performed on the log-transformed padded counts.
 
 ```{r corr, fig.height=8, fig.width=10}
-corelsP <- my_pairwise_internal_corels(log10(counts[topgenes,]), samples, method="pearson", groups = G,
+corelsP <- my_pairwise_internal_corels(log10(counts[topgenes, samples]), samples, method="pearson", groups = G,
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,   # prefiltered
                                       rds = file.path(params$outdir, 
                                                              sub(".txt|.tsv", paste0("_", params$loopval, "_corrP.RDS"), basename(params$name))) )
-corelsS <- my_pairwise_internal_corels(log10(counts[topgenes, ]), samples, method="spearman", groups = G,
+corelsS <- my_pairwise_internal_corels(log10(counts[topgenes, samples]), samples, method="spearman", groups = G,
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,     # prefiltered
                                       rds = file.path(params$outdir,
                                                              sub(".txt|.tsv", paste0("_", params$loopval, "_corrS.RDS"), basename(params$name))) )
@@ -662,11 +658,11 @@ print( corelsS[['scvf']] )
 Correlations using the top `r params$topVars` dispersed genes (out of those already filtered).
 
 ```{r corrb, fig.height=8, fig.width=10}
-corelsPb <- my_pairwise_internal_corels(log10(counts[topgenes2, ]), samples, method="pearson", groups = G,
+corelsPb <- my_pairwise_internal_corels(log10(counts[topgenes2, samples]), samples, method="pearson", groups = G,
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,   # prefiltered
                                       rds = file.path(params$outdir,
                                                       sub(".txt|.tsv", paste0("_", params$loopval, "_corrPtop.RDS"), basename(params$name))) )
-corelsSb <- my_pairwise_internal_corels(log10(counts[topgenes2, ]), samples, method="spearman", groups = G,
+corelsSb <- my_pairwise_internal_corels(log10(counts[topgenes2, samples]), samples, method="spearman", groups = G,
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,    # prefiltered
                                       rds = file.path(params$outdir,
                                                       sub(".txt|.tsv", paste0("_", params$loopval, "_corrStop.RDS"), basename(params$name))) )
@@ -675,7 +671,7 @@ print( corelsPb[['bee']] )
 print( corelsSb[['bee']] )
 ```
 
-```{r corr1, fig.height=15, fig.width=15}
+```{r corr1b, fig.height=15, fig.width=15}
 print( corelsPb[['sovf']] )
 print( corelsSb[['sovf']] )
 ```
@@ -695,7 +691,7 @@ For this, the log-scaled expression of the features is further standardized. Thi
 PCA based on all genes that meet the count thresholds. The analysis is performed on the log-transformed padded counts.
 
 ```{r pca}
-all_pca <- do_pca(log10(counts), covars, ntop = params$ntop,
+all_pca <- do_pca(log10(counts[, samples]), covars, ntop = params$ntop,
                   topgenes= topgenes, exclude=lowcnt,
                   minMean = 0, minSingle = 0,      # prefiltered
                   rds = file.path(params$outdir,
@@ -750,7 +746,7 @@ print( all_pca$pc2d )
 PCA using the top `r params$topVars` dispersed genes (out of those that already meet the count thresholds).
 
 ```{r pcab}
-all_pcab <- do_pca(log10(counts), covars, ntop = params$ntop,
+all_pcab <- do_pca(log10(counts[, samples]), covars, ntop = params$ntop,
                   topgenes= topgenes2, exclude=lowcnt,
                   minMean = 0, minSingle = 0,      # prefiltered
                   rds = file.path(params$outdir,
@@ -801,17 +797,12 @@ print( all_pcab$pc2d )
 
 
 
-
-
-
-
-
 # Write plots to PDF
 
 ```{r pdf}
 ## Plots to PDF ##
 pdf(file.path(params$outdir,
-              sub(".txt|.tsv", "_pca.pdf", basename(params$name))),
+              sub("txt|tsv", paste0(params$loopVal, ".pca.pdf"), basename(params$name))),
     width=max(12, ceiling(nrow(params$covars) / 3)), height=max(12, ceiling(nrow(params$covars) / 3))) # Scale up when many samples, but don't scale down when few.
 
 # Correlation plots

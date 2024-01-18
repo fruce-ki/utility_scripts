@@ -23,8 +23,8 @@ spec = matrix(c(
 
 opt <- getopt(spec)
 
-# opt <- list(baseDir="/SCRATCH/PP2023011_SLC13A5", countsFile="tesslinz.salmon.merged.gene_tpm.tsv", samplesFile="samplesheet_tesslinz.differentialabundance.csv", resultsDir="tesslinz_diffex/PCA", sortVar = 'time', idcol=1, nidcols=2, minMean=5, minSingle=20, reportTemplate="~/utility_scripts/pca_report_template.Rmd")
-# opt <- list(baseDir="C:/Users/jack_/Downloads/", countsFile="tesslinz.salmon.merged.gene_tpm.tsv", samplesFile="samplesheet_tesslinz.differentialabundance.csv", resultsDir="tesslinz_diffex/PCA", sortVar = 'time', idcol=1, nidcols=2, minMean=5, minSingle=20, reportTemplate="D:/Documents/GitHub/utility_scripts/pca_report_template.Rmd")
+# opt <- list(baseDir="/SCRATCH/PP2023011_SLC13A5", countsFile="tesslinz.salmon.merged.gene_tpm.tsv", samplesFile="samplesheet_tesslinz.differentialabundance.csv", resultsDir="tesslinz_diffex/PCA", sortVar = 'time', idcol=1, nidcols=2, minMean=5)
+# opt <- list(baseDir="C:/Users/jack_/Downloads/", countsFile="tesslinz.salmon.merged.gene_tpm.tsv", samplesFile="samplesheet_tesslinz.differentialabundance.csv", resultsDir="tesslinz_diffex/PCA", sortVar = 'time', idcol=1, nidcols=2, minMean=5, reportTemplate="D:/Documents/GitHub/utility_scripts/pca_report_template.Rmd")
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -32,7 +32,7 @@ if ( !is.null(opt$help) ) {
 }
 
 if ( is.null(opt$reportTemplate) ) {
-  opt$reportFile <- '~/utility_scripts/pca_report_template.Rmd'
+  opt$reportTemplate <- '~/utility_scripts/pca_report_template.Rmd'
 }
 
 stopifnot(!is.null(opt$baseDir))
@@ -86,6 +86,7 @@ names(subcovars)[1] <- 'default'
 
 for (V in names(subcovars)){
   # V <- names(subcovars)[1]
+  print(V)
 
   # Fire up the Rmd report
   rmarkdown::render(opt$reportTemplate,
@@ -106,3 +107,4 @@ for (V in names(subcovars)){
                                   groupvar=opt$sortVar)
   )
 }
+
