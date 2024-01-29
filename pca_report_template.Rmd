@@ -24,6 +24,7 @@ params:
   loopVal: "default"                  # default = no looping
   excluded: NULL                      # Features not to be included in PCA
   groupvar: NULL                      # Variable in covars by which to summarise the correlations
+  onlyUsable: FALSE                   # Only include the samples defined in the 'use' variable
 ---
 
 \VignetteEngine{knitr::knitr}
@@ -520,12 +521,13 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
 # Input
 
 ```{r parameters}
-message(paste("Name:", params$name))
-message(paste("Minimum mean count across samples:", params$minMean))
+message("Name: ", params$name)
+message("Minimum mean count across samples: ", params$minMean)
 # message(paste("Minimum count in a single sample, if the minimum mean is not met:", params$minSingle))
-message(paste("Number of features to report per Principle Component:", params$ntop))
-message(paste("Genes to exclude from library size calculations and PCA:", params$specnorm))
-message(paste("Number of top dispersed genes to use for correlation and PCA:", ifelse(is.null(params$topVars),'all that meet the count thresholds', params$topVars)))
+message("Number of features to report per Principle Component: ", params$ntop)
+message("Genes to exclude from library size calculations and PCA: ", params$specnorm)
+message("Number of top dispersed genes to use for correlation and PCA: ", ifelse(is.null(params$topVars),' all that meet the count thresholds ', params$topVars))
+message("Include only the samples marked as usable: ", params$onlyUsable)
 ```
 
 ```{r sample_info}
@@ -569,9 +571,13 @@ if (!is.null(params$groupvar)) {
 # Samples
 if (!is.null(params$groupvar))
   setorderv(covars, c(params$groupvar, 'sample'))
-samples <- covars[as.logical(use), sample]
+if (params$onlyUsable && 'use' %in% names(covars)) {
+  samples <- covars[as.logical(use), sample]
+} else {
+  samples <- covars$sample
+}
 
-datatable(params$covars)
+datatable(covars[sample %in% samples, ])
 ```
 
 

@@ -18,12 +18,13 @@ spec = matrix(c(
   'forVar',         'F', 1, "character", "Looping variable (ie. carry out the analysis separately for each level of this var).",
   'reportTemplate', 'T', 1, "character", "Full path to template Rmd file (~/utility_scripts/pca_report_template.Rmd).",
   'nhit',           'n', 1, "integer",   "Number of hits to report (10).",
-  'topVars',        'v', 1, "integer",   "How many genes to use, ranked by descending Coefficient of Variation. (500)"
+  'topVars',        'v', 1, "integer",   "How many genes to use, ranked by descending Coefficient of Variation. (500)",
+  'allSamples',     'a', 0, "logical",   "Do not include all the samples, include only the ones marked by 'use' (FALSE)."
 ), byrow=TRUE, ncol=5)
 
 opt <- getopt(spec)
 
-# opt <- list(baseDir="/SCRATCH/PP2023011_SLC13A5", countsFile="tesslinz.salmon.merged.gene_tpm.tsv", samplesFile="samplesheet_tesslinz.differentialabundance.csv", resultsDir="tesslinz_diffex/PCA", sortVar = 'time', idcol=1, nidcols=2, minMean=5)
+# opt <- list(baseDir="/SCRATCH/PP2023011_SLC13A5", countsFile="tesslinz.salmon.merged.gene_tpm.tsv", samplesFile="samplesheet_tesslinz.differentialabundance.csv", resultsDir="tesslinz_diffex/PCA", allSamples = TRUE, sortVar = 'time', idcol=1, nidcols=2, minMean=5)
 # opt <- list(baseDir="C:/Users/jack_/Downloads/", countsFile="tesslinz.salmon.merged.gene_tpm.tsv", samplesFile="samplesheet_tesslinz.differentialabundance.csv", resultsDir="tesslinz_diffex/PCA", sortVar = 'time', idcol=1, nidcols=2, minMean=5, reportTemplate="D:/Documents/GitHub/utility_scripts/pca_report_template.Rmd")
 
 if ( !is.null(opt$help) ) {
@@ -48,6 +49,7 @@ if (is.null(opt$nhit))  opt$nhit <- 10L
 if (is.null(opt$topVars))  opt$topVars <- 500L
 if ((!is.null(opt$forVar)) && opt$forVar == "NULL") opt$forVar <- NULL
 if ((!is.null(opt$groupVar)) && opt$groupVar == "NULL") opt$groupVar <- NULL
+if(is.null(opt$allSamples)) opt$allSamples <- FALSE
 
 
 dir.create(file.path(opt$baseDir, opt$resultsDir), recursive=TRUE)
@@ -104,7 +106,8 @@ for (V in names(subcovars)){
                                   topVars=opt$topVars,
                                   loopVal=V,
                                   excluded=exclusion,
-                                  groupvar=opt$sortVar)
+                                  groupvar=opt$sortVar,
+                                  onlyUsable=opt$allSamples)
   )
 }
 
