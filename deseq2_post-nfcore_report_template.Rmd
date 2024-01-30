@@ -14,14 +14,14 @@ params:
   counts: /SCRATCH/PP2023011_SLC13A5/tesslinz.salmon.merged.gene_counts.tsv     # file of raw counts
   tpm: /SCRATCH/PP2023011_SLC13A5/tesslinz.salmon.merged.gene_tpm.tsv           # file of TPM counts
   covars: /SCRATCH/PP2023011_SLC13A5/samplesheet_tesslinz.differentialabundance.csv  # samplesheet file for nf-core/differentialabundance
-  genesets: ['/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/h.all.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c5.all.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.all.v2023.2.Hs.symbols.reduced.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c1.all.v2023.2.Hs.symbols.gmt']
+  genesets: ['/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/h.all.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c5.hpo.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c5.go.mf.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c5.go.bp.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.cp.kegg_medicus.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.cp.reactome.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.cp.wikipathways.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.cp.pid.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.cp.biocarta.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c3.tft.gtrd.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c3.tft.tft_legacy.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c1.all.v2023.2.Hs.symbols.gmt']
   highlight_n: 50       # number of DE genes to highlight
   min_count: 10         # minimum raw count for DE to be accapted
   min_tpm: 5            # minimum TPM for DE to be accepted
-  min_lfc: 0.5          # minimum log2 fold-change  for DE to be accepted
+  min_lfc: 1            # minimum log2 fold-change  for DE to be accepted
   max_q: 0.05           # FDR level for DE and GSEA
   genelist : ''         # optional file with custom gene list to highlight instead of DE
-  pad: true             # pad zero counts for plots (log-scale axes hide the non-expressed genes)
+  pad: true             # pad zero counts for plots (otherwise the log-scaled axes hide the non-expressed genes)
 ---
 
 ```{r setup, include=FALSE}
@@ -444,12 +444,16 @@ run_fgsea <- function(gmts, x, tail, q, comparison, title) {
                         }) )
   
   # Querying multiple pathway resources means that the pval were not cocrected for the actual total number of tests. Correct again.
-  if(length(gmts) > 1)
+  if(length(gmts) > 1) {
     message('Applying multiple-testing correction across all the pathway sources combined.')
-  gsea[, padj := p.adjust(pval, 'BH')] # If only one source, this should match padj. But with this redundancy, I don't have to code it separately than having multiple sources..
+    gsea[, padj_meta := p.adjust(pval, 'BH')] 
+  } else {
+    gsea[, padj_meta := padj] # so I don't have to handle number of sets outside this function
+  }
+    
 }
 
-plot_fgsea <- function(res, title, ncol, n) {
+plot_fgsea <- function(res, title, ncol, n, q = params$max_q) {
   res[, absNES := abs(NES)]
   setorder(res, -absNES)
   if (any(res$NES < 0)) {
@@ -459,17 +463,19 @@ plot_fgsea <- function(res, title, ncol, n) {
     p <- ggplot(res, aes(x = NES, y = -log10(padj), label = pathway)) +
           facet_grid(resource ~ split, scales = 'free') +
           # geom_vline(xintercept = 0, linetype = 'dashed') + 
-          geom_point(aes(size = size), shape=21, fill='gold', colour = 'darkorange', alpha=0.6) +
+          geom_point(aes(size = size, fill = padj_meta < q), shape=21, colour = 'darkorange2', alpha=0.6) +
           geom_text_repel(data = res[, head(.SD, floor(n)), by = c('resource', 'side')], 
                           colour = 'blue', segment.color='black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 20, max.overlaps = 500) +
+          scale_fill_manual(values = c('gold', 'darkorange2')) +
           labs(title = title)
   } else {
     p <- ggplot(res, aes(x = NES, y = -log10(padj), label = pathway)) +
           facet_wrap(~ resource, scales = 'free', ncol = ncol) +
           # geom_vline(xintercept = 0, linetype = 'dashed') + 
-          geom_point(aes(size = size), shape=21, fill='gold', colour = 'darkorange', alpha=0.6) +
+          geom_point(aes(size = size, fill = padj_meta < q), shape=21, colour = 'darkorange2', alpha=0.6) +
           geom_text_repel(data = res[, head(.SD, floor(n)), by = c('resource', 'side')], 
                           colour = 'blue', segment.color='black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 20, max.overlaps = 500) +
+          scale_fill_manual(values = c('gold', 'darkorange2')) +
           labs(title = title)
   }
   
@@ -520,22 +526,30 @@ message(nrow(gsea2), ' candidate gene-sets for differentially regulated genes.')
 
 ### Table 
 
-Table of all qualifying gene-sets, across all the gene-set libraries used:
+Table of all qualifying gene-sets, across all the gene-set libraries used. Only significant gene-sets are listed.
+
+`padj` has been adjusted only within the context of the gene-set category. `padj_meta` is the Benjamini-Hochberg adjusted p-value for all the gene-sets tested across all the included categories.
 
 ```{r twotail_tb}
-datatable(gsea2[, .(side, pathway, padj, NES, size, leadingEdge)])
+datatable(gsea2[, .(side, pathway, padj, padj_meta, NES, size, leadingEdge)], )
 ```
 
 ### NES & Significance
 
-```{r twotail_volcano, fig.height=40, fig.width=20}
-p_rich2 <- plot_fgsea(gsea2, paste0(params$comparison, '.absLFC'), 1, 50)
-  
-pdf(file = file.path(params$da_path, 'plots', 'gsea', params$comparison, paste0(params$comparison, '.absLFC.fgsea.pdf')), width=20, height=40)
-print(p_rich2)
-dev.off()
+Only significant gene-sets are shown.
 
-p_rich2
+The Y axis displays the within-category adjusted p-value. Yellow points indicate gene-sets that no longer meet the significance level after p-value correction across categories, whereas brown points indicate gene-sets that remain significant.
+
+```{r twotail_volcano, fig.height=50, fig.width=20}
+if (nrow(gsea2) > 0) {
+  p_rich2 <- plot_fgsea(gsea2, paste0(params$comparison, '.absLFC'), 1, 50)
+  
+  pdf(file = file.path(params$da_path, 'plots', 'gsea', params$comparison, paste0(params$comparison, '.absLFC.fgsea.pdf')), width=20, height=40)
+  print(p_rich2)
+  dev.off()
+  
+  p_rich2
+}
 ```
 
 ## Direction-specific
@@ -560,20 +574,30 @@ message(nrow(gsea1[side == 'neg', ]), ' candidate gene-sets for the down-regulat
 
 ### Table
 
+Table of all qualifying gene-sets, across all the gene-set libraries used. Only significant gene-sets are listed.
+
+`padj` has been adjusted only within the context of the gene-set category. `padj_meta` is the Benjamini-Hochberg adjusted p-value for all the gene-sets tested across all the included categories.
+
 ```{r onetail_tb}
 datatable(gsea1[, .(side, pathway, padj, NES, size, leadingEdge)])
 ```
 
 ### NES & Significance
 
-```{r onetail_volcano, fig.height=40, fig.width=20}
-p_rich1 <- plot_fgsea(gsea1, params$comparison, 1, 30)
+Only significant gene-sets are shown.
 
-pdf(file = file.path(params$da_path, 'plots', 'gsea', params$comparison, paste0(params$comparison, '.fgsea.pdf')), width=20, height=40)
-print(p_rich1)
-dev.off()
+The Y axis displays the within-category adjusted p-value. Yellow points indicate gene-sets that no longer meet the significance level after p-value correction across categories, whereas brown points indicate gene-sets that remain significant.
 
-p_rich1
+```{r onetail_volcano, fig.height=50, fig.width=20}
+if (nrow(gsea1) > 0 ) {
+  p_rich1 <- plot_fgsea(gsea1, params$comparison, 1, 30)
+  
+  pdf(file = file.path(params$da_path, 'plots', 'gsea', params$comparison, paste0(params$comparison, '.fgsea.pdf')), width=20, height=40)
+  print(p_rich1)
+  dev.off()
+  
+  p_rich1
+}
 ```
 
 

@@ -16,7 +16,7 @@ spec = matrix(c(
   'genelist',       'g', 1, "character", "File with (vertical) list of genes to highlight, instead of top DE genes.",
   'minCount',       'm', 1, "integer",   "Minimum required mean count in at least one condition (50).",
   'minTPM',         'M', 1, "numeric",   "Minimum required mean TPM in at least one single sample (5).",
-  'minLFC',         'l', 1, "numeric",   "Minimum required log2 fold-change (0.5).",
+  'minLFC',         'l', 1, "numeric",   "Minimum required log2 fold-change (1).",
   'maxQ',           'p', 1, "numeric",   "FDR level (0.05).",
   'nhit',           'n', 1, "integer",   "Number of hits to report (50).",
   'pad',            'z', 1, "logical",   "Disable padding of zeros.",
@@ -26,6 +26,12 @@ spec = matrix(c(
 ), byrow=TRUE, ncol=5)
 
 opt <- getopt(spec)
+
+# opt <- list(baseDir = '/SCRATCH/PP2023011_SLC13A5/linz_diffex',
+#            countsFile = '/SCRATCH/PP2023011_SLC13A5/outputs_linz/star_salmon/salmon.merged.gene_counts.tsv',
+#            tpmFile = '/SCRATCH/PP2023011_SLC13A5/outputs_linz/star_salmon/salmon.merged.gene_tpm.tsv',
+#            samplesFile = '/SCRATCH/PP2023011_SLC13A5/samplesheet_linz.differentialabundance.csv',
+#            contrasts = '/SCRATCH/PP2023011_SLC13A5/contrasts_linz.differentialabundance.csv')
 
 if ( !is.null(opt$help) ) {
   cat(getopt(spec, usage=TRUE))
@@ -38,7 +44,7 @@ if (is.null(opt$minCount))
 if (is.null(opt$minTPM))
   opt$minTPM <- 5
 if (is.null(opt$minLFC))
-  opt$minLFC <- 0.5
+  opt$minLFC <- 1
 if (is.null(opt$maxQ))
   opt$maxQ <- 0.05
 if (is.null(opt$nhit))
@@ -51,7 +57,29 @@ if (is.null(opt$pad))
 
 contrasts <- read.table(opt$contrasts, sep = ',', header = TRUE)
 
+genesets = list('/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/h.all.v2023.2.Hs.symbols.gmt',
+
+                # '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c5.all.v2023.2.Hs.symbols.gmt',
+                '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c5.hpo.v2023.2.Hs.symbols.gmt',
+                '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c5.go.mf.v2023.2.Hs.symbols.gmt',
+                '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c5.go.bp.v2023.2.Hs.symbols.gmt',
+
+                # '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.all.v2023.2.Hs.symbols.reduced.gmt',
+                '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.cp.kegg_medicus.v2023.2.Hs.symbols.gmt',
+                '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.cp.reactome.v2023.2.Hs.symbols.gmt',
+                '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.cp.wikipathways.v2023.2.Hs.symbols.gmt',
+                '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.cp.pid.v2023.2.Hs.symbols.gmt',
+                '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.cp.biocarta.v2023.2.Hs.symbols.gmt',
+
+                # '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c3.all.v2023.2.Hs.symbols.gmt',
+                '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c3.tft.gtrd.v2023.2.Hs.symbols.gmt',
+                '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c3.tft.tft_legacy.v2023.2.Hs.symbols.gmt',
+
+                '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c1.all.v2023.2.Hs.symbols.gmt')
+
 for (comparison in contrasts$id) {
+  # comparison <- contrasts$id[1]
+
   rmarkdown::render(opt$reportTemplate,
                     output_file = paste0(comparison, opt$suffix, '.deseq2_fgsea.report.html'),
                     output_dir = file.path(opt$baseDir, 'report'),
@@ -66,6 +94,7 @@ for (comparison in contrasts$id) {
                                 min_lfc = opt$minLFC,
                                 max_q = opt$maxQ,
                                 genelist = opt$genelist,
-                                pad = !opt$pad
-                    )  )
+                                pad = !opt$pad,
+                                genesets = genesets )
+                    )
 }
