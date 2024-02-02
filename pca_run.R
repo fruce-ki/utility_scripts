@@ -14,7 +14,8 @@ spec = matrix(c(
   # 'minSingle',      'm', 1, "integer",   "Minimum count in at least one single sample (100).",
   'resultsDir',     'o', 1, "character", "Directory in which to save the report, relative to baseDir (.).",
   'samplesFile',    's', 1, "character", "Tab-separated table with `sample` column followed by the variable columns.",
-  'sortVar',        'S', 1, "character", " a variable by which to order the samples. Otherwise the samplesFile order will be used.",
+  'sortVar',        'S', 1, "character", "A variable by which to order the samples. Otherwise the samplesFile order will be used.",
+  'groupVar',       'G', 1, "character", "A variable by which to summarise correlatins in a beeswarm. Preferably a variable with very few different values.",
   'forVar',         'F', 1, "character", "Looping variable (ie. carry out the analysis separately for each level of this var).",
   'reportTemplate', 'T', 1, "character", "Full path to template Rmd file (~/utility_scripts/pca_report_template.Rmd).",
   'nhit',           'n', 1, "integer",   "Number of hits to report (10).",
@@ -24,7 +25,11 @@ spec = matrix(c(
 
 opt <- getopt(spec)
 
-# opt <- list(baseDir="/SCRATCH/PP2023011_SLC13A5", countsFile="tesslinz.salmon.merged.gene_tpm.tsv", samplesFile="samplesheet_tesslinz.differentialabundance.csv", resultsDir="tesslinz_diffex/PCA", allSamples = TRUE, sortVar = 'time', idcol=1, nidcols=2, minMean=5)
+# opt <- list(baseDir="/DROPBOX/Neurolentech Dropbox/NEUROLENTECH/BIOINFORMATICS/RNA_sequencing/Other_Analyses/Batches_1.2.3_PCA",
+#             countsFile="../../Quantified_Features/MASTER_TABLES/master.gene_tpm.tsv",
+#             samplesFile="samplesheet.pca.tsv",
+#             resultsDir="./",
+#             sortVar = 'sjct_ID', groupVar = 'sjct_Type', idcol=1, nidcols=2, minMean=5)
 # opt <- list(baseDir="C:/Users/jack_/Downloads/", countsFile="tesslinz.salmon.merged.gene_tpm.tsv", samplesFile="samplesheet_tesslinz.differentialabundance.csv", resultsDir="tesslinz_diffex/PCA", sortVar = 'time', idcol=1, nidcols=2, minMean=5, reportTemplate="D:/Documents/GitHub/utility_scripts/pca_report_template.Rmd")
 
 if ( !is.null(opt$help) ) {
@@ -49,7 +54,7 @@ if (is.null(opt$nhit))  opt$nhit <- 10L
 if (is.null(opt$topVars))  opt$topVars <- 500L
 if ((!is.null(opt$forVar)) && opt$forVar == "NULL") opt$forVar <- NULL
 if ((!is.null(opt$groupVar)) && opt$groupVar == "NULL") opt$groupVar <- NULL
-if(is.null(opt$allSamples)) opt$allSamples <- FALSE
+if (is.null(opt$allSamples)) opt$allSamples <- FALSE
 
 
 dir.create(file.path(opt$baseDir, opt$resultsDir), recursive=TRUE)
@@ -61,7 +66,7 @@ if (!is.null(opt$excludeList))
   exclusion <- read.csv(opt$excludeList, header=FALSE)[[1]]
 
 # Covariates
-covars <- fread(file.path(opt$baseDir, opt$samplesFile), sep=",", header=TRUE, check.names = FALSE, colClasses="character")
+covars <- fread(file.path(opt$baseDir, opt$samplesFile), header=TRUE, check.names = FALSE, colClasses="character")
 
 
 # Repeat analysis for every level of the looping variable.
@@ -106,7 +111,8 @@ for (V in names(subcovars)){
                                   topVars=opt$topVars,
                                   loopVal=V,
                                   excluded=exclusion,
-                                  groupvar=opt$sortVar,
+                                  groupVar=opt$groupVar,
+                                  sortVar=opt$sortVar,
                                   onlyUsable=opt$allSamples)
   )
 }

@@ -23,7 +23,8 @@ params:
   topVars: 500                        # Number of top dispersed genes to use
   loopVal: "default"                  # default = no looping
   excluded: NULL                      # Features not to be included in PCA
-  groupvar: NULL                      # Variable in covars by which to summarise the correlations
+  sortVar: NULL                       # Variable in covars by which to sort the correlation axes
+  groupVar: NULL                      # Variable in covars by which to summarise the correlations
   onlyUsable: FALSE                   # Only include the samples defined in the 'use' variable
 ---
 
@@ -324,18 +325,10 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
 pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){
   # pc <- pc; loads <- infl; highloads <- highinfl; ig <- ig; pcaimp <- pcaimp; pcx <- 1; pcy <- 2
   mycolours <- c(
-  	"#bb6600", "#880000", "#bb3300", "#ff0000", "#ff9900", "#ffcc00", "#eedd00",
-  	"#0000ff", "#0066ff", "#0099ff", "#00ccff",  "#00ffff",
-  	"#5500aa", "#8800ff", "#8866ff", "#ee00bb", "#ff66ff",  "#ff99ff", "#ffccff",
-  	"#224400", "#226600", "#229900", "#22cc00", "#22ff00", "#88cc00", 
-  	"#8899aa",
-  	"#0033aa", "#0066aa", "#0099aa", "#00ccaa",
-  	"#886600", "#bb9900", "#889900",
-  	"#8800aa", "#8866aa", "#8899ff", "#88ccff",
-  	"#ff7700", "#ee99aa", "#eeccaa"
+  	"#880000", "#ff0000", "#eebb00", "#ddaadd", "#22ff00", "#224400", "#7700aa", "#0000ff", "#00ddff"
   )
   # This works best when the colours are in a sensible sequence of gradual change.
-  getPalette <- colorRampPalette(mycolours[2:26])
+  getPalette <- colorRampPalette(mycolours)
 
   pcxs <- paste0("PC", pcx)
   pcys <- paste0("PC", pcy)
@@ -361,10 +354,11 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){
              title=varname) +
         theme(panel.grid=element_blank(), legend.position='none')
       
-    )}), ncol = ifelse(length(ig) <= 10, 2, 3))
+    )}), ncol = ifelse(length(ig) < 9, 2, ifelse(length(ig) < 16, 3, 4)))
   
   pc12v <- wrap_plots(lapply(ig, function(varname) {
     return(
+      
       ggplot(pc, aes(x = .data[[pcxs]], y = .data[[pcys]], label = .data[['sample']], fill = .data[[varname]], colour = .data[[varname]])) +
         geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
         geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
@@ -379,7 +373,8 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){
         labs(x=paste0(pcxs, " (", round(pcaimp[PC==pcx, Explained], 1), "%)"), 
              y=paste0(pcys, " (", round(pcaimp[PC==pcy, Explained], 1), "%)")) +
         theme(panel.grid=element_blank())
-    )}), ncol = ifelse(length(ig) <= 10, 2, 3))
+    
+      )}), ncol = ifelse(length(ig) < 9, 2, ifelse(length(ig) < 16, 3, 4)))
   
   return(list(pc12, pc12v))
 }
@@ -387,7 +382,7 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){
 # PCA
 # (scaling and centering of genes to one another, NOT samples to one another)
 do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, topgenes=NULL, exclude=NULL, minMean=0, minSingle=0, ntop=10) {
-  # countsmat <- log10(params$tpm); covars <- params$covars
+  # countsmat <- log10(counts[, samples])
   # scale = TRUE; center = TRUE; rds = file.path(params$outdir, sub(".txt|.tsv", "_corrP.RDS", basename(params$name))); topgenes=NULL; exclude=NULL; minMean=0; minSingle=0; ntop=10
   
   nvars <- nrow(countsmat)
@@ -473,7 +468,7 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
   # Coefficient names.
 
   ig <- names(covars)
-  ig <- ig[! ig %in% c('sample', 'sample', 'name', 'Name', 'sizeFactor')]
+  ig <- ig[! ig %in% c('sample', 'Sample', 'name', 'Name', 'sizeFactor')]
 
   # Means and Variances of the selected genes
   genevar[, selected := name %in% colnames(subcmat)]
@@ -487,12 +482,13 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
       scale_y_log10() +
       scale_colour_manual(name='Filtering:', breaks=c('Used', 'Not used', 'Filtered out'), values=c('red', 'black', 'grey70')) +
       annotation_logticks(base=10, sides='lb') +
-      labs(x="Mean", y="Coeff. of Varsiation", title=paste(nrow(genevar[StDev>0, ]), "variable features"), 
+      labs(x="Mean", y="Coeff. of Variation", title=paste(nrow(genevar[StDev>0, ]), "variable features"), 
            subtitle=paste(nrow(genevar[(!excluded),]), "after filtering,", length(topgenes), "used")) +
       theme(legend.position='bottom', panel.grid=element_blank())
 
   # Plot higher PCs in 2D pairs. Highlight one variable at a time.
   L <- lapply(seq(1, topnpc, 2), function(pcx){
+    # pcx <- 1
     pcy <- pcx + 1
     if (pcy > npc) pcy <- 1
     pca_plotter(pc, infl, highinfl, ig, pcaimp, pcx, pcy)
@@ -528,6 +524,9 @@ message("Number of features to report per Principle Component: ", params$ntop)
 message("Genes to exclude from library size calculations and PCA: ", params$specnorm)
 message("Number of top dispersed genes to use for correlation and PCA: ", ifelse(is.null(params$topVars),' all that meet the count thresholds ', params$topVars))
 message("Include only the samples marked as usable: ", params$onlyUsable)
+message("sort axes by: ", params$sortVar)
+message("summarise correlations by: ", params$groupVar)
+
 ```
 
 ```{r sample_info}
@@ -551,16 +550,16 @@ if (!is.data.frame(params$covars)) {
   covars <- params$covars
 }
 
-# Grouping
+# Grouping look-up
 setkey(covars, sample)
 G <- as.data.table(expand.grid(covars$sample, covars$sample))
 setnames(G, c('observation1','observation2'))
 
 G[, observation1 := as.character(observation1)]
 G[, observation2 := as.character(observation2)]
-if (!is.null(params$groupvar)) {
-  G[, group1 := covars[observation1, ][, params$groupvar, with = FALSE]]
-  G[, group2 := covars[observation2, params$groupvar, with = FALSE]]
+if (!is.null(params$groupVar)) {
+  G[, group1 := covars[observation1, ][, params$groupVar, with = FALSE]]
+  G[, group2 := covars[observation2, params$groupVar, with = FALSE]]
   G[, group := paste(group1, group2, sep = ' <-> ')]
   # Fix order of conditions, ragerdless of order of sample names
   G[, group := vapply(group, function(x){ strsplit(x, ' <-> ')[[1]] |> sort() |> paste(collapse = ' <-> ') }, character(1))]
@@ -569,8 +568,8 @@ if (!is.null(params$groupvar)) {
 }
 
 # Samples
-if (!is.null(params$groupvar))
-  setorderv(covars, c(params$groupvar, 'sample'))
+if (!is.null(params$sortVar))
+  setorderv(covars, c(params$sortVar, 'sample'))
 if (params$onlyUsable && 'use' %in% names(covars)) {
   samples <- covars[as.logical(use), sample]
 } else {
@@ -808,7 +807,7 @@ print( all_pcab$pc2d )
 ```{r pdf}
 ## Plots to PDF ##
 pdf(file.path(params$outdir,
-              sub("txt|tsv", paste0(params$loopVal, ".pca.pdf"), basename(params$name))),
+              sub("txt|tsv", paste0(params$loopVal, ".correlations.pdf"), basename(params$name))),
     width=max(12, ceiling(nrow(params$covars) / 3)), height=max(12, ceiling(nrow(params$covars) / 3))) # Scale up when many samples, but don't scale down when few.
 
 # Correlation plots
@@ -828,6 +827,12 @@ print(corelsPb[['sovf']])
 print(corelsSb[['sovf']])
 print(corelsPb[['scvf']])
 print(corelsSb[['scvf']])
+
+dev.off()
+
+pdf(file.path(params$outdir,
+              sub("txt|tsv", paste0(params$loopVal, ".pca.pdf"), basename(params$name))),
+    width=max(12, ceiling(nrow(params$covars) / 3)), height=max(12, ceiling(nrow(params$covars) / 3))) # Scale up when many samples, but don't scale down when few.
 
 # PCA plotsplot.new()
 plot.new()

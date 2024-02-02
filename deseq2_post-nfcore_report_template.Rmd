@@ -42,12 +42,13 @@ library(DT)
 library(DESeq2)
 library(fgsea)
 library(stringr)
-
+library(parallel)
 
 # ggplot2 base theme
 theme_set(theme_bw())
 
 # data.table::setDTthreads(1L)
+threads <- min(c(length(params$genesets), detectCores()))
 
 options(scipen=200)
 ```
@@ -212,7 +213,7 @@ DT <- munged$DT
 deseq <- munged$deseq
 
 
-fwrite(deseq, file = file.path(params$da_path, 'tables', 'differential', paste0(params$comparison, '.deseq2.results.csv')), sep=',', col.names = TRUE) # csv instead of tsv. I don't want to overwrite the original. It would mess up re-runs.
+saveRDS(DT, file = file.path(params$da_path, 'tables', 'differential', paste0(params$comparison, '.diffex_extra.RDS')))
 ```
 
 
@@ -411,9 +412,11 @@ p_box
 
 # GSEA
 
-Gene sets are considered enriched if they meet the criterion: FDR < `r params$max_q`. When multiple gene-set resources are queried, the default multiple-testing correction is inadequate, as it is performed for each resource separately. Therefore a new correction is carried out to encompass the real total number of tests. The genes are ranked by the shrunken log2 fold-change.
+The genes are ranked by the shrunken log2 fold-change.
 
-Only gene-sets that meet the FDR cutoff are shown in the plots and tables below. Out of those, only the highest nerchment scores are labeled in the plots, for legibility.
+Gene-sets are considered enriched if they meet the criterion: FDR < `r params$max_q`. When multiple gene-set resources are queried, the default multiple-testing correction is inadequate, as it is performed for each resource separately. Therefore a new correction is carried out to encompass the real total number of tests.
+
+Only gene-sets that meet the FDR cutoff are shown in the plots and tables below. Out of those, only the highest enrichment scores are labeled in the plots, for legibility.
 
 ```{r gsea_prep}
 ranks <- unique(DT[is.finite(shrunkLFC), .(gene_name, shrunkLFC)])
@@ -426,14 +429,15 @@ ranks <- ranks[, head(.SD, 1), by = gene_name]
 
 run_fgsea <- function(gmts, x, tail, q, comparison, title) {
   gsea <- Reduce(rbind, 
-                 lapply(gmts, 
+                 mclapply(gmts, 
                         function(gmt) {
                           pathways <- gmtPathways(gmt)
                           res <- fgsea(pathways = pathways, stats = x, 
                                        minSize = 15, maxSize = 500, scoreType = tail, nPermSimple = 10000)
                           setorder(res, padj, NES)
                           
-                          fwrite(res, file = file.path(params$da_path, 'tables', 'gsea', comparison, paste0(title, '.fgsea_', tail, '_', sub('.gmt', '', basename(gmt)), '.tsv')),
+                          dir.create(file.path(params$da_path, 'tables', 'gsea', comparison, sub('.gmt', '', basename(gmt))), recursive=TRUE)
+                          fwrite(res, file = file.path(params$da_path, 'tables', 'gsea', comparison, sub('.gmt', '', basename(gmt)), paste0(title, '.fgsea_', tail, '_', sub('.gmt', '', basename(gmt)), '.tsv')),
                                  col.names = TRUE, quote = FALSE, sep = '\t')
                           
                           message(basename(gmt), ' : ', nrow(res[padj < q, ]), ' significant pathways, out of ', nrow(res))
@@ -441,7 +445,7 @@ run_fgsea <- function(gmts, x, tail, q, comparison, title) {
                           res[, resource := basename(gmt)]
                           res[, side := tail]
                           res
-                        }) )
+                        }, mc.cores = threads) )
   
   # Querying multiple pathway resources means that the pval were not cocrected for the actual total number of tests. Correct again.
   if(length(gmts) > 1) {
@@ -454,32 +458,41 @@ run_fgsea <- function(gmts, x, tail, q, comparison, title) {
 }
 
 plot_fgsea <- function(res, title, ncol, n, q = params$max_q) {
+  # res <- gsea1; ncol <- 1; n <- 20; title <- 'foobar'
+  
   res[, absNES := abs(NES)]
   setorder(res, -absNES)
-  if (any(res$NES < 0)) {
-    res[NES > 0, split := 'NES > 0']
-    res[NES < 0, split := 'NES < 0']
     
-    p <- ggplot(res, aes(x = NES, y = -log10(padj), label = pathway)) +
-          facet_grid(resource ~ split, scales = 'free') +
-          # geom_vline(xintercept = 0, linetype = 'dashed') + 
-          geom_point(aes(size = size, fill = padj_meta < q), shape=21, colour = 'darkorange2', alpha=0.6) +
-          geom_text_repel(data = res[, head(.SD, floor(n)), by = c('resource', 'side')], 
-                          colour = 'blue', segment.color='black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 20, max.overlaps = 500) +
-          scale_fill_manual(values = c('gold', 'darkorange2')) +
-          labs(title = title)
-  } else {
-    p <- ggplot(res, aes(x = NES, y = -log10(padj), label = pathway)) +
-          facet_wrap(~ resource, scales = 'free', ncol = ncol) +
-          # geom_vline(xintercept = 0, linetype = 'dashed') + 
-          geom_point(aes(size = size, fill = padj_meta < q), shape=21, colour = 'darkorange2', alpha=0.6) +
-          geom_text_repel(data = res[, head(.SD, floor(n)), by = c('resource', 'side')], 
-                          colour = 'blue', segment.color='black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 20, max.overlaps = 500) +
-          scale_fill_manual(values = c('gold', 'darkorange2')) +
-          labs(title = title)
-  }
+  twosides <- any(res$NES < 0)
   
-  p
+  pl <- lapply( unique(res$resource), function (r) {
+    # r <- unique(res$resource)[1]
+    subres <- res[resource == r, ]
+    
+    if (twosides) {
+        p <- ggplot(subres, aes(x = NES, y = -log10(padj), label = pathway)) +
+            facet_grid(resource ~ side, scales = 'free') +
+            # geom_vline(xintercept = 0, linetype = 'dashed') + 
+            geom_point(aes(size = size, fill = padj_meta < q), shape=21, colour = 'darkorange2', alpha=0.6) +
+            geom_text_repel(data = subres[, head(.SD, floor(n)), by = c('resource', 'side')], 
+                            colour = 'blue', segment.color='black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 20, max.overlaps = 500) +
+            scale_fill_manual(values = c('gold', 'darkorange2')) +
+            labs(title = title)
+    } else {
+      p <- ggplot(subres, aes(x = NES, y = -log10(padj), label = pathway)) +
+            facet_wrap(~ resource, scales = 'free', ncol = ncol) +
+            # geom_vline(xintercept = 0, linetype = 'dashed') + 
+            geom_point(aes(size = size, fill = padj_meta < q), shape=21, colour = 'darkorange2', alpha=0.6) +
+            geom_text_repel(data = subres[, head(.SD, floor(n)), by = c('resource', 'side')], 
+                            colour = 'blue', segment.color='black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 20, max.overlaps = 500) +
+            scale_fill_manual(values = c('gold', 'darkorange2')) +
+            labs(title = title)
+    }
+    
+    p
+  })
+
+  pl
 }
 
 
@@ -540,15 +553,15 @@ Only significant gene-sets are shown.
 
 The Y axis displays the within-category adjusted p-value. Yellow points indicate gene-sets that no longer meet the significance level after p-value correction across categories, whereas brown points indicate gene-sets that remain significant.
 
-```{r twotail_volcano, fig.height=50, fig.width=20}
+```{r twotail_volcano, fig.height=15, fig.width=18}
 if (nrow(gsea2) > 0) {
-  p_rich2 <- plot_fgsea(gsea2, paste0(params$comparison, '.absLFC'), 1, 50)
+  p_rich2 <- plot_fgsea(gsea2, paste0(params$comparison, '.absLFC'), 1, 40)
   
   pdf(file = file.path(params$da_path, 'plots', 'gsea', params$comparison, paste0(params$comparison, '.absLFC.fgsea.pdf')), width=20, height=40)
   print(p_rich2)
   dev.off()
   
-  p_rich2
+  print( p_rich2 )
 }
 ```
 
@@ -564,8 +577,8 @@ names(ranks1) <- rn1
 
 gsea1 <- rbind(run_fgsea(params$genesets, ranks1, 'pos', params$max_q, params$comparison, params$comparison),
                run_fgsea(params$genesets, ranks1, 'neg', params$max_q, params$comparison, params$comparison) )
-# Re-do the multiple-testing correction to encompass the total number of tests.
-gsea1[, padj := p.adjust(pval, method = 'BH')]
+# # Re-do the multiple-testing correction to encompass the total number of tests from both sides.
+# gsea1[, padj_meta := p.adjust(pval, method = 'BH')]
 gsea1 <- gsea1[padj < params$max_q, ]
 
 message(nrow(gsea1[side == 'pos', ]), ' candidate gene-sets for the up-regulated genes.')
@@ -579,7 +592,7 @@ Table of all qualifying gene-sets, across all the gene-set libraries used. Only 
 `padj` has been adjusted only within the context of the gene-set category. `padj_meta` is the Benjamini-Hochberg adjusted p-value for all the gene-sets tested across all the included categories.
 
 ```{r onetail_tb}
-datatable(gsea1[, .(side, pathway, padj, NES, size, leadingEdge)])
+datatable(gsea1[, .(side, pathway, padj, padj_meta, NES, size, leadingEdge)])
 ```
 
 ### NES & Significance
@@ -588,15 +601,15 @@ Only significant gene-sets are shown.
 
 The Y axis displays the within-category adjusted p-value. Yellow points indicate gene-sets that no longer meet the significance level after p-value correction across categories, whereas brown points indicate gene-sets that remain significant.
 
-```{r onetail_volcano, fig.height=50, fig.width=20}
+```{r onetail_volcano, fig.height=15, fig.width=18}
 if (nrow(gsea1) > 0 ) {
-  p_rich1 <- plot_fgsea(gsea1, params$comparison, 1, 30)
+  p_rich1 <- plot_fgsea(gsea1, params$comparison, 1, 20)
   
   pdf(file = file.path(params$da_path, 'plots', 'gsea', params$comparison, paste0(params$comparison, '.fgsea.pdf')), width=20, height=40)
   print(p_rich1)
   dev.off()
   
-  p_rich1
+  print( p_rich1 )
 }
 ```
 
