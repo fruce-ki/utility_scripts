@@ -142,56 +142,58 @@ gm_mean = function(x, na.rm=TRUE){
 }
 
 
+### Correlations
+################
 my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NULL, txs=3, minMean=0, minSingle=0, groups=NULL, loopVal="default") {
   # mat <- log10(counts[topgenes,]);
-  
+
   # Filter
   if (minMean != 0 | minSingle != 0) {
     mat <- mat[rowSums(mat >= minSingle) >= 1 | rowMeans(mat) >= minMean, ]
   } else {
     mat <- mat[rowSums(mat) > 0, ]
   }
-  
+
   # Correlations
   cormat <- cor(mat, method=method)
-  
+
   # Cluster
   hcfit <- hclust(dist(scale(cormat, center=TRUE)))
   rn <- rownames(cormat)
-  
+
   # Make dendrogram. https://stackoverflow.com/questions/42047896/joining-a-dendrogram-and-a-heatmap
   dend <- as.dendrogram(hcfit)
   dend_data <- dendro_data(dend)
   # Setup the data, so that the axes are exchanged, instead of using coord_flip()
   segment_data <- with(
-    segment(dend_data), 
+    segment(dend_data),
     data.frame(x = y, y = x, xend = yend, yend = xend))
   # Use the dendrogram label data to position the sample labels
   sample_pos_table <- with(
-    dend_data$labels, 
+    dend_data$labels,
     data.frame(y_center = x, sample = as.character(label), height = 1))
   # Limits for the vertical axes
   sample_axis_limits <- with(
-    sample_pos_table, 
+    sample_pos_table,
     c(min(y_center - 0.5 * height), max(y_center + 0.5 * height))
   ) + 0.1 * c(-1, 1) # extra spacing: 0.1
   # Dendrogram plot
-  pd <- ggplot(segment_data) + 
-    geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) + 
+  pd <- ggplot(segment_data) +
+    geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) +
     scale_x_reverse(expand = c(0, 0.5),
-                    position = "top") + 
+                    position = "top") +
     scale_y_continuous(position = "right",
-                       breaks = sample_pos_table$y_center, 
-                       labels = sample_pos_table$sample, 
-                       limits = sample_axis_limits, 
-                       expand = c(0, 0)) + 
+                       breaks = sample_pos_table$y_center,
+                       labels = sample_pos_table$sample,
+                       limits = sample_axis_limits,
+                       expand = c(0, 0)) +
     labs(x = NULL, y = NULL) +
-    theme_minimal() + 
+    theme_minimal() +
     theme(panel.grid = element_blank(),
           axis.text.y = element_blank(),
           axis.ticks.y = element_blank())
-  
-  
+
+
   # Create duplicates for different plot styles.
   cormat <- cormat[samples, samples]                     # In the supplied order.
   cormat_t <- cormat                                     # Duplicate in which to delete below the diagonal.
@@ -200,7 +202,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   # Delete below the diagonal, for the triangles.
   for (r in 1:nrow(cormat_t)) {
     for (c in 1:ncol(cormat_t)) {
-      if (c <= r) {                # For non-clustered, also delete the diagonal. 
+      if (c <= r) {                # For non-clustered, also delete the diagonal.
         cormat_t[r, c] <- NA_real_
       }
     }
@@ -220,7 +222,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
       }
     }
   }
-  
+
   # Restructure for plotting.
   restruct <- function(cm){
     rn <- rownames(cm)
@@ -231,7 +233,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     # cm <- merge(cormat, sample_pos_table, by.x="observation2", by.y="sample", all.x=TRUE)
     cm
   }
-  
+
   cormat <- restruct(cormat)
   cormat_t <- restruct(cormat_t)
   cormat_c <- restruct(cormat_c)
@@ -240,14 +242,14 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
   cormat_t <- cormat_t[!is.na(Correlation)]
   cormat_ct <- cormat_ct[!is.na(Correlation)]
   cormat_ctv <- cormat_ctv[!is.na(Correlation)]
-  
-  
+
+
   # Text colour switch for the dynamic range
   m <- min(cormat4$Correlation, na.rm=TRUE)
   M <- max(cormat4$Correlation, na.rm=TRUE)
   colourswitch <- c( m + 0.49 * (M-m),  m + 0.51 * (M-m) )
-  
-  
+
+
   # Square. Custom order. No values. Full range.
   p_sonf <- ggplot(cormat, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -256,7 +258,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-  
+
   # Square. Custom order. No values. Dynamic range.
   p_sond <- ggplot(cormat, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -265,8 +267,8 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-  
-  
+
+
   # Square. Custom order. With values. Full range.
   p_sovf <- ggplot(cormat, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -277,7 +279,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-  
+
   # Square. Custom order. With values. Dynamic range.
   p_sovd <- ggplot(cormat, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -288,8 +290,8 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-  
-  
+
+
   # Square. Clustered order. No values. Full range.
   p_scnf <- ggplot(cormat_c, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -298,7 +300,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-  
+
   # Square. Clustered order. No values. Dynamic range.
   p_scnd <- ggplot(cormat_c, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -307,8 +309,8 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-  
-  
+
+
   # Square. Clustered order. With values. Full range.
   p_scvf <- ggplot(cormat_c, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -319,7 +321,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-  
+
   # Square. Clustered order. With values. Dynamic range.
   p_scvd <- ggplot(cormat_c, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -330,8 +332,8 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-  
-  
+
+
   # Triangle. Custom order. With values. Full range.
   p_tovf <- ggplot(cormat_t, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -342,7 +344,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-  
+
   # Triangle. Custom order. With values. Dynamic range.
   p_tovd <- ggplot(cormat_t, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -353,8 +355,8 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-  
-  
+
+
   # Triangle. Clustered order. with values. Full range.
   p_tcvf <- ggplot(cormat_ct, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -365,7 +367,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-  
+
   # Triangle. Clustered order. with values. Dynamic range.
   p_tcvd <- ggplot(cormat_ct, aes(x=observation1, y=observation2)) +
     geom_tile(aes(fill=Correlation)) +
@@ -376,11 +378,11 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
     theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
           panel.grid = element_blank() )
-  
-  
+
+
   # If exact pairs don't matter.
   cormat_x <- merge(cormat_t, groups, by = c('observation1', 'observation2'), all.x = TRUE, all.y = FALSE)
-  
+
   p_bee <- ggplot(cormat_x, aes(x = Correlation, y = group, colour = group)) +
     # geom_violin()+ #(draw_quantiles = c(0.25, 0.5, 0.75)) +
     geom_boxplot(outlier.alpha = 0, width = 0.5, fill = 'grey95', colour = 'black') +
@@ -390,7 +392,7 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     scale_colour_brewer(palette = 'Set1') +
     labs(title = paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Summary"), x = "Pairwise Correlation", y = "Pairs") +
     theme(legend.position = 'none')
-  
+
   out <- list(corr=dcast(cormat2, observation1 ~ observation2, value.var = "Correlation"),
               sonf=p_sonf, #sond=p_sond,
               sovf=p_sovf, #sovd=p_sovd,
@@ -400,11 +402,11 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
               tcvf=pd + p_tcvf + plot_layout(ncol=2, widths=c(1,4)), #tcvd=pd + p_tcvd + plot_layout(ncol=2, widths=c(1,4)),
               bee = p_bee
   )
-  
+
   if (!is.null(rds) && length(rds) > 0) {
     saveRDS(out, file = rds)
   }
-  
+
   return(out)
 }
 

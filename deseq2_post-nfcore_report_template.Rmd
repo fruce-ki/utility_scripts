@@ -6,22 +6,27 @@ output:
   html_document:
     code_folding: hide
     toc: true
+    toc_depth: 4
     toc_float:
       collapsed: false
 params:
-  comparison: time_W6_vs_W3.conf_condition                # name of a specific comparison for this report
-  da_path: /SCRATCH/PP2023011_SLC13A5/tesslinz_diffex                           # output dir of nf-core/differentialabundance
-  counts: /SCRATCH/PP2023011_SLC13A5/tesslinz.salmon.merged.gene_counts.tsv     # file of raw counts
-  tpm: /SCRATCH/PP2023011_SLC13A5/tesslinz.salmon.merged.gene_tpm.tsv           # file of TPM counts
-  covars: /SCRATCH/PP2023011_SLC13A5/samplesheet_tesslinz.differentialabundance.csv  # samplesheet file for nf-core/differentialabundance
+  comparison: patient_VS_control.CONF_time_sBatch.USE_all                # name of a specific comparison for this report
+  da_path: '/SCRATCH/diffex/tess'                           # output dir of nf-core/differentialabundance
+  counts: ../master.gene_counts.tsv     # file of raw counts, relative to da_path
+  tpm: ../master.gene_tpm.tsv           # file of TPM counts, relative to da_path
+  contrasts: ../contrasts_tess.differentialabundance.csv  # contrasts file for nf-core/differentialabundance, , relative to da_path
   genesets: ['/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/h.all.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c5.hpo.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c5.go.mf.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c5.go.bp.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.cp.kegg_medicus.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.cp.reactome.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.cp.wikipathways.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.cp.pid.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c2.cp.biocarta.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c3.tft.gtrd.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c3.tft.tft_legacy.v2023.2.Hs.symbols.gmt', '/SCRATCH/REFERENCES/msigdb_v2023.2.Hs_GMTs/c1.all.v2023.2.Hs.symbols.gmt']
   highlight_n: 50       # number of DE genes to highlight
   min_count: 10         # minimum raw count for DE to be accapted
   min_tpm: 5            # minimum TPM for DE to be accepted
   min_lfc: 1            # minimum log2 fold-change  for DE to be accepted
   max_q: 0.05           # FDR level for DE and GSEA
-  genelist : ''         # optional file with custom gene list to highlight instead of DE
+  genelists : ['/DROPBOX/Neurolentech Dropbox/NEUROLENTECH/BIOINFORMATICS/REFERENCES/custom_genesets/autism.sfari_long.genelist.txt', '/DROPBOX/Neurolentech Dropbox/NEUROLENTECH/BIOINFORMATICS/REFERENCES/custom_genesets/epilepsy.all_uniq.genelist.txt']
+  pathways: ''          # Comma-separated (significant) pathways from which to plot leading genes.
   pad: true             # pad zero counts for plots (otherwise the log-scaled axes hide the non-expressed genes)
+  # useAll: false         # Use all the samples. If false, use only the samples marked by the variable 'use' (if present). 
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
@@ -31,9 +36,6 @@ knitr::opts_chunk$set(echo = TRUE, bitmapType='cairo-png')
 # Setup
 
 ```{r libraries, message=FALSE}
-
-setwd(params$da_path)
-
 library(data.table)
 library(ggplot2)
 library(patchwork)
@@ -41,25 +43,73 @@ library(ggrepel)
 library(DT)
 library(DESeq2)
 library(fgsea)
-library(stringr)
-library(parallel)
+library(ggforce)
+library(ggdendro)
+library(ggbeeswarm)
+# library(parallel)
 
 # ggplot2 base theme
 theme_set(theme_bw())
 
-# data.table::setDTthreads(1L)
-threads <- min(c(length(params$genesets), detectCores()))
+threads <- max(c(length(params$genesets), parallel::detectCores()))
+data.table::setDTthreads(threads)
 
 options(scipen=200)
 ```
 
 ```{r load}
+# INPUTS
+dds <- readRDS(file.path(params$da_path, 'other', 'deseq2', paste0(params$comparison, '.dds.rld.rds')))         # can't shrink LFC otherwise
+deseq <- fread(file.path(params$da_path, 'tables', 'differential', paste0(params$comparison, '.deseq2.results.tsv')))  # to avoid running it with different parameters than the pipeline
+vst <- fread(file.path(params$da_path, 'tables', 'processed_abundance', 'all.vst.tsv'))
+normcounts <- fread(file.path(params$da_path, 'tables', 'processed_abundance', 'all.normalised_counts.tsv'))
+counts <- fread(file.path(params$da_path, params$counts))
+tpm <- fread(file.path(params$da_path, params$tpm))
+contrasts <- fread(file.path(params$da_path, params$contrasts))  
+```
 
+```{r in_comparison}
+# Comparison
+setkey(contrasts, id)
+mainvar <- contrasts[params$comparison, variable]
+varref <- contrasts[params$comparison, reference]
+vartreat <- contrasts[params$comparison, target]
+```
+
+```{r in_samples}
+# Metadata
+covars <- as.data.table(colData(dds))
+# Make generic name for coding ease
+covars[, mainvar := covars[[mainvar]]]
+covars[mainvar == varref, mainvar := 'reference']
+covars[mainvar == vartreat, mainvar := 'target']
+
+# Relevant samples
+if ('exclude_samples_col' %in% names(contrasts) && contrasts[params$comparison, exclude_samples_col] != '') {
+  selvar <- contrasts[params$comparison, exclude_samples_col]
+  selvals <- strsplit(contrasts[params$comparison, exclude_samples_values], ',')[[1]]
+  covars <- covars[! covars[[selvar]] %in% selvals, ]
+}
+# # Excluded due to sequencing QC or other external reasons
+# if (!params$useAll && 'use' %in% names(covars) && is.logical(covars$use)) {
+#   covars <- covars[(use), ]
+# }
+subsamples <- covars$sample    # disconnecting from covars$sample, in case in the future I want to show a bigger part of covars while still only working with a subset of samples.
+```
+
+```{r in_shrink}
+# Shrunken LFC
+shrink <- lfcShrink(dds, type ='ashr', contrast = c(mainvar, vartreat, varref),      # apeglm doesn't like this format of contrast specification
+                    res = results(dds, contrast = c(mainvar, vartreat, varref), alpha = params$max_q, lfcThreshold = 0, independentFiltering = TRUE))
+```
+
+```{r munge}
 # Combine inputs 
 munge_DE_tables <- function(deseq, shrink, counts, tpm, normcounts, vst, covars, 
                             subsamples, mainvar, varref, vartreat,
                             min_count = 50, min_tpm = 5, min_lfc = 0.5, max_q = 0.05,
                             highlight_n = 50, genelist = NULL, pad = TRUE) {
+  #  deseq = deseq; shrink = shrink; counts = counts; tpm = tpm; normcounts = normcounts; vst = vst; covars = covars; subsamples = subsamples; mainvar = mainvar; varref = varref; vartreat = vartreat; min_count = params$min_count;  min_tpm = params$min_tpm; min_lfc = params$min_lfc; max_q = params$max_q; highlight_n = params$highlight_n; genelist = genelist; pad = params$pad
   
   shrink <- data.table(gene_id = rownames(shrink), shrunkLFC = shrink$log2FoldChange)
   deseq <- merge(deseq, shrink, by = 'gene_id')
@@ -102,6 +152,7 @@ munge_DE_tables <- function(deseq, shrink, counts, tpm, normcounts, vst, covars,
   # Add sample metadata
   DT <- merge(DT, covars, by = 'sample', all.x = TRUE)
 
+  DT[!is.finite(abundance), abundance := 0]
   if (pad) {
     # Pad zeros, in a non-interfering way.
     rawpad <- min(DT[count_type == 'raw' & abundance > 0, abundance], na.rm = TRUE) / 5
@@ -110,7 +161,10 @@ munge_DE_tables <- function(deseq, shrink, counts, tpm, normcounts, vst, covars,
     tpmpad <- min(DT[count_type == 'tpm' & abundance > 0, abundance], na.rm = TRUE) / 5
     DT[count_type == 'tpm', abundance := abundance + tpmpad]
     message('Zero-padding the TPMs by ', tpmpad)
-    message('The pad values are selected sufficiently small to avoid interference with non-zero measurements.')
+    normpad <- min(DT[count_type == 'normalised' & abundance > 0, abundance], na.rm = TRUE) / 5
+    DT[count_type == 'normalised', abundance := abundance + normpad]
+    message('Zero-padding the normalised counts by ', normpad)
+    message('The pad values are selected to be below the lowest non-zero measurement.')
   }
   
   ## Abundance filters
@@ -136,15 +190,10 @@ munge_DE_tables <- function(deseq, shrink, counts, tpm, normcounts, vst, covars,
   DT[, fltr_pass := fltr_abund_pass & fltr_de_pass]
   
   # Add highlight selection
-  if (!is.null(genelist)) {
-    markgenes <- fread(genelist)[[1]]
-    warning('Highlighting a custom list of genes. The quoted selection thresholds do not apply!')
-  } else {
-    setorder(DT, rank)
-    markgenes <- head(unique(DT[(fltr_pass), gene_id]), highlight_n)
-    if (length(markgenes) <= 1) {                                                                       # if there isn't much to show
-      markgenes <- head(unique(DT[, gene_id]), highlight_n)         # add some context of the nearest misses
-    }
+  setorder(DT, rank)
+  markgenes <- head(unique(DT[(fltr_pass), gene_id]), highlight_n)
+  if (length(markgenes) <= 1) {                                                                       # if there isn't much to show
+    markgenes <- head(unique(DT[, gene_id]), highlight_n)         # add some context of the nearest misses
   }
   DT[, mark := gene_id %in% markgenes] 
   
@@ -154,68 +203,20 @@ munge_DE_tables <- function(deseq, shrink, counts, tpm, normcounts, vst, covars,
   
   return(list(DT = DT, deseq = deseq))
 }
-
-
-
-# Contrast
-stopifnot(str_detect(params$comparison, '\\w+_\\w+_vs_\\w+'))
-contrast <- str_split(str_extract(params$comparison, '\\w+_\\w+_vs_\\w+'), '_')[[1]]
-mainvar <- contrast[1]
-vartreat <- contrast[2]
-varref <- contrast[4]
-
-# INPUTS
-dds <- readRDS(file.path(params$da_path, 'other', 'deseq2', paste0(params$comparison, '.dds.rld.rds')))         # can't shrink LFC otherwise
-deseq <- fread(file.path(params$da_path, 'tables', 'differential', paste0(params$comparison, '.deseq2.results.tsv')))  # to avoid running it with different parameters than the pipeline
-vst <- fread(file.path(params$da_path, 'tables', 'processed_abundance', 'all.vst.tsv'))
-normcounts <- fread(file.path(params$da_path, 'tables', 'processed_abundance', 'all.normalised_counts.tsv'))
-counts <- fread(params$counts)
-tpm <- fread(params$tpm)
-  
-# Metadata
-covars <- as.data.table(colData(dds))
-# Make generic name for coding ease
-covars[, mainvar := covars[[mainvar]]]
-covars[mainvar == varref, mainvar := 'reference']
-covars[mainvar == vartreat, mainvar := 'target']
-
-# Relevant samples
-subsamples <- covars$sample
-if(str_detect(params$comparison, '\\w+_\\w+\\.\\w+_\\w+_vs_\\w+')) {
-  selection <- str_split(str_extract(params$comparison, '^\\w+_\\w+'), '_')[[1]]
-  selvar <- selection[1]
-  selval <- selection[2]
-  subsamples <- covars$sample[covars[[selvar]] == selval]
-}
-covars <- covars[sample %in% subsamples, ]
-# Excluded due to sequencing QC or other external reasons
-if ('use' %in% names(covars) && is.logical(covars$use)) {
-  subsamples <- covars[(use), sample]
-  covars <- covars[sample %in% subsamples, ]
-}
-
-# Shrunken LFC
-shrink <- lfcShrink(dds, type ='ashr', contrast = c(mainvar, vartreat, varref),      # apeglm doesn't like this format of contrast specification
-                    res = results(dds, contrast = c(mainvar, vartreat, varref), alpha = params$max_q, lfcThreshold = 0, independentFiltering = TRUE))
-
-# Custom highlights
-genelist <- NULL
-if (!is.null(params$genelist) && params$genelist != '' && params$genelist != 'NULL'){
-  genelist <- fread(params$genelist)
-}
   
 
 munged <- munge_DE_tables(deseq = deseq, shrink = shrink, counts = counts, tpm = tpm, normcounts = normcounts, vst = vst, covars = covars, 
                             subsamples = subsamples, mainvar = mainvar, varref = varref, vartreat = vartreat,
                             min_count = params$min_count, min_tpm = params$min_tpm, min_lfc = params$min_lfc, max_q = params$max_q,
-                            highlight_n = params$highlight_n, genelist = genelist, pad = params$pad)
+                            highlight_n = params$highlight_n, genelist = NULL, pad = params$pad)
 DT <- munged$DT
 deseq <- munged$deseq
-
-
-saveRDS(DT, file = file.path(params$da_path, 'tables', 'differential', paste0(params$comparison, '.diffex_extra.RDS')))
 ```
 
+```{r in_write}
+saveRDS(DT, file = file.path(params$da_path, 'custom_reports', 'tables', 'differential', paste0(params$comparison, '.diffex_extra.RDS')))
+fwrite(deseq, file = file.path(params$da_path, 'custom_reports', 'tables', 'differential', paste0(params$comparison, '.deseq2.tsv')), sep = "\t", col.names = TRUE)
+```
 
 
 # Contrast and Variables
@@ -223,19 +224,529 @@ saveRDS(DT, file = file.path(params$da_path, 'tables', 'differential', paste0(pa
 ```{r name}
 cat('\n###\nContrast name:\n\n', params$comparison, '\n')
 
+cat('Main variable: ', mainvar)
+cat('Reference: ', varref)
+cat('Target: ', vartreat)
+
+
 cat('\n###\nMetadata of the relevant samples:\n')
 datatable(covars[sample %in% subsamples,], options = list(pageLength = min(25, nrow(covars))))
 ```
 
+```{r functions}
+# Correlations
+my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NULL, txs=3, minMean=0, minSingle=0, groups=NULL, loopVal="default") {
+  # mat <- log10(M); sample <- covars
+  
+  # Filter
+  if (minMean != 0 | minSingle != 0) {
+    mat <- mat[rowSums(mat >= minSingle) >= 1 | rowMeans(mat) >= minMean, ]
+  } else {
+    mat <- mat[rowSums(mat) > 0, ]
+  }
+  
+  # Correlations
+  cormat <- cor(mat, method=method)
+  
+  # Cluster
+  hcfit <- hclust(dist(scale(cormat, center=TRUE)))
+  rn <- rownames(cormat)
+  
+  # Make dendrogram. https://stackoverflow.com/questions/42047896/joining-a-dendrogram-and-a-heatmap
+  dend <- as.dendrogram(hcfit)
+  dend_data <- dendro_data(dend)
+  # Setup the data, so that the axes are exchanged, instead of using coord_flip()
+  segment_data <- with(
+      segment(dend_data), 
+      data.frame(x = y, y = x, xend = yend, yend = xend))
+  # Use the dendrogram label data to position the sample labels
+  sample_pos_table <- with(
+      dend_data$labels, 
+      data.frame(y_center = x, sample = as.character(label), height = 1))
+  # Limits for the vertical axes
+  sample_axis_limits <- with(
+      sample_pos_table, 
+      c(min(y_center - 0.5 * height), max(y_center + 0.5 * height))
+  ) + 0.1 * c(-1, 1) # extra spacing: 0.1
+  # Dendrogram plot
+  pd <- ggplot(segment_data) + 
+    geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) + 
+    scale_x_reverse(expand = c(0, 0.5),
+                    position = "top") + 
+    scale_y_continuous(position = "right",
+                       breaks = sample_pos_table$y_center, 
+                       labels = sample_pos_table$sample, 
+                       limits = sample_axis_limits, 
+                       expand = c(0, 0)) + 
+    labs(x = NULL, y = NULL) +
+    theme_minimal() + 
+    theme(panel.grid = element_blank(),
+          axis.text.y = element_blank(),
+          axis.ticks.y = element_blank())
+
+  
+  # Create duplicates for different plot styles.
+  cormat <- cormat[samples, samples]                     # In the supplied order.
+  cormat_t <- cormat                                     # Duplicate in which to delete below the diagonal.
+  cormat_c <- cormat[rn[hcfit$order], rn[hcfit$order]]   # Duplicate in clustered order.
+  cormat_ct <- cormat_c                                  # Duplicate in which to delete below the diagonal.
+  # Delete below the diagonal, for the triangles.
+  for (r in 1:nrow(cormat_t)) {
+    for (c in 1:ncol(cormat_t)) {
+      if (c <= r) {                # For non-clustered, also delete the diagonal. 
+        cormat_t[r, c] <- NA_real_
+      }
+    }
+  }
+  for (r in 1:nrow(cormat_ct)) {
+    for (c in 1:ncol(cormat_ct)) {
+      if (c < r) {                 # For clustered keep the diagonal, so the dendrogram lines up.
+        cormat_ct[r, c] <- NA_real_
+      }
+    }
+  }
+  cormat_ctv <- cormat_ct                               # Duplicate in which to also delete the diagonal, for the value labels.
+  for (r in 1:nrow(cormat_ctv)) {
+    for (c in 1:ncol(cormat_ctv)) {
+      if (c == r) {
+        cormat_ctv[r, c] <- NA_real_
+      }
+    }
+  }
+
+  # Restructure for plotting.
+  restruct <- function(cm){
+    rn <- rownames(cm)
+    cm <- as.data.table(cm)
+    cm[, observation1 := factor(rn, ordered=TRUE, levels=rn)]
+    cm <- melt(cm, id.vars = "observation1", value.name = "Correlation", variable.name = "observation2")
+    cm[, observation2 := factor(observation2, ordered=TRUE, levels=rn)]
+    # cm <- merge(cormat, sample_pos_table, by.x="observation2", by.y="sample", all.x=TRUE)
+    cm
+  }
+  
+  cormat <- restruct(cormat)
+  cormat_t <- restruct(cormat_t)
+  cormat_c <- restruct(cormat_c)
+  cormat_ct <- restruct(cormat_ct)
+  cormat_ctv <- restruct(cormat_ctv)
+  cormat_t <- cormat_t[!is.na(Correlation)]
+  cormat_ct <- cormat_ct[!is.na(Correlation)]
+  cormat_ctv <- cormat_ctv[!is.na(Correlation)]
+  
+
+  # Text colour switch for the dynamic range
+  m <- min(cormat_ctv$Correlation, na.rm=TRUE)
+  M <- max(cormat_ctv$Correlation, na.rm=TRUE)
+  colourswitch <- c( m + 0.49 * (M-m),  m + 0.51 * (M-m) )
+  
+  
+  # Square. Custom order. No values. Full range.
+  p_sonf <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "grey50" ) +
+    scale_x_discrete(position = "top") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+
+  # Square. Custom order. No values. Dynamic range.
+  p_sond <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "grey50" ) +
+    scale_x_discrete(position = "top") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+
+
+  # Square. Custom order. With values. Full range.
+  p_sovf <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(data=cormat_t, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
+    scale_x_discrete(position = "top") +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "grey50" ) +
+    scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="grey50", guide="none") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+
+  # Square. Custom order. With values. Dynamic range.
+  p_sovd <- ggplot(cormat, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(data=cormat_t, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
+    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "grey50" ) +
+    scale_colour_manual(values=c("black", "white"), na.value="grey50", guide="none") +
+    scale_x_discrete(position = "top") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+
+
+  # Square. Clustered order. No values. Full range.
+  p_scnf <- ggplot(cormat_c, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "grey50" ) +
+    scale_x_discrete(position = "top") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+
+  # Square. Clustered order. No values. Dynamic range.
+  p_scnd <- ggplot(cormat_c, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "grey50" ) +
+    scale_x_discrete(position = "top") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+
+
+  # Square. Clustered order. With values. Full range.
+  p_scvf <- ggplot(cormat_c, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(data=cormat_ctv, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "grey50" ) +
+    scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="grey50", guide="none") +
+    scale_x_discrete(position = "top") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+
+  # Square. Clustered order. With values. Dynamic range.
+  p_scvd <- ggplot(cormat_c, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(data=cormat_ctv, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
+    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "grey50" ) +
+    scale_colour_manual(values=c("black", "white"), na.value="grey50", guide="none") +
+    scale_x_discrete(position = "top") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+
+
+  # Triangle. Custom order. With values. Full range.
+  p_tovf <- ggplot(cormat_t, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
+    scale_x_discrete(position = "top") +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "grey50" ) +
+    scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="grey50", guide="none") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+
+  # Triangle. Custom order. With values. Dynamic range.
+  p_tovd <- ggplot(cormat_t, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
+    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value = "grey50" ) +
+    scale_colour_manual(values=c("black", "white"), na.value="grey50", guide="none") +
+    scale_x_discrete(position = "top") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+
+
+  # Triangle. Clustered order. with values. Full range.
+  p_tcvf <- ggplot(cormat_ct, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(data=cormat_ctv, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=Correlation >= -0.60 & Correlation <= 0.60 ), size=rel(txs)) +
+    scale_x_discrete(position = "top") +
+    scale_fill_gradientn(limits=c(-1, 1), colors=c("lightskyblue", "dodgerblue3", "darkblue", "black", "darkred", "red", "gold"), na.value = "grey50" ) +
+    scale_colour_manual(values=c('FALSE'="black", 'TRUE'="white"), na.value="grey50", guide="none") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+
+  # Triangle. Clustered order. with values. Dynamic range.
+  p_tcvd <- ggplot(cormat_ct, aes(x=observation1, y=observation2)) +
+    geom_tile(aes(fill=Correlation)) +
+    geom_text(data=cormat_ctv, aes(label=sub('0.', '.', as.character(round(Correlation, 2))), colour=(Correlation <= colourswitch[2]) ), size=rel(txs)) +
+    scale_x_discrete(position = "top") +
+    scale_fill_gradientn(colors=c("black", "red", "gold", "white"), na.value ="grey50" ) +
+    scale_colour_manual(values=c("black", "white"), na.value="grey50", guide="none") +
+    labs(x='', y='', title=paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Clustered")) +
+    theme(axis.text.x=element_text(angle=90, hjust=0, vjust=0.5),
+          panel.grid = element_blank() )
+
+  
+  # If exact pairs don't matter.
+  cormat_x <- merge(cormat_t, groups, by = c('observation1', 'observation2'), all.x = TRUE, all.y = FALSE)
+  
+  p_bee <- ggplot(cormat_x, aes(x = Correlation, y = group, colour = group)) +
+    # geom_violin()+ #(draw_quantiles = c(0.25, 0.5, 0.75)) +
+    geom_boxplot(outlier.alpha = 0, width = 0.5, fill = 'grey95', colour = 'black') +
+    # geom_jitter(width = 0, height = 0.2) +
+    geom_beeswarm() +
+    # scale_x_continuous(limits = c(-1, 1)) +
+    scale_colour_brewer(palette = 'Set1') +
+    labs(title = paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Summary"), x = "Pairwise Correlation", y = "Pairs") +
+    theme(legend.position = 'none')
+    
+  out <- list(corr=dcast(cormat_t, observation1 ~ observation2, value.var = "Correlation"),
+              sonf=p_sonf, #sond=p_sond,
+              sovf=p_sovf, #sovd=p_sovd,
+              scnf=pd + p_scnf + plot_layout(ncol=2, widths=c(1,4)), #scnd=pd + p_scnd + plot_layout(ncol=2, widths=c(1,4)),
+              scvf=pd + p_scvf + plot_layout(ncol=2, widths=c(1,4)), #scvd=pd + p_scvd + plot_layout(ncol=2, widths=c(1,4)),
+              tovf=p_tovf, #tovd=p_tovd,
+              tcvf=pd + p_tcvf + plot_layout(ncol=2, widths=c(1,4)), #tcvd=pd + p_tcvd + plot_layout(ncol=2, widths=c(1,4)),
+              bee = p_bee
+            )
+  
+  if (!is.null(rds) && length(rds) > 0) {
+    saveRDS(out, file = rds)
+  }
+  
+  return(out)
+}
+
+## helper function
+pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){
+  # pc <- pc; loads <- infl; highloads <- highinfl; ig <- ig; pcaimp <- pcaimp; pcx <- 1; pcy <- 2
+  mycolours <- c(
+  	"#ff0000", "#eebb00", "#335500", "#22ff00", "grey50", "#BB00aa", "#ddaadd", "#00ddff", "#0000ff" 
+  )
+  # This works best when the colours are in a sensible sequence of gradual change.
+  getPalette <- colorRampPalette(mycolours)
+
+  pcxs <- paste0("PC", pcx)
+  pcys <- paste0("PC", pcy)
+  subload <- loads[rowID %in% unique(c(head(highloads[[pcx]], 5), head(highloads[[pcy]], 5))), c("rowID", pcxs, pcys), with=FALSE]
+  lmt <- max( c(abs(pc[[pcxs]]), abs(pc[[pcys]])) )
+  
+  return(
+    lapply(ig[ig != 'sample'], function(varname) {
+      # varname <- ig[2]
+      
+      return(
+        
+        ggplot(pc, aes(x = .data[[pcxs]], y = .data[[pcys]], label = sample, fill = as.character(.data[[as.character(varname)]]), colour = as.character(.data[[as.character(varname)]]))) +
+          geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
+          geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
+          # geom_mark_hull(alpha=0.1, colour='transparent') +
+          geom_point(shape=16, size=rel(2.1)) +
+          # geom_text(size=rel(2.1)) +
+          geom_text_repel(size=rel(2.1), min.segment.length = 0) +
+          coord_fixed(ratio=1, xlim=c(-lmt, lmt), ylim=c(-lmt, lmt) ) +
+          scale_colour_manual(values=getPalette(length(unique(pc[[as.character(varname)]]))), name=varname) +
+          scale_fill_manual(values=getPalette(length(unique(pc[[as.character(varname)]]))), name=varname) +
+          labs(x=paste0(pcxs, " (", round(pcaimp[PC==pcx, Explained], 1), "%)"),
+               y=paste0(pcys, " (", round(pcaimp[PC==pcy, Explained], 1), "%)"),
+               title=varname) +
+          theme(panel.grid=element_blank())
+        
+      )}) )
+}
+
+# PCA
+# (scaling and centering of genes to one another, NOT samples to one another)
+do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, topgenes=NULL, exclude=NULL, minMean=0, minSingle=0, ntop=10) {
+  # countsmat <- log10(M)
+  # scale = TRUE; center = TRUE; rds = NULL; topgenes=topgenes; exclude=NULL; minMean=0; minSingle=0; ntop=10
+  
+  nvars <- nrow(countsmat)
+  countsmat <- countsmat[rowSums(countsmat) > 0, ]
+  
+  # Mean and Standard Deviation, standardized counts, mean and stdev of standardized counts.
+  genevar <- data.table(name = rownames(countsmat),
+                        Mean = rowMeans(countsmat),
+                        StDev = rowSds(countsmat),
+                        singles = rowSums(countsmat >= minSingle))
+  # normcounts <- (countsmat - genevar$Mean) / genevar$StDev
+  # genevar [, zMean := rowMeans(normcounts)]
+  # genevar [, zStDev := rowSds(normcounts)]    # always 1 by definition
+  
+  # Select features
+  if (is.null(topgenes)) {
+    message(paste("Using variable features that exceed either", minMean, "mean count or", minSingle, "count in any single sample."))
+    topgenes = genevar[StDev > 0 & (Mean >= minMean | singles > 0), name]  # all the variable genes, above min count level
+  } else {
+    message("Using the variable features among the manually provided list.")
+    topgenes = genevar[name %in% topgenes & StDev > 0, name] # manually provided features, as long as they are variable
+  }
+  message(paste("Number of variable features available:", nrow(genevar[StDev > 0,])))
+  message(paste("Number of variable features used:", length(topgenes[!topgenes %in% exclude])))
+  
+  # PCA
+  subcmat <- countsmat[topgenes[!topgenes %in% exclude], ]
+  subcmat <- t(subcmat)
+  pca <- prcomp(subcmat, center = center, scale = scale)
+    
+  srn <- sqrt(nrow(pca$x) - 1)
+  pc <- sweep(pca$x, 2, 1 / (pca$sdev * srn), FUN = '*')   
+  dirs <- as.data.table(pca$rotation)
+  
+  pc <- cbind(pc, data.frame(sample = rownames(pc)))
+  pc <- as.data.frame(merge(pc, covars, by="sample", all = TRUE))
+  npc <- sum(pca$sdev > 1)
+  
+  # Screeplot.
+  
+  pcaimp <- data.table(PC = 1:length(colnames(pca$x)),
+                       Explained = summary(pca)$importance['Proportion of Variance', ] * 100,
+                       Cumulative = summary(pca)$importance['Cumulative Proportion', ] * 100)
+  pcaimp <- pcaimp[1:npc, ]
+  topnpc <- nrow(pcaimp[Explained >= 2])
+  
+  pimp <- ggplot(pcaimp[Explained > 1, ]) +
+    geom_line(aes(x=PC, y=Cumulative), colour='dodgerblue') +
+    geom_bar(aes(x=PC, y=Explained, fill=Explained >= 1),
+             stat='identity', colour='transparent', alpha=0.3) +
+    geom_text(aes(x=PC, y=0, label=paste0(round(Explained, 1),"%")), 
+              angle=90, hjust=0, vjust=0, size=rel(3)) +
+    geom_text(data=pcaimp[2:npc,][Explained > 1, ],
+              aes(x=PC, y=0.95*Cumulative, label=paste0(round(Cumulative, 1),"%")), 
+              angle=90, vjust=0, hjust=1, size=rel(3)) +
+    scale_fill_manual(values=c("grey75", "grey25"), guide="none") +
+    scale_x_continuous(breaks=seq.int(1, npc, 1)) +
+    labs(title = "Scree plot", subtitle=paste0(length(topgenes), " features, ", npc, " PCs"), 
+         x = "Principal Component", y='% Variance') +
+    theme(panel.grid=element_blank())
+    
+  
+  # Top influencers. 
+  
+  infl <- as.data.table(pca$rotation)
+  highinfl <- lapply(infl, function(x){ order(abs(x), decreasing=TRUE) })
+  infl[, rowID := rownames(pca$rotation)]
+  highinfl <- lapply(highinfl, function(x){ head(unique(infl$rowID[x]), ntop) })
+  # highinfl <- highinfl[1:topnpc]
+  setkey(infl, rowID)
+  
+  # Influence plots
+  # lapply(1:npc, function(i) {
+  #   ggplot(infl[highinfl[[i]], 
+  #             c('rowID', names(loads)[i]), with=FALSE], 
+  #        aes_string(x="rowID", xend="rowID", y=0, yend=names(loads)[i])) +
+  #   geom_segment() +
+  #   geom_point(aes_string(y=names(loads)[i])) +
+  #   coord_flip() +
+  #   labs(y=NULL, x=NULL)
+  # })
+  
+  # Coefficient names.
+
+  ig <- names(covars)
+  ig <- ig[ig %in% c('sample', 'mainvar', 'use', 'bracket', 'bracketPC')]
+  ig <- factor(ig, ordered = TRUE, levels = rev(c('sample', 'mainvar', 'use', 'bracket', 'bracketPC')))
+
+  # Means and Variances of the selected genes
+  genevar[, selected := name %in% colnames(subcmat)]
+  genevar[, excluded := name %in% exclude]
+  pvar1 <- ggplot() +
+      geom_point(data=genevar[!selected & excluded, ], aes(x=Mean, y=StDev/Mean), shape=16, size=0.8, alpha=0.5, colour='grey50') +
+      geom_point(data=genevar[!selected & !excluded, ],aes(x=Mean, y=StDev/Mean), shape=16, size=0.8, alpha=1, colour='black') +
+      geom_point(data=genevar[(selected), ], aes(x=Mean, y=StDev/Mean), shape=16, size=1, alpha=1, colour='red') +
+      geom_point(aes(x=NA_real_, y=NA_real_, colour=c('Filtered out','Not used','Used'))) +
+      scale_x_log10() +
+      scale_y_log10() +
+      scale_colour_manual(name='Filtering:', breaks=c('Used', 'Not used', 'Filtered out'), values=c('red', 'black', 'grey70')) +
+      annotation_logticks(base=10, sides='lb') +
+      labs(x="Mean", y="Coeff. of Variation", title=paste(nrow(genevar[StDev>0, ]), "variable features"), 
+           subtitle=paste(nrow(genevar[(!excluded),]), "after filtering,", length(topgenes), "used")) +
+      theme(legend.position='bottom', panel.grid=element_blank())
+
+  # Plot higher PCs in 2D pairs. Highlight one variable at a time.
+  L <- lapply(seq(1, topnpc, 2), function(pcx){
+    # pcx <- 1
+    pcy <- pcx + 1
+    if (pcy > npc) pcy <- 1
+    pca_plotter(pc, infl, highinfl, ig, pcaimp, pcx, pcy)
+  } )
+  
+  out <- list(pca=pca,
+              nvars=nvars,
+              nPC=npc,
+              pimp=pimp, pvar1=pvar1,
+              highloads=highinfl,
+              pc2d=L
+              )
+  
+  if (!is.null(rds) && length(rds) > 0) {
+    saveRDS(out, file = rds)
+  }
+  
+  return(out)
+}
+```
+
+## Correlation
+
+Using the DESeq2 normalised abundances, instead of TPM, so that any batch corrections carried out by DESeq2 are in effect.
+
+```{r correlations, fig.height= 4, fig.width = 10}
+# Filtered matrix for correlation
+M <- dcast(DT[fltr_abund_pass & count_type == 'normalised', .(gene_id, sample, abundance)], 
+           gene_id ~ sample, value.var = 'abundance')
+n <- M$gene_id
+M <- as.matrix(M[, 2:length(M)])
+rownames(M) <- n
+
+# Grouping look-up
+setkey(covars, sample)
+G <- as.data.table(expand.grid(covars$sample, covars$sample))
+setnames(G, c('observation1','observation2'))
+G[, observation1 := as.character(observation1)]
+G[, observation2 := as.character(observation2)]
+G[, group1 := covars[observation1, mainvar, with = FALSE]]
+G[, group2 := covars[observation2, mainvar, with = FALSE]]
+G[, group := paste(group1, group2, sep = ' <-> ')]
+# Fix order of conditions, regardless of order of sample names
+G[, group := vapply(group, function(x){ strsplit(x, ' <-> ')[[1]]  |>  sort()  |>  paste(collapse = ' <-> ') }, character(1))]
+
+setorder(covars, mainvar, sample)
+
+corels <- my_pairwise_internal_corels(log10(M), covars$sample, method="spearman", groups = G,
+                                      minMean = 0, minSingle = 0, loopVal=mainvar,     # prefiltered
+                                      rds = NULL )
+
+corels$bee
+```
+
+```{r correlations2, fig.height=15, fig.width=15}
+corels$sovf
+```
+
+## PCA
+
+Using the DESeq2 normalised abundances, instead of TPM, so that any batch corrections carried out by DESeq2 are in effect.
+
+```{r pca, fig.height = 10, fig.width = 10}
+# Unfiltered matrix for correlation
+M <- dcast(DT[count_type == 'normalised', .(gene_id, sample, abundance)], 
+           gene_id ~ sample, value.var = 'abundance')
+n <- M$gene_id
+M <- as.matrix(M[, 2:length(M)])
+rownames(M) <- n
+topgenes <- DT[(fltr_abund_pass), unique(gene_id)]
+
+all_pca <- do_pca(log10(M), covars, ntop = 10,
+                  topgenes= topgenes, exclude=NULL,
+                  minMean = 0, minSingle = 0,      # prefiltered
+                  rds = NULL )
+
+message('Main variable: ', mainvar)
+message('Reference: ', varref)
+message('Target: ', vartreat)
+
+all_pca$pc2d[[1]]
+```
 
 
 # Differential abundance
+
+## Table
+
+```{r de_table}
+datatable(deseq, options = list(pageLength = min(50, nrow(deseq))))
+```
 
 ## FC & significance
 
 `fltr_pass` represents genes that meet all of the criteria: FDR < `r params$max_q` , abs(L2FC) > `r params$min_lfc`, mean raw count in at least one condition > `r params$min_count`, and mean TPM in at least one condition > `r params$min_tpm`.
 
-```{r volcano, fig.height=15, fig.width=15}
+```{r volcano, fig.height=10, fig.width=10}
 volcXY <- unique(DT[, .(gene_id, gene_name, padj, log2FoldChange, shrunkLFC, fltr_abund_pass, fltr_de_pass, fltr_pass, mark)])
 volcXY[, upregulated := log2FoldChange > 0]
 volcXY[log2FoldChange == 0, upregulated := NA] # edge case
@@ -250,31 +761,36 @@ setorder(desummary, fltr_pass)
 print(desummary)
 
 p_volcano <- ggplot(volcXY, aes(x = log2FoldChange, y = -log10(padj), colour = fltr_pass, label = gene_name)) +
+  geom_vline(xintercept = params$min_lfc, colour = 'orange', linetype = 'dashed' ) +
+  geom_vline(xintercept = -params$min_lfc, colour = 'orange', linetype = 'dashed' ) +
+  geom_hline(yintercept = -log10(params$max_q), colour = 'orange', linetype = 'dashed' ) +
+  geom_point(data = volcXY[!(fltr_pass), ], shape = 16, size = rel(0.8), alpha = 0.7) +
+  geom_point(data = volcXY[(fltr_pass), ], shape = 16, size = rel(1)) +
+  geom_label_repel(data = volcXY[(mark), ], colour = 'black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 2, force_pull = 0.1, max.overlaps = 100) +
+  scale_colour_manual(values = c('grey50', '#2244FF')) +
+  labs(title = params$comparison) +
+  theme(legend.position = 'bottom', panel.grid.minor = element_blank())
+
+p_volcano
+```
+
+```{r shrunkvolcano, fig.height=10, fig.width=10}
+p_shrunkvolcano <- ggplot(volcXY, aes(x = shrunkLFC, y = -log10(padj), colour = fltr_pass, label = gene_name)) +
+  geom_vline(xintercept = params$min_lfc, colour = 'orange', linetype = 'dashed' ) +
+  geom_vline(xintercept = -params$min_lfc, colour = 'orange', linetype = 'dashed' ) +
   geom_point(data = volcXY[(!fltr_pass)], shape = 16, size = rel(0.8), alpha = 0.7) +
   geom_point(data = volcXY[(fltr_pass)], shape = 16, size = rel(1)) +
   geom_label_repel(data = volcXY[(mark), ], colour = 'black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 2, force_pull = 0.1, max.overlaps = 100) +
   scale_colour_manual(values = c('grey50', '#2244FF')) +
   labs(title = params$comparison) +
-  theme(legend.position = 'bottom')
+  theme(legend.position = 'bottom', panel.grid.minor = element_blank())
 
-p_volcano
-```
-
-```{r shrunkvolcano, fig.height=15, fig.width=15}
-# p_shrunkvolcano <- ggplot(volcXY, aes(x = shrunkLFC, y = -log10(padj), colour = fltr_pass, label = gene_name)) +
-#   geom_point(data = volcXY[(!fltr_pass)], shape = 16, size = rel(0.8), alpha = 0.7) +
-#   geom_point(data = volcXY[(fltr_pass)], shape = 16, size = rel(1)) +
-#   geom_label_repel(data = volcXY[(mark), ], colour = 'black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 2, force_pull = 0.1, max.overlaps = 100) +
-#   scale_colour_manual(values = c('grey50', '#2244FF')) +
-#   labs(title = params$comparison) +
-#   theme(legend.position = 'bottom')
-# 
-# p_shrunkvolcano
+p_shrunkvolcano
 ```
 
 ## FC & abundance
 
-```{r ma, fig.height=15, fig.width=15}
+```{r ma, fig.height=10, fig.width=10}
 maXY <- unique(DT[mainvar == 'reference' & count_type == 'normalised', .(gene_id, gene_name, count_type, condGeneMean, log2FoldChange, fltr_pass, mark)])
 
 p_ma <- ggplot(maXY, aes(x = condGeneMean, y = log2FoldChange, colour = fltr_pass, label = gene_name)) +
@@ -295,8 +811,8 @@ p_ma
 
 `fltr_pass` represents genes that meet all of the criteria: FDR < `r params$max_q` , abs(L2FC) > `r params$min_lfc`, mean raw count in at least one condition > `r params$min_count`, and mean TPM in at least one condition > `r params$min_tpm`.
 
-```{r expression, fig.height=15, fig.width=15}
-abundXY <- dcast(unique(DT[count_type == 'tpm', .(gene_id, gene_name, count_type, condGeneMean, fltr_abund_pass, fltr_de_pass, fltr_pass, mark, mainvar)]), '... ~ mainvar', value.var = 'condGeneMean')
+```{r expression, fig.height=10, fig.width=10}
+abundXY <- dcast(unique(DT[count_type == 'normalised', .(gene_id, gene_name, count_type, condGeneMean, fltr_abund_pass, fltr_de_pass, fltr_pass, mark, mainvar)]), '... ~ mainvar', value.var = 'condGeneMean')
 
 p_XY <- ggplot(abundXY, aes(x = reference, y = target, label = gene_name, colour = fltr_pass)) +
   facet_wrap(~ count_type, scales='free', ncol = 1) +
@@ -315,7 +831,7 @@ p_XY
 
 ## Density distributions
 
-The dotted lines represent the abundance thresholds that will be applied in accepting the DE results: mean raw count in at least one condition > `r params$min_count`, and mean TPM in at least one condition > `r params$min_tpm`.
+The dotted lines represent the abundance thresholds that are applied in accepting the DE results: mean raw count in at least one condition > `r params$min_count`, and mean TPM in at least one condition > `r params$min_tpm`.
 
 ```{r expresion_density, fig.height=10, fig.width=15}
 count_thresh <- data.frame(count_type = factor(c('raw', 'tpm'), levels = c('raw', 'tpm', 'normalised', 'vst'), ordered = TRUE), thresh = c(params$min_count, params$min_tpm))
@@ -362,30 +878,38 @@ p_dense
 
 The genes are ordered by decreasing fold-change and the samples are grouped by condition.
 
-```{r heatmap, fig.height=40, fig.width=15}
-heatXY <- DT[(mark) & count_type != 'normalised', .(gene_id, gene_name, sample, abundance, condGeneMean, count_type, mainvar, log2FoldChange)]
+```{r heatmap, fig.height=16, fig.width=12}
+heatXY <- DT[(mark), .(gene_id, gene_name, sample, abundance, condGeneMean, count_type, mainvar, log2FoldChange)]
 setorder(heatXY, mainvar, log2FoldChange)
 heatXY[, sample := factor(sample, levels = unique(sample), ordered = TRUE)]
 heatXY[, gene_name := factor(gene_name, levels = unique(gene_name), ordered = TRUE)]
 
-p_heat <- (ggplot(heatXY[count_type == 'tpm', ], aes(x = sample, y = gene_name, fill = log10(abundance))) +
+p_heat1 <- ggplot(heatXY[count_type == 'tpm', ], aes(x = sample, y = gene_name, fill = log10(abundance))) +
             facet_wrap(~ count_type, scales = 'free') +
             geom_tile() +
             scale_fill_gradient(low = 'black', high = 'yellow') +
             labs(title = params$comparison) +
-            theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) ) +
+            theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
 
-            (ggplot(heatXY[count_type == 'vst', ], aes(x = sample, y = gene_name, fill = abundance)) +
+p_heat2 <- ggplot(heatXY[count_type == 'normalised', ], aes(x = sample, y = gene_name, fill = log10(abundance))) +
             facet_wrap(~ count_type, scales = 'free') +
             geom_tile() +
             scale_fill_gradient(low = 'black', high = 'yellow') +
-            theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) ) +
-    plot_layout(ncol = 1)
+            labs(title = params$comparison) +
+            theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
 
-p_heat
+p_heat3 <- ggplot(heatXY[count_type == 'vst', ], aes(x = sample, y = gene_name, fill = abundance)) +
+            facet_wrap(~ count_type, scales = 'free') +
+            geom_tile() +
+            scale_fill_gradient(low = 'black', high = 'yellow') +
+            theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+print(p_heat1)
+print(p_heat2)
+print(p_heat3)
 ```
 
-### Detail
+### Boxplots
 
 The genes are ordered by decreasing fold-change.
 
@@ -394,21 +918,40 @@ The dotted lines represent the abundance criteria: mean raw count in at least on
 ```{r details, fig.height=20, fig.width=15}
 cntthresh <- data.frame(count_type = factor(c('raw', 'tpm'), ordered = TRUE, levels = c('raw', 'tpm', 'normalised', 'vst')), abundance = c(params$min_count, params$min_tpm))
 
-p_box <- ggplot(heatXY[count_type != 'normalised', ], aes(y = gene_name, x = abundance, colour = mainvar)) +
+p_box <- ggplot(heatXY[count_type != 'vst', ], aes(y = gene_name, x = abundance, colour = mainvar, fill = mainvar)) +
   facet_wrap(~ count_type, nrow = 1, scales = 'free_x') +
   geom_vline(data = cntthresh, aes(xintercept = abundance), linetype = 'dotted') +
   geom_jitter(shape = 16, size = rel(1), height = 0.2) +
-  geom_boxplot(fill = 'transparent', outlier.alpha = 0, width = 0.5, linewidth = 0.2) +
+  geom_boxplot(alpha = 0.1, outlier.alpha = 0, width = 0.6, linewidth = 0.2) +
   # scale_x_continuous(trans = 'log2') +
   # scale_x_continuous(trans = 'sqrt') +
   scale_x_log10() +
   scale_colour_manual(values = c('blue', 'red')) + 
+  scale_fill_manual(values = c('blue', 'red')) + 
   labs(title = params$comparison) +
   theme(legend.position = 'bottom', panel.grid.minor.x = element_blank())
 
 p_box
 ```
 
+##  Write to PDF
+
+```{r de_pdf}
+pdf(file.path(params$da_path, 'custom_reports', 'plots', 'differential', paste0(params$comparison, '.diffex_plots.pdf')), 
+    width = max(8, params$highlight_n / 4), height = max(10, params$highlight_n / 3))
+
+print(p_volcano)
+print(p_XY)
+print(p_box)
+print(p_heat1)
+print(p_heat2)
+print(p_heat3)
+
+print(corels$sovf)
+print(all_pca$pc2d[[1]])
+
+dev.off()
+```
 
 # GSEA
 
@@ -417,6 +960,24 @@ The genes are ranked by the shrunken log2 fold-change.
 Gene-sets are considered enriched if they meet the criterion: FDR < `r params$max_q`. When multiple gene-set resources are queried, the default multiple-testing correction is inadequate, as it is performed for each resource separately. Therefore a new correction is carried out to encompass the real total number of tests.
 
 Only gene-sets that meet the FDR cutoff are shown in the plots and tables below. Out of those, only the highest enrichment scores are labeled in the plots, for legibility.
+
+## Legend of default databases
+
+All gene-set datasets were obtained through MSigDB (Broad Institute).
+
+- `h.all.v2023.2.Hs.symbols.gmt` Hallmark gene-sets.
+- `c5.hpo.v2023.2.Hs.symbols.gmt` Human Phenotype Ontology
+- `c5.go.mf.v2023.2.Hs.symbols.gmt` GO MF - Gene Ontology for Molecular Function
+- `c5.go.bp.v2023.2.Hs.symbols.gmt` GO BP - Gene Ontology for Biological Process
+- `c2.cp.kegg_medicus.v2023.2.Hs.symbols.gmt` KEGG Medicus - Kyoto Encyclopedia of Genes and Genomes
+- `c2.cp.reactome.v2023.2.Hs.symbols.gmt` REACTOME (EMBL-EBI and others)
+- `c2.cp.wikipathways.v2023.2.Hs.symbols.gmt` WikiPathways
+- `c2.cp.pid.v2023.2.Hs.symbols.gmt` Pathway Interaction Database (NIH)
+- `c2.cp.biocarta.v2023.2.Hs.symbols.gmt`BioCarta (Uni Pitsburg)
+- `c1.all.v2023.2.Hs.symbols.gmt` Cytogenic Bands
+- `c3.tft.gtrd.v2023.2.Hs.symbols.gmt` Transcription Factor Targets - GTRD predicted TF binding sites (https://pubmed.ncbi.nlm.nih.gov/33231677/)
+- `c3.tft.tft_legacy.v2023.2.Hs.symbols.gmt` Transcription Factor Targets - older collection of cis- motifs (http://www.nature.com/nature/journal/v434/n7031/abs/nature03441.html)
+
 
 ```{r gsea_prep}
 ranks <- unique(DT[is.finite(shrunkLFC), .(gene_name, shrunkLFC)])
@@ -427,25 +988,37 @@ ranks[, absSLFC := abs(shrunkLFC)]
 setorder(ranks, gene_name, -absSLFC)
 ranks <- ranks[, head(.SD, 1), by = gene_name]
 
-run_fgsea <- function(gmts, x, tail, q, comparison, title) {
-  gsea <- Reduce(rbind, 
-                 mclapply(gmts, 
-                        function(gmt) {
-                          pathways <- gmtPathways(gmt)
-                          res <- fgsea(pathways = pathways, stats = x, 
-                                       minSize = 15, maxSize = 500, scoreType = tail, nPermSimple = 10000)
-                          setorder(res, padj, NES)
-                          
-                          dir.create(file.path(params$da_path, 'tables', 'gsea', comparison, sub('.gmt', '', basename(gmt))), recursive=TRUE)
-                          fwrite(res, file = file.path(params$da_path, 'tables', 'gsea', comparison, sub('.gmt', '', basename(gmt)), paste0(title, '.fgsea_', tail, '_', sub('.gmt', '', basename(gmt)), '.tsv')),
-                                 col.names = TRUE, quote = FALSE, sep = '\t')
-                          
-                          message(basename(gmt), ' : ', nrow(res[padj < q, ]), ' significant pathways, out of ', nrow(res))
-                          
-                          res[, resource := basename(gmt)]
-                          res[, side := tail]
-                          res
-                        }, mc.cores = threads) )
+run_fgsea <- function(gmts, x, tail, q, comparison, title, path = params$da_path, multithread = threads) {
+  outs <- lapply(gmts, 
+                function(gmt) {
+                  pathways <- gmtPathways(gmt)
+                  
+                  ## Doesn't work                    
+                  # kid <- knitr::knit_child(
+                  #           text = c('#### `r paste(basename(gmt), tail)`'),
+                  #           envir = rlang::env(parent.frame(), quiet = TRUE)
+                  #         )
+                  # cat(kid, sep = "\n")
+
+                  res <- fgsea(pathways = pathways, stats = x, scoreType = tail, 
+                               minSize = 15, maxSize = 500, nPermSimple = 1000, nproc = multithread)
+                  setorder(res, padj, NES)
+                  
+                  dir.create(file.path(path, 'custom_reports', 'tables', 'gsea', comparison, sub('.gmt', '', basename(gmt))), recursive=TRUE)
+                  
+                  fwrite(res, file = file.path(path, 'custom_reports', 'tables', 'gsea', comparison, sub('.gmt', '', basename(gmt)), 
+                                               paste0(comparison, '.', gsub('.', '_', sub('.gmt', '', basename(gmt), fixed = TRUE), fixed = TRUE), '.', tail, '_', title, '.gsea.tsv')),
+                         col.names = TRUE, quote = FALSE, sep = '\t')
+                  
+                  cat(basename(gmt), ' : ', nrow(res[padj < q, ]), ' significant pathways, out of ', nrow(res), '\n')
+                  # print(datatable(res[, .(pathway, padj, NES, size, leadingEdge)], ))
+                  
+                  res[, resource := basename(gmt)]
+                  res[, side := tail]
+                  res
+                })
+
+  gsea <- base::Reduce(rbind, outs)
   
   # Querying multiple pathway resources means that the pval were not cocrected for the actual total number of tests. Correct again.
   if(length(gmts) > 1) {
@@ -454,48 +1027,70 @@ run_fgsea <- function(gmts, x, tail, q, comparison, title) {
   } else {
     gsea[, padj_meta := padj] # so I don't have to handle number of sets outside this function
   }
-    
 }
 
-plot_fgsea <- function(res, title, ncol, n, q = params$max_q) {
-  # res <- gsea1; ncol <- 1; n <- 20; title <- 'foobar'
+plot_fgsea <- function(res, title, n, q = params$max_q, twosides = TRUE, comparison = params$comparison, path = params$da_path) {
+  # res <- gsea2; n <- 40; title <- ' abs(LFC)'; twosides = TRUE; comparison = params$comparison; path = params$da_path
   
   res[, absNES := abs(NES)]
   setorder(res, -absNES)
-    
-  twosides <- any(res$NES < 0)
   
   pl <- lapply( unique(res$resource), function (r) {
     # r <- unique(res$resource)[1]
-    subres <- res[resource == r, ]
+    subres <- copy(res[resource == r, ])
+    dir.create(file.path(path, 'custom_reports', 'plots', 'gsea', comparison, sub('.gmt', '', r)), recursive=TRUE)
     
     if (twosides) {
-        p <- ggplot(subres, aes(x = NES, y = -log10(padj), label = pathway)) +
-            facet_grid(resource ~ side, scales = 'free') +
-            # geom_vline(xintercept = 0, linetype = 'dashed') + 
-            geom_point(aes(size = size, fill = padj_meta < q), shape=21, colour = 'darkorange2', alpha=0.6) +
-            geom_text_repel(data = subres[, head(.SD, floor(n)), by = c('resource', 'side')], 
-                            colour = 'blue', segment.color='black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 20, max.overlaps = 500) +
-            scale_fill_manual(values = c('gold', 'darkorange2')) +
-            labs(title = title)
-    } else {
+        
+      subres[, side := factor(side, ordered = TRUE, levels = c("neg", "pos"))]  # force two panels, even if one would be empty
       p <- ggplot(subres, aes(x = NES, y = -log10(padj), label = pathway)) +
-            facet_wrap(~ resource, scales = 'free', ncol = ncol) +
-            # geom_vline(xintercept = 0, linetype = 'dashed') + 
-            geom_point(aes(size = size, fill = padj_meta < q), shape=21, colour = 'darkorange2', alpha=0.6) +
-            geom_text_repel(data = subres[, head(.SD, floor(n)), by = c('resource', 'side')], 
-                            colour = 'blue', segment.color='black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 20, max.overlaps = 500) +
-            scale_fill_manual(values = c('gold', 'darkorange2')) +
-            labs(title = title)
+        facet_grid(resource ~ side, scales = "free", drop = FALSE) +
+        # geom_vline(xintercept = 0, linetype = "dashed") +
+        geom_point(aes(size = size, fill = padj_meta < q), shape=21, colour = "darkorange2", alpha=0.6) +
+        geom_text_repel(data = subres[, head(.SD, floor(n)), by = c("resource", "side")],
+                        colour = "blue", segment.color="black", min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 20, max.overlaps = 500) +
+        scale_fill_manual(values = c("FALSE" = "gold", "TRUE" = "darkorange2")) +
+        labs(title = title)
+    
+    } else {
+    
+      p <- ggplot(subres, aes(x = NES, y = -log10(padj), label = pathway)) +
+        facet_wrap(~ resource, scales = "free") +
+        # geom_vline(xintercept = 0, linetype = "dashed") + 
+        geom_point(aes(size = size, fill = padj_meta < q), shape=21, colour = "darkorange2", alpha=0.6) +
+        geom_text_repel(data = subres[, head(.SD, floor(n)), by = c("resource", "side")], 
+                        colour = "blue", segment.color="black", min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 20, max.overlaps = 500) +
+        scale_fill_manual(values = c("FALSE" = "gold", "TRUE" = "darkorange2")) +
+        labs(title = title)
+    
     }
     
+    pdf(file = file.path(path, 'custom_reports', 'plots', 'gsea', comparison, sub('.gmt', '', r), 
+                         paste0(comparison, gsub('.', '_', sub('.gmt', '', r, fixed = TRUE), fixed = TRUE), ifelse(twosides, '.directional', '.absolute'), '.gsea_plot.pdf')), 
+        width=12, height=12)
+    print(p)
+    dev.off()
+
+  
+    kid <- knitr::knit_child(
+      text = c('#### `r a`',
+               '',
+               '```{r, fig.height=10, fig.width=15}',
+               'print(b)',
+               '```'),
+      envir = rlang::env(a = r, b = p, output=NULL, quiet = TRUE)
+    )
+    
+    cat(kid, sep = "\n")
+
     p
   })
 
   pl
 }
+```
 
-
+```{r}
 plot_leading_genes <- function(res, DT, genes) {
   genes <- split(genes, '\\s*,\\s*')[[1]]
   
@@ -524,7 +1119,7 @@ plot_leading_genes <- function(res, DT, genes) {
 
 The idea is that the same gene-set could have genes that are up-regulated and other genes that are down-regulated. So we are only interested in the fact that they are strongly effected and we are looking only for enrichment of gene-sets containing effected genes.
 
-```{r twotail}
+```{r twotail, message = FALSE}
 # Not using the two-tail test, because I am unsure how it will behave if there is a strong asymmetry in the fold-changes.
 
 setorder(ranks, absSLFC)
@@ -532,9 +1127,8 @@ rn2 <- ranks$gene_name
 ranks2 <- ranks$absSLFC
 names(ranks2) <- rn2
 
-gsea2 <- run_fgsea(params$genesets, ranks2, 'pos', params$max_q, params$comparison, paste0(params$comparison, '.absLFC'))
+gsea2 <- run_fgsea(params$genesets, ranks2, 'pos', params$max_q, params$comparison, 'absolute')
 gsea2 <- gsea2[padj < params$max_q, ]
-message(nrow(gsea2), ' candidate gene-sets for differentially regulated genes.')
 ```
 
 ### Table 
@@ -544,7 +1138,9 @@ Table of all qualifying gene-sets, across all the gene-set libraries used. Only 
 `padj` has been adjusted only within the context of the gene-set category. `padj_meta` is the Benjamini-Hochberg adjusted p-value for all the gene-sets tested across all the included categories.
 
 ```{r twotail_tb}
-datatable(gsea2[, .(side, pathway, padj, padj_meta, NES, size, leadingEdge)], )
+message(nrow(gsea2), ' candidate gene-sets for differentially regulated genes.')
+
+datatable(gsea2[, .(side, pathway, padj, padj_meta, NES, size, leadingEdge)], options = list(pageLength = min(25, nrow(gsea2))))
 ```
 
 ### NES & Significance
@@ -553,15 +1149,15 @@ Only significant gene-sets are shown.
 
 The Y axis displays the within-category adjusted p-value. Yellow points indicate gene-sets that no longer meet the significance level after p-value correction across categories, whereas brown points indicate gene-sets that remain significant.
 
-```{r twotail_volcano, fig.height=15, fig.width=18}
+```{r twotail_volcano, results = 'asis'}
 if (nrow(gsea2) > 0) {
-  p_rich2 <- plot_fgsea(gsea2, paste0(params$comparison, '.absLFC'), 1, 40)
+  p_rich2 <- plot_fgsea(gsea2, paste0(params$comparison, ' abs(LFC)'), 40, twosides = FALSE)
   
-  pdf(file = file.path(params$da_path, 'plots', 'gsea', params$comparison, paste0(params$comparison, '.absLFC.fgsea.pdf')), width=20, height=40)
-  print(p_rich2)
-  dev.off()
+  # pdf(file = file.path(params$da_path, 'custom_reports', 'plots', 'gsea', params$comparison, paste0(params$comparison, '.absolute.fgsea_plots.pdf')), width=12, height=12)
+  # print(p_rich2)
+  # dev.off()
   
-  print( p_rich2 )
+  # print( p_rich2 )
 }
 ```
 
@@ -575,14 +1171,11 @@ rn1 <- ranks$gene_name
 ranks1 <- ranks$shrunkLFC
 names(ranks1) <- rn1
 
-gsea1 <- rbind(run_fgsea(params$genesets, ranks1, 'pos', params$max_q, params$comparison, params$comparison),
-               run_fgsea(params$genesets, ranks1, 'neg', params$max_q, params$comparison, params$comparison) )
+gsea1 <- rbind(run_fgsea(params$genesets, ranks1, 'pos', params$max_q, params$comparison, 'directional'),
+               run_fgsea(params$genesets, ranks1, 'neg', params$max_q, params$comparison, 'directional') )
 # # Re-do the multiple-testing correction to encompass the total number of tests from both sides.
 # gsea1[, padj_meta := p.adjust(pval, method = 'BH')]
 gsea1 <- gsea1[padj < params$max_q, ]
-
-message(nrow(gsea1[side == 'pos', ]), ' candidate gene-sets for the up-regulated genes.')
-message(nrow(gsea1[side == 'neg', ]), ' candidate gene-sets for the down-regulated genes.')
 ```
 
 ### Table
@@ -592,7 +1185,10 @@ Table of all qualifying gene-sets, across all the gene-set libraries used. Only 
 `padj` has been adjusted only within the context of the gene-set category. `padj_meta` is the Benjamini-Hochberg adjusted p-value for all the gene-sets tested across all the included categories.
 
 ```{r onetail_tb}
-datatable(gsea1[, .(side, pathway, padj, padj_meta, NES, size, leadingEdge)])
+message(nrow(gsea1[side == 'pos', ]), ' candidate gene-sets for the up-regulated genes.')
+message(nrow(gsea1[side == 'neg', ]), ' candidate gene-sets for the down-regulated genes.')
+
+datatable(gsea1[, .(side, pathway, padj, padj_meta, NES, size, leadingEdge)], options = list(pageLength = min(25, nrow(gsea1))))
 ```
 
 ### NES & Significance
@@ -601,21 +1197,175 @@ Only significant gene-sets are shown.
 
 The Y axis displays the within-category adjusted p-value. Yellow points indicate gene-sets that no longer meet the significance level after p-value correction across categories, whereas brown points indicate gene-sets that remain significant.
 
-```{r onetail_volcano, fig.height=15, fig.width=18}
+```{r onetail_volcano, results = 'asis'}
 if (nrow(gsea1) > 0 ) {
-  p_rich1 <- plot_fgsea(gsea1, params$comparison, 1, 20)
+  p_rich1 <- plot_fgsea(gsea1, params$comparison, 20,, twosides = TRUE)
   
-  pdf(file = file.path(params$da_path, 'plots', 'gsea', params$comparison, paste0(params$comparison, '.fgsea.pdf')), width=20, height=40)
-  print(p_rich1)
-  dev.off()
-  
-  print( p_rich1 )
+  # pdf(file = file.path(params$da_path, 'custom_reports', 'plots', 'gsea', params$comparison, paste0(params$comparison, '.directional.fgsea_plots.pdf')), width=12, height=12)
+  # print(p_rich1)
+  # dev.off()
+  # 
+  # print( p_rich1 )
 }
 ```
 
 
 
-# Session
+# Custom Gene highlights
+
+All the genes from the list are coloured.
+Only the top `r params$highlight_n` genes are highlighted that have adjusted p-value < `r params$max_q`.
+
+```{r genlist, results = 'asis'}
+if (!is.null(params$genelists) && length(params$genelists) > 0) {
+  for (gl in params$genelists) {
+    # gl <- params$genelists[1]
+    
+    genes <- fread(gl, header = FALSE)
+    
+    volcXY <- unique(DT[, .(gene_id, gene_name, padj, log2FoldChange, shrunkLFC, fltr_de_pass, fltr_pass, mark)])
+    volcXY[, upregulated := log2FoldChange > 0]
+    volcXY[log2FoldChange == 0, upregulated := NA] # edge case
+  
+    volcXY[, in_list := gene_name %in% genes$V1]
+    volcXY[, asl := abs(shrunkLFC)]
+    setorder(volcXY, -asl, na.last = TRUE)
+    volcXY[, mark := in_list & padj < params$max_q]
+    volcXY[(mark), mark := gene_name %in% head(gene_name, params$highlight_n)]
+    
+    desummary <- as.data.table(table(volcXY[, .(fltr_de_pass, in_list)]))
+    setnames(desummary, c('DEG', 'in_gene_list', 'N_genes'))
+    
+    p_volcano <- ggplot(volcXY, aes(x = log2FoldChange, y = -log10(padj), colour = in_list, label = gene_name)) +
+      geom_vline(xintercept = params$min_lfc, colour = 'orange', linetype = 'dashed' ) +
+      geom_vline(xintercept = -params$min_lfc, colour = 'orange', linetype = 'dashed' ) +
+      geom_hline(yintercept = -log10(params$max_q), colour = 'orange', linetype = 'dashed' ) +
+      geom_point(data = volcXY[!(in_list), ], shape = 16, size = rel(0.8), alpha = 0.7) +
+      geom_point(data = volcXY[(in_list), ], shape = 16, size = rel(1)) +
+      geom_label_repel(data = volcXY[(mark), ], colour = 'black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 2, force_pull = 0.001, max.overlaps = 100) +
+      scale_colour_manual(values = c('grey50', 'red')) +
+      labs(title = params$comparison, subtitle = basename(gl)) +
+      theme_bw() +
+      theme(legend.position = 'bottom', panel.grid.minor = element_blank())
+    
+    heatXY <- DT[(mark), .(gene_id, gene_name, sample, abundance, count_type, mainvar, log2FoldChange)]
+    setorder(heatXY, mainvar, log2FoldChange)
+    heatXY[, sample := factor(sample, levels = unique(sample), ordered = TRUE)]
+    heatXY[, gene_name := factor(gene_name, levels = unique(gene_name), ordered = TRUE)]
+
+    p_box <- ggplot(heatXY[count_type %in% c('raw', 'normalised'), ], aes(y = gene_name, x = abundance, colour = mainvar, fill = mainvar)) +
+      facet_wrap(~ count_type, nrow = 1, scales = 'free_x') +
+      geom_vline(data = cntthresh[cntthresh$count_type %in% c('raw', 'normalised'), ], aes(xintercept = abundance), linetype = 'dotted') +
+      geom_jitter(shape = 16, size = rel(1), height = 0.2) +
+      geom_boxplot(alpha = 0.1, outlier.alpha = 0, width = 0.6, linewidth = 0.2) +
+      # scale_x_continuous(trans = 'log2') +
+      # scale_x_continuous(trans = 'sqrt') +
+      scale_x_log10() +
+      scale_colour_manual(values = c('blue', 'red')) + 
+      scale_fill_manual(values = c('blue', 'red')) + 
+      labs(title = params$comparison) +
+      theme(legend.position = 'bottom', panel.grid.minor.x = element_blank())
+
+    kid <- knitr::knit_child(
+      text = c('## `r a`',
+               '',
+               '```{r, fig.height=10, fig.width=10}',
+               'print(b)',
+               'print(c)',
+               '```',
+               '',
+               '```{r, fig.height=15, fig.width=8}',
+               'print(d)',
+               '```'),
+      envir = rlang::env(a = basename(gl), b = p_volcano, c = desummary, d = p_box, output=NULL, quiet = TRUE)
+    )
+    
+    cat(kid, sep = "\n")
+  }
+}
+```
+
+# Pathway Gene highlights
+
+Highlighting leading-edge genes of pre-selected pathways.
+
+```{r, results = 'asis'}
+if (!is.null(params$pathways) && length(params$pathways > 0)) {
+  for (pw in params$pathways) {
+    # pw <- params$pathways[1]
+    
+    flag = 0
+    
+    p1 <- NULL
+    p2 <- NULL
+    
+    if (pw %in% gsea1$pathway) {
+      edge1 <- gsea1[pathway == pw, leadingEdge][[1]]
+      
+      if (length(edge1) > 1) {
+        flag = flag + 1
+        
+        pwXY1 <- copy(volcXY)
+        pwXY1[, mark := gene_name %in% edge1]
+        
+        p1 <- ggplot(pwXY1, aes(x = log2FoldChange, y = -log10(padj), colour = mark, label = gene_name)) +
+          geom_vline(xintercept = params$min_lfc, colour = 'orange', linetype = 'dashed' ) +
+          geom_vline(xintercept = -params$min_lfc, colour = 'orange', linetype = 'dashed' ) +
+          geom_hline(yintercept = -log10(params$max_q), colour = 'orange', linetype = 'dashed' ) +
+          geom_point(data = pwXY1[!(mark), ], shape = 16, size = rel(0.8), alpha = 0.7) +
+          geom_point(data = pwXY1[(mark), ], shape = 16, size = rel(1)) +
+          geom_label_repel(data = pwXY1[(mark), ], colour = 'black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 2, force_pull = 0.1, max.overlaps = 100) +
+          scale_colour_manual(values = c('grey50', '#2244FF')) +
+          labs(title = params$comparison, subtitle = pw) +
+          theme(legend.position = 'bottom')
+      }
+    }
+      
+    if (pw %in% gsea2$pathway) {
+      edge2 <- gsea2[pathway == pw, leadingEdge][[1]]
+      
+      if (length(edge2) > 1) {
+        flag = flag + 1
+        
+        pwXY2 <- copy(volcXY)
+        pwXY2[, mark := gene_name %in% edge2]
+        
+        p2 <- ggplot(pwXY2, aes(x = log2FoldChange, y = -log10(padj), colour = mark, label = gene_name)) +
+          geom_vline(xintercept = params$min_lfc, colour = 'orange', linetype = 'dashed' ) +
+          geom_vline(xintercept = -params$min_lfc, colour = 'orange', linetype = 'dashed' ) +
+          geom_hline(yintercept = -log10(params$max_q), colour = 'orange', linetype = 'dashed' ) +
+          geom_point(data = pwXY2[!(mark), ], shape = 16, size = rel(0.8), alpha = 0.7) +
+          geom_point(data = pwXY2[(mark), ], shape = 16, size = rel(1)) +
+          geom_label_repel(data = pwXY2[(mark), ], colour = 'black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 2, force_pull = 0.1, max.overlaps = 100) +
+          scale_colour_manual(values = c('grey50', '#2244FF')) +
+          labs(title = params$comparison, subtitle = pw) +
+          theme(legend.position = 'bottom')
+      }
+    }
+    
+    if (flag > 0) {
+      kid <- knitr::knit_child(
+        text = c('#### `r a`',
+                 '',
+                 '```{r, fig.height=10, fig.width=10}',
+                 'print(b)',
+                 'print(c)',
+                 '```'),
+        envir = rlang::env(a = pw, b = p1, c = p2, output=NULL, quiet = TRUE)
+      )
+      
+      cat(kid, sep = "\n")
+    }
+  }
+}
+```
+
+
+# Session & Parameters
+
+```{r params}
+print(params)
+```
 
 ```{r session}
 sessionInfo()

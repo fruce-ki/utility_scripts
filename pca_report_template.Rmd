@@ -300,7 +300,6 @@ my_pairwise_internal_corels <- function(mat, samples, method = "pearson", rds=NU
     # geom_jitter(width = 0, height = 0.2) +
     geom_beeswarm() +
     # scale_x_continuous(limits = c(-1, 1)) +
-    scale_colour_brewer(palette = 'Set1') +
     labs(title = paste(paste(toupper(substr(method, 1, 1)), tolower(substr(method, 2, nchar(method))), "'s", sep=""), "correlation - Summary"), x = "Pairwise Correlation", y = "Pairs") +
     theme(legend.position = 'none')
     
@@ -335,48 +334,56 @@ pca_plotter <- function(pc, loads, highloads, ig, pcaimp, pcx, pcy){
   subload <- loads[rowID %in% unique(c(head(highloads[[pcx]], 5), head(highloads[[pcy]], 5))), c("rowID", pcxs, pcys), with=FALSE]
   lmt <- max( c(abs(pc[[pcxs]]), abs(pc[[pcys]])) )
   
-  pc12 <- wrap_plots(lapply(ig, function(varname) {
-    # varname <- ig[3]
-    
-    return(
-      
-      ggplot(pc, aes(x = .data[[pcxs]], y = .data[[pcys]], label = .data[[varname]], fill = .data[[varname]], colour = .data[[varname]])) +
+  
+  pc_samples <- ggplot(pc, aes(x = .data[[pcxs]], y = .data[[pcys]], label = sample, colour = sample)) +
+          geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
+          geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
+          geom_text(size=rel(2.1)) +
+          # geom_point(shape=16, alpha=0.5) +
+          # geom_text_repel(size=rel(2.1), min.segment.length = 0) +
+          coord_fixed(ratio=1, xlim=c(-lmt, lmt), ylim=c(-lmt, lmt) ) +
+          scale_colour_manual(values=getPalette(length(unique(pc[['sample']])))) +
+          labs(x=paste0(pcxs, " (", round(pcaimp[PC==pcx, Explained], 1), "%)"),
+               y=paste0(pcys, " (", round(pcaimp[PC==pcy, Explained], 1), "%)"),
+               title='sample') +
+          theme(panel.grid=element_blank(), legend.position='none')
+
+  pc_variables <- wrap_plots(
+    lapply(ig, function(varname) {
+      # varname <- ig[2]
+      ggplot(pc, aes(x = .data[[pcxs]], y = .data[[pcys]], label = as.character(.data[[varname]]), colour = as.character(.data[[varname]]))) +
         geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
         geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
         # geom_mark_hull(alpha=0.1, colour='transparent') +
-        #   geom_point(shape=16, alpha=0.5) +
+        # geom_point(shape=16, alpha=0.5) +
         geom_text(size=rel(2.1)) +
         coord_fixed(ratio=1, xlim=c(-lmt, lmt), ylim=c(-lmt, lmt) ) +
-        scale_colour_manual(values=getPalette(length(unique(pc[[varname]])))) +
-        scale_fill_manual(values=getPalette(length(unique(pc[[varname]])))) +
+        scale_colour_manual(values=getPalette(length(unique(pc[[varname]]))), name=varname) +
         labs(x=paste0(pcxs, " (", round(pcaimp[PC==pcx, Explained], 1), "%)"),
              y=paste0(pcys, " (", round(pcaimp[PC==pcy, Explained], 1), "%)"),
              title=varname) +
-        theme(panel.grid=element_blank(), legend.position='none')
-      
-    )}), ncol = ifelse(length(ig) < 9, 2, ifelse(length(ig) < 16, 3, 4)))
+        guides(colour = guide_legend(ncol = 1)) +
+        theme(panel.grid=element_blank(), legend.position='right')
+    }), 
+    ncol = ifelse(length(ig) < 9, 2, 3))
   
-  pc12v <- wrap_plots(lapply(ig, function(varname) {
-    return(
-      
-      ggplot(pc, aes(x = .data[[pcxs]], y = .data[[pcys]], label = .data[['sample']], fill = .data[[varname]], colour = .data[[varname]])) +
-        geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
-        geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
-        # geom_mark_hull(alpha=0.1, colour='transparent') +
-        geom_segment(data=subload, inherit.aes=FALSE, colour='black', arrow=arrow(length=unit(0.1, 'cm')), alpha=0.2,
-                     x=0, y=0, aes(xend = .data[[pcxs]], yend = .data[[pcys]])) +
-        geom_point() +
-        geom_text_repel(data=subload, inherit.aes=FALSE, aes(label = .data[["rowID"]], x = .data[[pcxs]], y = .data[[pcys]]), size=2) +
-        coord_fixed(ratio=1, xlim=c(-lmt, lmt), ylim=c(-lmt, lmt) ) +
-        scale_colour_manual(values=getPalette(length(unique(pc[[varname]])))) +
-        scale_fill_manual(values=getPalette(length(unique(pc[[varname]])))) +
-        labs(x=paste0(pcxs, " (", round(pcaimp[PC==pcx, Explained], 1), "%)"), 
-             y=paste0(pcys, " (", round(pcaimp[PC==pcy, Explained], 1), "%)")) +
-        theme(panel.grid=element_blank())
+
+      # ggplot(pc, aes(x = .data[[pcxs]], y = .data[[pcys]], label = .data[['sample']], fill = as.character(.data[[varname]]), colour = as.character(.data[[varname]]))) +
+      #   geom_vline(xintercept=0, linetype='dashed', colour='grey70') +
+      #   geom_hline(yintercept=0, linetype='dashed', colour='grey70') +
+      #   # geom_mark_hull(alpha=0.1, colour='transparent') +
+      #   geom_segment(data=subload, inherit.aes=FALSE, colour='black', arrow=arrow(length=unit(0.1, 'cm')), alpha=0.2,
+      #                x=0, y=0, aes(xend = .data[[pcxs]], yend = .data[[pcys]])) +
+      #   geom_point() +
+      #   geom_text_repel(data=subload, inherit.aes=FALSE, aes(label = .data[["rowID"]], x = .data[[pcxs]], y = .data[[pcys]]), size=2) +
+      #   coord_fixed(ratio=1, xlim=c(-lmt, lmt), ylim=c(-lmt, lmt) ) +
+      #   scale_colour_manual(values=getPalette(length(unique(pc[[varname]])))) +
+      #   scale_fill_manual(values=getPalette(length(unique(pc[[varname]])))) +
+      #   labs(x=paste0(pcxs, " (", round(pcaimp[PC==pcx, Explained], 1), "%)"), 
+      #        y=paste0(pcys, " (", round(pcaimp[PC==pcy, Explained], 1), "%)")) +
+      #   theme(panel.grid=element_blank())
     
-      )}), ncol = ifelse(length(ig) < 9, 2, ifelse(length(ig) < 16, 3, 4)))
-  
-  return(list(pc12, pc12v))
+  return(list(pc_samples, pc_variables))
 }
 
 # PCA
@@ -427,22 +434,23 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
                        Explained = summary(pca)$importance['Proportion of Variance', ] * 100,
                        Cumulative = summary(pca)$importance['Cumulative Proportion', ] * 100)
   pcaimp <- pcaimp[1:npc, ]
-  topnpc <- nrow(pcaimp[Explained >= 1])
+  topnpc <- nrow(pcaimp[Explained >= 5])
   
-  pimp <- ggplot(pcaimp) +
+  pimp <- ggplot(pcaimp[Explained > 1, ]) +
     geom_line(aes(x=PC, y=Cumulative), colour='dodgerblue') +
-    geom_bar(aes(x=PC, y=Explained, fill=Explained >= 1),
+    geom_bar(aes(x=PC, y=Explained, fill=Explained >= 5),
              stat='identity', colour='transparent', alpha=0.3) +
     geom_text(aes(x=PC, y=0, label=paste0(round(Explained, 1),"%")), 
               angle=90, hjust=0, vjust=0, size=rel(3)) +
-    geom_text(data=pcaimp[2:npc,],
+    geom_text(data=pcaimp[2:npc,][Explained > 1, ],
               aes(x=PC, y=0.95*Cumulative, label=paste0(round(Cumulative, 1),"%")), 
               angle=90, vjust=0, hjust=1, size=rel(3)) +
-    scale_fill_manual(values=c("grey25", "grey75"), guide="none") +
+    scale_fill_manual(values=c("grey75", "grey25"), guide="none") +
     scale_x_continuous(breaks=seq.int(1, npc, 1)) +
     labs(title = "Scree plot", subtitle=paste0(length(topgenes), " features, ", npc, " PCs"), 
          x = "Principal Component", y='% Variance') +
     theme(panel.grid=element_blank())
+  
     
   
   # Top influencers. 
@@ -469,7 +477,8 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
 
   ig <- names(covars)
   ig <- ig[! ig %in% c('sample', 'Sample', 'name', 'Name', 'sizeFactor')]
-
+  # ig <- ig[! ig %in% c('name', 'Name', 'sizeFactor')]
+  
   # Means and Variances of the selected genes
   genevar[, selected := name %in% colnames(subcmat)]
   genevar[, excluded := name %in% exclude]
@@ -494,15 +503,14 @@ do_pca <- function(countsmat, covars, scale = TRUE, center = TRUE, rds=NULL, top
     pca_plotter(pc, infl, highinfl, ig, pcaimp, pcx, pcy)
   } )
   
-  L1 <- lapply(L, function(x) { x[[1]] })
-  L2 <- lapply(L, function(x) { x[[2]] })
-  
   out <- list(pca=pca,
               nvars=nvars,
               nPC=npc,
-              pimp=pimp, pvar1=pvar1,
+              pimp=pimp, 
+              pvar1=pvar1,
               highloads=highinfl,
-              pc2d=L1, pcv2d=L2
+              pc2d=L,
+              npanels=length(ig)
               )
   
   if (!is.null(rds) && length(rds) > 0) {
@@ -576,7 +584,7 @@ if (params$onlyUsable && 'use' %in% names(covars)) {
   samples <- covars$sample
 }
 
-datatable(covars[sample %in% samples, ])
+datatable(covars[sample %in% samples, ], options = list(pageLength = min(25, nrow(covars))))
 ```
 
 
@@ -585,6 +593,8 @@ datatable(covars[sample %in% samples, ])
 Genes with mean count across all samples below `r params$minMean` are excluded. For PCA, all genes are given equal weight, but low expression genes are proportionally more variable, so filtering them in advance reduces noise.
 
 ```{r filter}
+stopifnot(all(samples %in% colnames(counts)))
+
 # All genes above the count thresholds
 # message(paste("Using features that exceed either", params$minMean, "mean count across samples or", params$minSingle, "count in any single sample."))
 message(paste("Using features that exceed", params$minMean, "mean count across samples."))
@@ -633,7 +643,7 @@ Using log-scaled counts.
 
 Correlations based on all the genes that meet the count and name criteria. The analysis is performed on the log-transformed padded counts.
 
-```{r corr, fig.height=8, fig.width=10}
+```{r corr}
 corelsP <- my_pairwise_internal_corels(log10(counts[topgenes, samples]), samples, method="pearson", groups = G,
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,   # prefiltered
                                       rds = file.path(params$outdir, 
@@ -642,19 +652,42 @@ corelsS <- my_pairwise_internal_corels(log10(counts[topgenes, samples]), samples
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,     # prefiltered
                                       rds = file.path(params$outdir,
                                                              sub(".txt|.tsv", paste0("_", params$loopval, "_corrS.RDS"), basename(params$name))) )
-
-print( corelsP[['bee']] )
-print( corelsS[['bee']] )
 ```
 
-```{r corr1, fig.height=15, fig.width=15}
+### Pearson
+
+```{r, fig.height=15, fig.width=15}
 print( corelsP[['sovf']] )
+```
+
+### Spearman
+
+```{r, fig.height=15, fig.width=15}
 print( corelsS[['sovf']] )
 ```
 
-```{r corr2, fig.height=15, fig.width=17}
+### Pearson - clustered
+
+```{r, fig.height=15, fig.width=17}
 print( corelsP[['scvf']] )
+```
+
+### Spearman - clustered
+
+```{r, fig.height=15, fig.width=17}
 print( corelsS[['scvf']] )
+```
+
+### Pearson - beeswarm
+
+```{r, fig.height=8, fig.width=10}
+print( corelsP[['bee']] )
+```
+
+### Spearman - beeswarm
+
+```{r, fig.height=8, fig.width=10}
+print( corelsS[['bee']] )
 ```
 
 
@@ -662,7 +695,7 @@ print( corelsS[['scvf']] )
 
 Correlations using the top `r params$topVars` dispersed genes (out of those already filtered).
 
-```{r corrb, fig.height=8, fig.width=10}
+```{r corrb}
 corelsPb <- my_pairwise_internal_corels(log10(counts[topgenes2, samples]), samples, method="pearson", groups = G,
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,   # prefiltered
                                       rds = file.path(params$outdir,
@@ -671,19 +704,42 @@ corelsSb <- my_pairwise_internal_corels(log10(counts[topgenes2, samples]), sampl
                                       minMean = 0, minSingle = 0, loopVal=params$loopVal,    # prefiltered
                                       rds = file.path(params$outdir,
                                                       sub(".txt|.tsv", paste0("_", params$loopval, "_corrStop.RDS"), basename(params$name))) )
-
-print( corelsPb[['bee']] )
-print( corelsSb[['bee']] )
 ```
 
-```{r corr1b, fig.height=15, fig.width=15}
+### Pearson
+
+```{r, fig.height=15, fig.width=15}
 print( corelsPb[['sovf']] )
+```
+
+### Spearman
+
+```{r, fig.height=15, fig.width=15}
 print( corelsSb[['sovf']] )
 ```
 
-```{r corr2b, fig.height=15, fig.width=17}
+### Pearson - clustered
+
+```{r corr2, fig.height=15, fig.width=17}
 print( corelsPb[['scvf']] )
+```
+
+### Spearman - clustered
+
+```{r, fig.height=15, fig.width=17}
 print( corelsSb[['scvf']] )
+```
+
+### Pearson - beeswarm
+
+```{r, fig.height=8, fig.width=10}
+print( corelsPb[['bee']] )
+```
+
+### Spearman - beeswarm
+
+```{r, fig.height=8, fig.width=10}
+print( corelsSb[['bee']] )
 ```
 
 
@@ -726,8 +782,26 @@ print(all_pca$pimp)
 
 Highlighting the defined experimental variables against the principal components helps make sense of what the components are.
 
-```{r pcs, fig.width=12, fig.height=18}
-print( all_pca$pc2d )
+```{r pcs, results = 'asis'}
+i <- 1
+for (x in all_pca$pc2d) {
+  kid <- knitr::knit_child(
+    text = c('#### `r paste("PC", a)`',
+           '',
+           '```{r, fig.height=10, fig.width=10}',
+           'print(b)',
+           '```',
+           '',
+           '```{r, fig.height=18, fig.width=13}',
+           'print(c)',
+           '```'),
+      envir = rlang::env(a = i, b = x[[1]], c = x[[2]], output=NULL, quiet = TRUE)
+    )
+  
+  cat(kid, sep = "\n")
+  
+  i <- i + 2
+}
 ```
 
 
@@ -781,8 +855,27 @@ print(all_pcab$pimp)
 
 Highlighting the defined experimental variables against the principal components helps make sense of what the components are.
 
-```{r pcsb, fig.width=12, fig.height=18}
-print( all_pcab$pc2d )
+```{r pcsb, results = 'asis'}
+i <- 1
+for (x in all_pcab$pc2d) {
+  kid <- knitr::knit_child(
+    text = c('#### `r paste("PC", a)`',
+           '',
+           '```{r, fig.height=10, fig.width=10}',
+           'print(b)',
+           '```',
+           '',
+           '```{r, fig.height=18, fig.width=13}',
+           'print(c)',
+           '```'),
+      envir = rlang::env(a = i, b = x[[1]], c = x[[2]], output=NULL, quiet = TRUE)
+    )
+  
+  cat(kid, sep = "\n")
+  
+  i <- i + 2
+}
+
 ```
 
 
@@ -813,20 +906,20 @@ pdf(file.path(params$outdir,
 # Correlation plots
 plot.new()
 text(.5, .5, 'Correlation with all expressed genes')
-print(corelsP[['bee']])
-print(corelsS[['bee']])
 print(corelsP[['sovf']])
 print(corelsS[['sovf']])
 print(corelsP[['scvf']])
 print(corelsS[['scvf']])
+print(corelsP[['bee']])
+print(corelsS[['bee']])
 plot.new()
 text(.5, .5, 'Correlation with only the most variable genes')
-print(corelsPb[['bee']])
-print(corelsSb[['bee']])
 print(corelsPb[['sovf']])
 print(corelsSb[['sovf']])
 print(corelsPb[['scvf']])
 print(corelsSb[['scvf']])
+print(corelsPb[['bee']])
+print(corelsSb[['bee']])
 
 dev.off()
 
@@ -838,13 +931,19 @@ pdf(file.path(params$outdir,
 plot.new()
 text(.5, .5, 'PCA with all expressed genes')
 print(all_pca$pimp)
-print(all_pca$pc2d)
-print(all_pca$pvar1)
+for(x in all_pca$pc2d) {  # list of lists
+  print(x[[1]])
+  print(x[[2]])
+}
+
 plot.new()
 text(.5, .5, 'PCA with only the most variable genes')
 print(all_pcab$pimp)
 print(all_pcab$pc2d)
-print(all_pcab$pvar1)
+for(x in all_pcab$pc2d) { # list of lists
+  print(x[[1]])
+  print(x[[2]])
+}
 
 dev.off()
 ```

@@ -1,0 +1,79 @@
+---
+title: "Highlight custom gene lists"
+author: "Kimon"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+params:
+  baseDir: '/DROPBOX/Neurolentech Dropbox/NEUROLENTECH/BIOINFORMATICS/RNA_sequencing/Differential_Analyses/tess.2024_2.patients_vs_controls.w6_vs_w3'
+  comparison: 'patient_VS_control.CONF_time.USE_good'
+  genlists: ['/DROPBOX/Neurolentech Dropbox/NEUROLENTECH/BIOINFORMATICS/REFERENCES/custom_genesets/autism.sfari_long.genelist.txt', '/DROPBOX/Neurolentech Dropbox/NEUROLENTECH/BIOINFORMATICS/REFERENCES/custom_genesets/epilepsy.all_uniq.genelist.txt']
+  min_lfc: 1
+  max_q: 0.05
+  nhit: 30
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(data.table)
+library(ggplot2)
+library(ggrepel)
+```
+
+
+```{r, results = 'asis'}
+DT <- readRDS(file.path(params$baseDir, 'tables', 'differential', paste0(params$comparison, '.diffex_extra.RDS')))
+
+for (gl in params$genlists) {
+  # gl <- params$genlists[1]
+  
+  genes <- fread(gl, header = FALSE)
+  
+  volcXY <- unique(DT[, .(gene_id, gene_name, padj, log2FoldChange, shrunkLFC, fltr_abund_pass, fltr_de_pass, fltr_pass, mark)])
+  volcXY[, upregulated := log2FoldChange > 0]
+  volcXY[log2FoldChange == 0, upregulated := NA] # edge case
+
+  volcXY[, in_list := gene_name %in% genes$V1]
+  volcXY[, asl := abs(shrunkLFC)]
+  setorder(volcXY, -asl, na.last = TRUE)
+  volcXY[, mark := in_list & (abs(log2FoldChange) >= params$min_lfc | padj < params$max_q)]
+  volcXY[(mark), mark := gene_name %in% head(gene_name, params$nhit)]
+  
+  desummary <- as.data.table(table(volcXY[, .(fltr_de_pass, in_list)]))
+  setnames(desummary, c('DEG', 'in_gene_list', 'N_genes'))
+  
+  p_volcano <- ggplot(volcXY, aes(x = log2FoldChange, y = -log10(padj), colour = in_list, label = gene_name)) +
+    geom_vline(xintercept = params$min_lfc, colour = 'orange', linetype = 'dashed' ) +
+    geom_vline(xintercept = -params$min_lfc, colour = 'orange', linetype = 'dashed' ) +
+    geom_hline(yintercept = -log10(params$max_q), colour = 'orange', linetype = 'dashed' ) +
+    geom_point(data = volcXY[!(in_list), ], shape = 16, size = rel(0.8), alpha = 0.7) +
+    geom_point(data = volcXY[(in_list), ], shape = 16, size = rel(1)) +
+    geom_label_repel(data = volcXY[(mark), ], colour = 'black', min.segment.length = 0, segment.size = 0.3, size = rel(2.5), force = 2, force_pull = 0.001, max.overlaps = 100) +
+    scale_colour_manual(values = c('grey50', 'red')) +
+    labs(title = params$comparison, subtitle = basename(gl)) +
+    theme_bw() +
+    theme(legend.position = 'bottom')
+  
+  
+  kid <- knitr::knit_child(
+    text = c('## `r a`',
+             '',
+             '```{r, fig.height=10, fig.width=10}',
+             'print(b)',
+             'print(c)',
+             '```'),
+    envir = rlang::env(a = gl, b = p_volcano, c = desummary, output=NULL, quiet = TRUE)
+  )
+  
+  cat(kid, sep = "\n")
+}
+```
+
+
+

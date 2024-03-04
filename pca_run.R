@@ -15,21 +15,23 @@ spec = matrix(c(
   'resultsDir',     'o', 1, "character", "Directory in which to save the report, relative to baseDir (.).",
   'samplesFile',    's', 1, "character", "Tab-separated table with `sample` column followed by the variable columns.",
   'sortVar',        'S', 1, "character", "A variable by which to order the samples. Otherwise the samplesFile order will be used.",
-  'groupVar',       'G', 1, "character", "A variable by which to summarise correlatins in a beeswarm. Preferably a variable with very few different values.",
+  'groupVar',       'G', 1, "character", "A variable by which to summarise correlations in a beeswarm. Preferably a variable with very few different values.",
   'forVar',         'F', 1, "character", "Looping variable (ie. carry out the analysis separately for each level of this var).",
   'reportTemplate', 'T', 1, "character", "Full path to template Rmd file (~/utility_scripts/pca_report_template.Rmd).",
   'nhit',           'n', 1, "integer",   "Number of hits to report (10).",
   'topVars',        'v', 1, "integer",   "How many genes to use, ranked by descending Coefficient of Variation. (500)",
-  'allSamples',     'a', 0, "logical",   "Do not include all the samples, include only the ones marked by 'use' (FALSE)."
+  'allSamples',     'a', 0, "logical",   "Do NOT include all the samples, include only the ones marked by 'use' (FALSE)."
 ), byrow=TRUE, ncol=5)
 
 opt <- getopt(spec)
 
-# opt <- list(baseDir="/DROPBOX/Neurolentech Dropbox/NEUROLENTECH/BIOINFORMATICS/RNA_sequencing/Other_Analyses/Batches_1.2.3_PCA",
-#             countsFile="../../Quantified_Features/MASTER_TABLES/master.gene_tpm.tsv",
-#             samplesFile="samplesheet.pca.tsv",
-#             resultsDir="./",
-#             sortVar = 'sjct_ID', groupVar = 'sjct_Type', idcol=1, nidcols=2, minMean=5)
+# opt <- list(baseDir="/SCRATCH/sBatch3",
+#             countsFile="outputs_rat/star_salmon/salmon.merged.gene_tpm.tsv",
+#             samplesFile="samplesheet.pca.csv",
+#             resultsDir="./outputs_rt/pca",
+#             sortVar = 'lab_Construct', groupVar = 'bracketPC',
+#             idcol=1, nidcols=2, minMean=5)
+
 # opt <- list(baseDir="C:/Users/jack_/Downloads/", countsFile="tesslinz.salmon.merged.gene_tpm.tsv", samplesFile="samplesheet_tesslinz.differentialabundance.csv", resultsDir="tesslinz_diffex/PCA", sortVar = 'time', idcol=1, nidcols=2, minMean=5, reportTemplate="D:/Documents/GitHub/utility_scripts/pca_report_template.Rmd")
 
 if ( !is.null(opt$help) ) {
@@ -73,14 +75,14 @@ covars <- fread(file.path(opt$baseDir, opt$samplesFile), header=TRUE, check.name
 subcovars <- list()
 if (!is.null(opt$forVar)) {
   # in case not all combinations of variables exist
-  covars[[opt$forVar]] <- droplevels(as.factor(covars[[opt$forVar]]))  # sometimes it is a factor sometimes it isn,t
+  covars[[opt$forVar]] <- droplevels(as.factor(covars[[opt$forVar]]))  # sometimes it is a factor sometimes it isn't
 
   subcovars <- lapply(levels(covars[[opt$forVar]]), function(V) {
     # V <- levels(covars[[opt$forVar]])[1]
 
     # Select relevant rows and drop the column
     coldata <- covars[covars[[opt$forVar]] == V, ]
-    coldata[opt$forVar] <- NULL
+    coldata[, opt$forVar] <- NULL
 
     return(coldata)
   })
